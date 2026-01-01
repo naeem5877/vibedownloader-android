@@ -1,19 +1,21 @@
 {
   "name": "VibeDownloaderMobile",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "android": "react-native run-android",
-    "ios": "react-native run-ios",
-    "lint": "eslint .",
     "start": "react-native start",
-    "test": "jest"
+    "lint": "eslint .",
+    "test": "jest",
+    "clean": "cd android && ./gradlew clean && cd ..",
+    "build:debug": "cd android && ./gradlew assembleDebug && cd ..",
+    "build:release": "cd android && ./gradlew assembleRelease && cd .."
   },
   "dependencies": {
     "react": "19.2.0",
     "react-native": "0.83.1",
-    "@react-native/new-app-screen": "0.83.1",
-    "react-native-safe-area-context": "^5.5.2"
+    "react-native-safe-area-context": "^5.5.2",
+    "react-native-svg": "^15.11.2"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

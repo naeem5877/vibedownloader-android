@@ -84,7 +84,23 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        
+        // ABI filters for youtubedl-android
+        ndk {
+            abiFilters 'x86', 'x86_64', 'armeabi-v7a', 'arm64-v8a'
+        }
     }
+    
+    // ABI splits to reduce APK size
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'x86', 'x86_64', 'armeabi-v7a', 'arm64-v8a'
+            universalApk true
+        }
+    }
+    
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -105,6 +121,13 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
+    
+    // Required for youtubedl-android
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 dependencies {
@@ -116,4 +139,14 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+    
+    // youtubedl-android library
+    implementation("io.github.junkfood02.youtubedl-android:library:${rootProject.ext.youtubedlAndroidVersion}")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:${rootProject.ext.youtubedlAndroidVersion}")
+    
+    // Kotlin Coroutines for async operations
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    
+    // Gson for JSON parsing
+    implementation("com.google.code.gson:gson:2.10.1")
 }

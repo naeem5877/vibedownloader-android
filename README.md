@@ -1,97 +1,245 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# VibeDownloader Mobile
 
-# Getting Started
+A React Native Android app for downloading media from multiple platforms using yt-dlp.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+## Features (V1)
 
-## Step 1: Start Metro
+- ✅ URL input with clipboard paste support
+- ✅ Platform validation (8 supported platforms)
+- ✅ Fetch metadata using yt-dlp JSON mode
+- ✅ Display video info with thumbnail, duration, quality
+- ✅ Download best available format
+- ✅ Real-time progress events
+- ✅ Cancel download support
+- ✅ Scoped storage (Android 10+)
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+## Supported Platforms
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+| Platform | Status |
+|----------|--------|
+| YouTube | ✅ |
+| Instagram | ✅ |
+| Facebook | ✅ |
+| TikTok | ✅ |
+| Spotify | ✅ |
+| X (Twitter) | ✅ |
+| Pinterest | ✅ |
+| SoundCloud | ✅ |
 
-```sh
-# Using npm
+## Project Structure
+
+```
+VibeDownloaderMobile/
+├── android/
+│   └── app/
+│       └── src/main/java/com/vibedownloadermobile/
+│           ├── MainActivity.kt
+│           ├── MainApplication.kt
+│           └── ytdlp/
+│               ├── YtDlpModule.kt      # Native module (yt-dlp logic)
+│               └── YtDlpPackage.kt     # React Native package registration
+├── src/
+│   ├── components/
+│   │   ├── Icons.tsx                   # Platform & UI icons
+│   │   ├── PlatformSelector.tsx        # Platform icon selector
+│   │   ├── URLInput.tsx                # URL input with paste
+│   │   ├── VideoInfoCard.tsx           # Video metadata display
+│   │   ├── FormatList.tsx              # Quality selection list
+│   │   └── DownloadProgress.tsx        # Progress indicator
+│   ├── hooks/
+│   │   └── useYtDlp.ts                 # React hook for yt-dlp
+│   ├── native/
+│   │   └── YtDlpModule.ts              # TypeScript bridge
+│   ├── screens/
+│   │   └── HomeScreen.tsx              # Main screen
+│   └── theme/
+│       └── index.ts                    # Design system
+├── App.tsx                             # App entry point
+└── package.json
+```
+
+## Native Module API
+
+### YtDlpModule (Kotlin → React Native)
+
+```typescript
+// Fetch video metadata
+const info = await YtDlpNative.fetchInfo(url);
+
+// Download with progress
+const result = await YtDlpNative.download(url, formatId, processId);
+
+// Cancel download
+await YtDlpNative.cancelDownload(processId);
+
+// Validate URL
+const { valid, platform } = await YtDlpNative.validateUrl(url);
+
+// Update yt-dlp binary
+await YtDlpNative.updateYtDlp();
+
+// List downloaded files
+const files = await YtDlpNative.listDownloadedFiles();
+
+// Delete file
+await YtDlpNative.deleteFile(filePath);
+```
+
+### Progress Events
+
+```typescript
+import { onDownloadProgress } from './src/native/YtDlpModule';
+
+const unsubscribe = onDownloadProgress((progress) => {
+  console.log(`${progress.progress}% - ETA: ${progress.eta}s`);
+});
+
+// Later: unsubscribe();
+```
+
+## Installation
+
+### Prerequisites
+
+- Node.js 20+
+- Java 17+
+- Android SDK (API 24+)
+- Android NDK
+
+### Setup
+
+```bash
+# Install dependencies
+npm install
+
+# Start Metro bundler
 npm start
 
-# OR using Yarn
-yarn start
-```
-
-## Step 2: Build and run your app
-
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
-
-```sh
-# Using npm
+# Build debug APK
 npm run android
 
-# OR using Yarn
-yarn android
+# Or build directly
+cd android && ./gradlew assembleDebug
 ```
 
-### iOS
+### Build Release APK
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
-bundle install
+```bash
+cd android && ./gradlew assembleRelease
 ```
 
-Then, and every time you update your native dependencies, run:
+APKs will be in `android/app/build/outputs/apk/`
 
-```sh
-bundle exec pod install
+## Android Permissions
+
+The app requests these permissions:
+
+```xml
+<!-- Network -->
+<uses-permission android:name="android.permission.INTERNET" />
+
+<!-- Storage (Android 12 and below) -->
+<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+
+<!-- Android 13+ Media Permissions -->
+<uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+<uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+
+<!-- Foreground Service -->
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+<!-- Notifications (Android 13+) -->
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 ```
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+## Storage Location
 
-```sh
-# Using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
+Files are saved to scoped storage:
+```
+/Android/data/com.vibedownloadermobile/files/Movies/
 ```
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+This location is accessible without special permissions and survives app updates.
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+---
 
-## Step 3: Modify your app
+## ⚠️ Play Store Risks & Legal Considerations
 
-Now that you have successfully run the app, let's make changes!
+### Distribution Warnings
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+1. **Google Play Store Ban**: Apps that download content from YouTube and similar platforms typically violate Google Play's policies. This app is **NOT suitable for Google Play distribution**.
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+2. **Alternative Distribution**:
+   - APK sideloading
+   - F-Droid (if open source)
+   - GitHub Releases
+   - Your own website
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+### Legal Considerations
 
-## Congratulations! :tada:
+1. **Copyright**: Downloading copyrighted content may be illegal in your jurisdiction.
 
-You've successfully run and modified your React Native App. :partying_face:
+2. **Terms of Service**: Downloading from YouTube, Instagram, etc. may violate their Terms of Service.
 
-### Now what?
+3. **Fair Use**: The app is intended for downloading content you have rights to (your own uploads, Creative Commons, etc.).
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
+4. **User Responsibility**: Users are responsible for ensuring they have the right to download content.
 
-# Troubleshooting
+### youtubedl-android License
 
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
+The [youtubedl-android](https://github.com/yausername/youtubedl-android) library is under the **GPL-3.0 license**. If you distribute this app:
+- You must also release your source code under GPL-3.0
+- You must include the license text
+- You must provide access to the source code
 
-# Learn More
+### Disclaimer
 
-To learn more about React Native, take a look at the following resources:
+This software is provided for educational purposes. The developers are not responsible for:
+- How users choose to use the app
+- Any copyright infringement by users
+- Any violation of platform Terms of Service
+- Any legal consequences of using this app
 
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+---
+
+## Development Notes
+
+### Adding New Platforms
+
+1. Add domain patterns in `YtDlpModule.kt`:
+   ```kotlin
+   private val SUPPORTED_DOMAINS = listOf(
+       // Add new domain here
+       "newplatform.com",
+   )
+   ```
+
+2. Add platform color in `src/theme/index.ts`
+3. Add icon in `src/components/Icons.tsx`
+4. Update `SUPPORTED_PLATFORMS` array
+
+### Debugging Native Module
+
+```bash
+# View Android logs
+adb logcat | grep -E "(YtDlpModule|ReactNativeJS)"
+```
+
+### Common Issues
+
+1. **"YtDlpModule not found"**: Ensure the package is registered in `MainApplication.kt`
+
+2. **Download fails immediately**: Check internet permission and network connectivity
+
+3. **Progress not updating**: Verify event listener is subscribed before starting download
+
+## Tech Stack
+
+- **React Native** 0.83.1
+- **Kotlin** 2.1.20
+- **youtubedl-android** 0.18.1 (includes yt-dlp + Python)
+- **FFmpeg** (bundled with youtubedl-android)
+
+## License
+
+This project is licensed under GPL-3.0 to comply with youtubedl-android's license.

@@ -3,7 +3,7 @@
  * Android-only React Native app for downloading media from multiple platforms
  * 
  * @format
- */-
+ */
 
 import React from 'react';
 import { StatusBar, StyleSheet, useColorScheme, View } from 'react-native';

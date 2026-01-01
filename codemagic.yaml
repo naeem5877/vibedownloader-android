@@ -9,7 +9,7 @@ workflows:
       groups:
         - google_play
       vars:
-        PACKAGE_NAME: "com.yourapp.name"  # Replace with your actual package name
+        PACKAGE_NAME: "com.vibedownloader.app"  # Replace with your actual package name
       node: 18
       java: 17
     scripts:
@@ -29,4 +29,4 @@ workflows:
     publishing:
       email:
         recipients:
-          - your-email@example.com  # Replace with your email
+          - naeem58902@gmail.com  # Replace with your email

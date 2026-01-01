@@ -2,14 +2,8 @@ workflows:
   android-debug:
     name: Android Debug APK
     max_build_duration: 120
-    instance_type: mac_mini_m1   # Free plan compatible
+    instance_type: mac_mini_m1
     environment:
-      android_signing:
-        - keystore_reference
-      groups:
-        - google_play
-      vars:
-        PACKAGE_NAME: "com.vibedownloader.app"  # Replace with your actual package name
       node: 18
       java: 17
     scripts:
@@ -19,7 +13,7 @@ workflows:
       - name: Set up local.properties
         script: |
           echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/android/local.properties"
-      - name: Build Android APK
+      - name: Build Android Debug APK
         script: |
           cd android
           chmod +x gradlew
@@ -29,4 +23,5 @@ workflows:
     publishing:
       email:
         recipients:
-          - naeem58902@gmail.com  # Replace with your email
+          - naeem58902@gmail.com
+        

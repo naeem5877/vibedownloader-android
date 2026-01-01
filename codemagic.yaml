@@ -1,0 +1,27 @@
+workflows:
+  android-debug:
+    name: Android Debug APK
+    max_build_duration: 120
+    instance_type: mac_mini_m1
+    environment:
+      node: 18
+      java: 17
+    scripts:
+      - name: Install dependencies
+        script: |
+          npm install
+      - name: Set up local.properties
+        script: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/android/local.properties"
+      - name: Build Android Debug APK
+        script: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+    artifacts:
+      - android/app/build/outputs/apk/debug/app-debug.apk
+    publishing:
+      email:
+        recipients:
+          - naeem58902@gmail.com
+        

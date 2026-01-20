@@ -1,202 +1,261 @@
-/**
- * useYtDlp - React hook for yt-dlp operations
- */
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { NativeEventEmitter } from 'react-native';
 import {
     YtDlpNative,
-    onDownloadProgress,
-    generateProcessId,
     VideoInfo,
-    DownloadProgress,
     DownloadResult,
     ValidationResult,
-    DownloadedFile,
+    SharedData,
+    ytDlpEventEmitter,
 } from '../native/YtDlpModule';
 
-export interface UseYtDlpState {
-    // Fetch info state
+interface UseYtDlpState {
     isLoading: boolean;
-    videoInfo: VideoInfo | null;
-    fetchError: string | null;
-
-    // Download state
     isDownloading: boolean;
+    videoInfo: VideoInfo | null;
     downloadProgress: number;
     downloadEta: number;
+    downloadLine: string;
+    fetchError: string | null;
     downloadError: string | null;
-    currentProcessId: string | null;
-
-    // Validation
-    validationResult: ValidationResult | null;
 }
 
-export interface UseYtDlpActions {
+interface UseYtDlpActions {
     fetchInfo: (url: string) => Promise<void>;
-    download: (url: string, formatId?: string) => Promise<DownloadResult | null>;
+    download: (url: string, formatId: string | null) => Promise<DownloadResult | null>;
     cancelDownload: () => Promise<void>;
     validateUrl: (url: string) => Promise<ValidationResult>;
-    clearState: () => void;
-    updateYtDlp: () => Promise<void>;
-    listDownloadedFiles: () => Promise<DownloadedFile[]>;
-    deleteFile: (path: string) => Promise<boolean>;
-    getOutputDirectory: () => Promise<string>;
+    reset: () => void;
+    checkSharedText: () => Promise<string | null>;
+    getSharedData: () => Promise<SharedData | null>;
+    getClipboardText: () => Promise<string>;
+    saveThumbnail: (url: string, title: string) => Promise<string>;
 }
 
-export function useYtDlp(): [UseYtDlpState, UseYtDlpActions] {
-    const [isLoading, setIsLoading] = useState(false);
-    const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
-    const [fetchError, setFetchError] = useState<string | null>(null);
+const initialState: UseYtDlpState = {
+    isLoading: false,
+    isDownloading: false,
+    videoInfo: null,
+    downloadProgress: 0,
+    downloadEta: 0,
+    downloadLine: '',
+    fetchError: null,
+    downloadError: null,
+};
 
-    const [isDownloading, setIsDownloading] = useState(false);
-    const [downloadProgress, setDownloadProgress] = useState(0);
-    const [downloadEta, setDownloadEta] = useState(0);
-    const [downloadError, setDownloadError] = useState<string | null>(null);
+export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
+    const [state, setState] = useState<UseYtDlpState>(initialState);
     const [currentProcessId, setCurrentProcessId] = useState<string | null>(null);
 
-    const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
-
-    const processIdRef = useRef<string | null>(null);
-
-    // Subscribe to download progress events
+    // Listen for progress events with error handling
     useEffect(() => {
-        const unsubscribe = onDownloadProgress((progress: DownloadProgress) => {
-            if (progress.processId === processIdRef.current) {
-                setDownloadProgress(progress.progress);
-                setDownloadEta(progress.eta);
-            }
-        });
+        let subscription: any;
 
-        return () => unsubscribe();
-    }, []);
+        try {
+            subscription = ytDlpEventEmitter.addListener(
+                'onDownloadProgress',
+                (event) => {
+                    if (event.processId === currentProcessId) {
+                        setState((prev) => ({
+                            ...prev,
+                            downloadProgress: event.progress || 0,
+                            downloadEta: event.eta || 0,
+                            downloadLine: event.line || '',
+                        }));
+                    }
+                }
+            );
+        } catch (error) {
+            console.warn('Failed to add progress listener:', error);
+        }
+
+        return () => {
+            try {
+                subscription?.remove();
+            } catch (error) {
+                // Ignore cleanup errors
+            }
+        };
+    }, [currentProcessId]);
+
+    const generateProcessId = () => Math.random().toString(36).substring(7);
 
     const fetchInfo = useCallback(async (url: string) => {
-        setIsLoading(true);
-        setFetchError(null);
-        setVideoInfo(null);
+        setState((prev) => ({
+            ...prev,
+            isLoading: true,
+            fetchError: null,
+            videoInfo: null,
+            downloadError: null
+        }));
 
         try {
-            const info = await YtDlpNative.fetchInfo(url);
-            setVideoInfo(info);
-        } catch (error: any) {
-            setFetchError(error.message || 'Failed to fetch video info');
-        } finally {
-            setIsLoading(false);
-        }
-    }, []);
-
-    const download = useCallback(async (url: string, formatId?: string): Promise<DownloadResult | null> => {
-        const processId = generateProcessId();
-        processIdRef.current = processId;
-
-        setIsDownloading(true);
-        setDownloadProgress(0);
-        setDownloadEta(0);
-        setDownloadError(null);
-        setCurrentProcessId(processId);
-
-        try {
-            const result = await YtDlpNative.download(url, formatId || null, processId);
-            return result;
-        } catch (error: any) {
-            if (error.code !== 'CANCELLED') {
-                setDownloadError(error.message || 'Download failed');
+            // Check if native module is available
+            if (!YtDlpNative || !YtDlpNative.fetchInfo) {
+                throw new Error('Native module not available. Please restart the app.');
             }
-            return null;
-        } finally {
-            setIsDownloading(false);
-            setCurrentProcessId(null);
-            processIdRef.current = null;
+
+            const info = await YtDlpNative.fetchInfo(url);
+
+            if (!info) {
+                throw new Error('No video information found');
+            }
+
+            setState((prev) => ({
+                ...prev,
+                isLoading: false,
+                videoInfo: info
+            }));
+        } catch (error: any) {
+            const errorMessage = error?.message || 'Failed to fetch video info. Please check the URL and try again.';
+            console.error('fetchInfo error:', error);
+
+            setState((prev) => ({
+                ...prev,
+                isLoading: false,
+                fetchError: errorMessage,
+            }));
         }
     }, []);
+
+    const download = useCallback(
+        async (url: string, formatId: string | null) => {
+            const processId = generateProcessId();
+            setCurrentProcessId(processId);
+
+            setState((prev) => ({
+                ...prev,
+                isDownloading: true,
+                downloadProgress: 0,
+                downloadEta: 0,
+                downloadError: null,
+            }));
+
+            try {
+                if (!YtDlpNative || !YtDlpNative.download) {
+                    throw new Error('Native module not available');
+                }
+
+                const result = await YtDlpNative.download(url, formatId, processId);
+                setState((prev) => ({ ...prev, isDownloading: false, downloadProgress: 100 }));
+                return result;
+            } catch (error: any) {
+                if (error.code === 'CANCELLED') {
+                    setState((prev) => ({ ...prev, isDownloading: false }));
+                    return null;
+                }
+
+                const errorMessage = error?.message || 'Download failed. Please try again.';
+                console.error('download error:', error);
+
+                setState((prev) => ({
+                    ...prev,
+                    isDownloading: false,
+                    downloadError: errorMessage,
+                }));
+                return null;
+            } finally {
+                setCurrentProcessId(null);
+            }
+        },
+        []
+    );
 
     const cancelDownload = useCallback(async () => {
-        if (currentProcessId) {
-            try {
+        try {
+            if (currentProcessId && YtDlpNative?.cancelDownload) {
                 await YtDlpNative.cancelDownload(currentProcessId);
-            } catch (error) {
-                console.error('Failed to cancel download:', error);
             }
+            setState((prev) => ({ ...prev, isDownloading: false }));
+        } catch (error) {
+            console.warn('Cancel download error:', error);
+            // Still update state even if cancel fails
+            setState((prev) => ({ ...prev, isDownloading: false }));
         }
     }, [currentProcessId]);
 
     const validateUrl = useCallback(async (url: string): Promise<ValidationResult> => {
         try {
-            const result = await YtDlpNative.validateUrl(url);
-            setValidationResult(result);
-            return result;
-        } catch (error: any) {
-            const result = { valid: false, platform: null };
-            setValidationResult(result);
-            return result;
-        }
-    }, []);
-
-    const clearState = useCallback(() => {
-        setVideoInfo(null);
-        setFetchError(null);
-        setDownloadError(null);
-        setDownloadProgress(0);
-        setDownloadEta(0);
-        setValidationResult(null);
-    }, []);
-
-    const updateYtDlp = useCallback(async () => {
-        try {
-            await YtDlpNative.updateYtDlp();
-        } catch (error: any) {
-            console.error('Failed to update yt-dlp:', error);
-        }
-    }, []);
-
-    const listDownloadedFiles = useCallback(async (): Promise<DownloadedFile[]> => {
-        try {
-            return await YtDlpNative.listDownloadedFiles();
+            if (!YtDlpNative?.validateUrl) {
+                return { valid: false, platform: null };
+            }
+            return await YtDlpNative.validateUrl(url);
         } catch (error) {
-            return [];
+            console.warn('Validate URL error:', error);
+            return { valid: false, platform: null };
         }
     }, []);
 
-    const deleteFile = useCallback(async (path: string): Promise<boolean> => {
+    const reset = useCallback(() => {
+        setState(prev => ({
+            ...prev,
+            videoInfo: null,
+            fetchError: null,
+            downloadError: null,
+            isDownloading: false
+        }));
+    }, []);
+
+    const checkSharedText = useCallback(async (): Promise<string | null> => {
         try {
-            return await YtDlpNative.deleteFile(path);
+            if (!YtDlpNative?.getSharedText) {
+                return null;
+            }
+            return await YtDlpNative.getSharedText();
         } catch (error) {
-            return false;
+            console.warn('Check shared text error:', error);
+            return null;
         }
     }, []);
 
-    const getOutputDirectory = useCallback(async (): Promise<string> => {
+    const getSharedData = useCallback(async (): Promise<SharedData | null> => {
         try {
-            return await YtDlpNative.getOutputDirectory();
+            if (!YtDlpNative?.getSharedData) {
+                return null;
+            }
+            return await YtDlpNative.getSharedData();
         } catch (error) {
+            console.warn('Get shared data error:', error);
+            return null;
+        }
+    }, []);
+
+    const getClipboardText = useCallback(async (): Promise<string> => {
+        try {
+            if (!YtDlpNative?.getClipboardText) {
+                return '';
+            }
+            return await YtDlpNative.getClipboardText();
+        } catch (error) {
+            console.warn('Get clipboard error:', error);
             return '';
         }
     }, []);
 
-    const state: UseYtDlpState = {
-        isLoading,
-        videoInfo,
-        fetchError,
-        isDownloading,
-        downloadProgress,
-        downloadEta,
-        downloadError,
-        currentProcessId,
-        validationResult,
-    };
+    const saveThumbnail = useCallback(async (url: string, title: string): Promise<string> => {
+        try {
+            if (!YtDlpNative?.saveThumbnail) {
+                throw new Error('Save thumbnail not available');
+            }
+            return await YtDlpNative.saveThumbnail(url, title);
+        } catch (error: any) {
+            console.error('Save thumbnail error:', error);
+            throw error;
+        }
+    }, []);
 
-    const actions: UseYtDlpActions = {
-        fetchInfo,
-        download,
-        cancelDownload,
-        validateUrl,
-        clearState,
-        updateYtDlp,
-        listDownloadedFiles,
-        deleteFile,
-        getOutputDirectory,
-    };
-
-    return [state, actions];
-}
-
-export default useYtDlp;
+    return [
+        state,
+        {
+            fetchInfo,
+            download,
+            cancelDownload,
+            validateUrl,
+            reset,
+            checkSharedText,
+            getSharedData,
+            getClipboardText,
+            saveThumbnail
+        },
+    ];
+};

@@ -1,9 +1,8 @@
 /**
- * Platform Icons - SVG icons for supported platforms
+ * Premium Platform Icons with enhanced visuals
  */
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
-import Svg, { Path, G, Circle, Rect } from 'react-native-svg';
+import Svg, { Path, Circle, G, Defs, LinearGradient as SvgGradient, Stop } from 'react-native-svg';
 import { Colors } from '../theme';
 
 interface IconProps {
@@ -11,6 +10,7 @@ interface IconProps {
     color?: string;
 }
 
+// Platform Icons
 export const YouTubeIcon: React.FC<IconProps> = ({ size = 24, color = Colors.youtube }) => (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
         <Path
@@ -29,11 +29,11 @@ export const InstagramIcon: React.FC<IconProps> = ({ size = 24, color = Colors.i
     </Svg>
 );
 
-export const TikTokIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPrimary }) => (
+export const TikTokIcon: React.FC<IconProps> = ({ size = 24, color }) => (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
         <Path
             d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z"
-            fill={color}
+            fill={color || Colors.textPrimary}
         />
     </Svg>
 );
@@ -56,7 +56,7 @@ export const SpotifyIcon: React.FC<IconProps> = ({ size = 24, color = Colors.spo
     </Svg>
 );
 
-export const XIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPrimary }) => (
+export const XIcon: React.FC<IconProps> = ({ size = 24, color = '#FFFFFF' }) => (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
         <Path
             d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"
@@ -75,15 +75,12 @@ export const PinterestIcon: React.FC<IconProps> = ({ size = 24, color = Colors.p
 );
 
 export const SoundCloudIcon: React.FC<IconProps> = ({ size = 24, color = Colors.soundcloud }) => (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-        <Path
-            d="M1.175 12.225c-.051 0-.094.046-.101.1l-.233 2.154.233 2.105c.007.058.05.098.101.098.05 0 .09-.04.099-.098l.255-2.105-.27-2.154c0-.057-.045-.1-.09-.1m-.899.828c-.06 0-.091.037-.104.094L0 14.479l.165 1.308c0 .055.045.094.09.094s.089-.045.104-.104l.21-1.319-.21-1.334c0-.061-.044-.09-.09-.09m1.83-1.229c-.061 0-.12.045-.12.104l-.21 2.563.225 2.458c0 .06.045.12.119.12.061 0 .105-.061.121-.12l.254-2.474-.254-2.548c-.016-.06-.061-.12-.121-.12m.945-.089c-.075 0-.135.06-.15.135l-.193 2.64.21 2.544c.016.077.075.138.149.138.075 0 .135-.061.15-.15l.24-2.532-.24-2.623c0-.075-.06-.135-.135-.135m1.155.36c-.005-.09-.075-.149-.159-.149-.09 0-.158.06-.164.149l-.217 2.43.2 2.563c0 .09.075.157.159.157.074 0 .148-.068.148-.158l.227-2.563-.227-2.444m.809-1.709c-.101 0-.18.09-.18.181l-.21 3.957.187 2.563c0 .09.08.164.18.164.094 0 .174-.09.18-.18l.209-2.563-.209-3.972c-.008-.104-.088-.18-.18-.18m.959-.914c-.105 0-.195.09-.203.194l-.18 4.872.165 2.548c0 .12.09.209.195.209.104 0 .194-.089.21-.209l.193-2.548-.192-4.856c-.016-.12-.105-.21-.21-.21m.989-.449c-.121 0-.211.089-.225.209l-.165 5.275.165 2.52c.014.119.104.225.225.225.119 0 .225-.105.225-.225l.195-2.52-.18-5.275c0-.12-.105-.209-.225-.209m1.245.045c0-.135-.105-.24-.24-.24-.116 0-.24.105-.24.24l-.149 5.441.149 2.503c.016.135.12.24.256.24s.24-.105.254-.24l.166-2.503-.18-5.456m.705-.463c-.136 0-.256.12-.271.256l-.106 5.873.136 2.49c0 .149.12.27.271.27.135 0 .255-.12.27-.27l.151-2.49-.135-5.873c0-.136-.135-.256-.271-.256m1.02-.464c-.15 0-.271.12-.285.271l-.091 6.322.105 2.46c.015.15.135.271.271.271.149 0 .271-.12.3-.271l.105-2.46-.12-6.322c0-.15-.135-.271-.285-.271m1.064-.195c-.164 0-.299.135-.315.285l-.074 6.501.09 2.445c.016.165.15.299.299.299.165 0 .3-.135.315-.299l.09-2.445-.105-6.501c0-.15-.135-.285-.3-.285m.926 1.083c-.165 0-.3.135-.3.3l-.06 5.403.06 2.385c.015.165.135.3.3.3.164 0 .3-.135.3-.3l.076-2.385-.076-5.403c0-.165-.15-.3-.3-.3m1.065-.165c-.18 0-.315.135-.315.315l-.06 5.253.06 2.37c0 .18.135.315.315.315.165 0 .315-.135.315-.315l.075-2.37-.075-5.253c0-.18-.15-.315-.315-.315m1.035-.015c-.18 0-.33.15-.33.33l-.045 5.25.045 2.34c.015.18.15.33.33.33.18 0 .33-.15.33-.33l.046-2.34-.046-5.25c0-.18-.15-.33-.33-.33m1.095.24c-.195 0-.345.15-.345.345l-.03 4.635.03 2.34c0 .195.15.345.345.345.194 0 .344-.15.344-.345l.03-2.34-.045-4.635c0-.195-.149-.345-.344-.345m.976-.93c-.195 0-.36.165-.36.36l-.015 5.205.015 2.31c.015.195.165.36.36.36.18 0 .345-.165.36-.36l.015-2.31-.03-5.205c0-.195-.164-.36-.345-.36m12.48 2.055c-.393 0-.78.074-1.125.209-.18-2.1-1.95-3.75-4.11-3.75-.54 0-1.065.105-1.53.284-.18.076-.24.15-.24.3v7.396c0 .164.12.3.285.314h6.72c1.275 0 2.31-1.035 2.31-2.311 0-1.275-1.035-2.324-2.31-2.324"
-            fill={color}
-        />
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+        <Path d="M11.562 8.35a.86.86 0 0 0-.853.861v7.62a.86.86 0 0 0 .853.862h.023a.86.86 0 0 0 .852-.863V9.212a.86.86 0 0 0-.853-.862h-.022zm-2.485 2.14a.8.8 0 0 0-.793.802v4.757a.8.8 0 0 0 .793.803h.02a.8.8 0 0 0 .794-.803v-4.757a.8.8 0 0 0-.794-.802h-.02zm-2.484 2.115a.735.735 0 0 0-.726.735v2.247c0 .407.326.735.726.735h.019a.735.735 0 0 0 .727-.735V13.34a.735.735 0 0 0-.727-.735h-.019zm14.498 1.18c-.805-2.29-2.955-3.832-5.367-3.832-.572 0-1.12.09-1.636.252A.86.86 0 0 0 13.25 9.21v7.62c0 .48.384.862.86.862h.017c.07 0 .14-.01.206-.027 1.309.843 2.76.828 2.76.828 2.87-.14 4.545-2.215 4.545-2.215.938-1.226.79-2.392.79-2.392-.257-2.906-3.09-2.9-3.09-2.9h-.002z" />
     </Svg>
 );
 
-// Common icons
+// UI Icons
 export const SearchIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textSecondary }) => (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
         <Path
@@ -96,12 +93,24 @@ export const SearchIcon: React.FC<IconProps> = ({ size = 24, color = Colors.text
     </Svg>
 );
 
-export const ClipboardIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textSecondary }) => (
+export const CloseIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textSecondary }) => (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
         <Path
-            d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
+            d="M6 18L18 6M6 6l12 12"
             stroke={color}
             strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+    </Svg>
+);
+
+export const ArrowRightIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPrimary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+            d="M14 5l7 7m0 0l-7 7m7-7H3"
+            stroke={color}
+            strokeWidth={2.5}
             strokeLinecap="round"
             strokeLinejoin="round"
         />
@@ -129,10 +138,10 @@ export const PlayIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPr
     </Svg>
 );
 
-export const CloseIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textSecondary }) => (
+export const ClipboardIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textSecondary }) => (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
         <Path
-            d="M6 18L18 6M6 6l12 12"
+            d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
             stroke={color}
             strokeWidth={2}
             strokeLinecap="round"
@@ -178,7 +187,67 @@ export const FolderIcon: React.FC<IconProps> = ({ size = 24, color = Colors.text
     </Svg>
 );
 
-const styles = StyleSheet.create({});
+export const MusicNoteIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPrimary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+            d="M9 18V5l12-2v13"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+        <Circle cx={6} cy={18} r={3} stroke={color} strokeWidth={2} />
+        <Circle cx={18} cy={16} r={3} stroke={color} strokeWidth={2} />
+    </Svg>
+);
+
+export const VideoIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPrimary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+            d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+    </Svg>
+);
+
+export const ImageIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPrimary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+            d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+    </Svg>
+);
+
+export const CheckIcon: React.FC<IconProps> = ({ size = 24, color = Colors.success }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+            d="M5 13l4 4L19 7"
+            stroke={color}
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+    </Svg>
+);
+
+export const SparkleIcon: React.FC<IconProps> = ({ size = 24, color = Colors.primary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+            d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+    </Svg>
+);
 
 export default {
     YouTubeIcon,
@@ -190,11 +259,17 @@ export default {
     PinterestIcon,
     SoundCloudIcon,
     SearchIcon,
-    ClipboardIcon,
+    CloseIcon,
+    ArrowRightIcon,
     DownloadIcon,
     PlayIcon,
-    CloseIcon,
+    ClipboardIcon,
     ChevronRightIcon,
     SettingsIcon,
     FolderIcon,
+    MusicNoteIcon,
+    VideoIcon,
+    ImageIcon,
+    CheckIcon,
+    SparkleIcon,
 };

@@ -1,24 +1,20 @@
-/**
- * YtDlp Native Module Bridge
- * TypeScript interface for the native Kotlin YtDlpModule
- */
-import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
+import { NativeModules, NativeEventEmitter } from 'react-native';
 
-// Type definitions
-export interface VideoFormat {
+// Type definitions for VideoInfo
+export interface Format {
     formatId: string;
-    formatNote: string;
-    ext: string;
-    filesize: number;
-    tbr: number;
-    width: number;
-    height: number;
-    resolution: string;
-    fps: number;
-    vcodec: string;
-    acodec: string;
-    hasVideo: boolean;
-    hasAudio: boolean;
+    formatNote?: string;
+    ext?: string;
+    filesize?: number;
+    tbr?: number;
+    width?: number;
+    height?: number;
+    resolution?: string;
+    fps?: number;
+    vcodec?: string;
+    acodec?: string;
+    hasVideo?: boolean;
+    hasAudio?: boolean;
 }
 
 export interface VideoInfo {
@@ -28,27 +24,24 @@ export interface VideoInfo {
     thumbnail: string;
     uploader: string;
     uploaderUrl: string;
-    duration: number;
+    duration: number; // seconds
     viewCount: number;
     likeCount: number;
     uploadDate: string;
-    extractor: string;
+    extractor: string; // youtube, instagram, etc
     url: string;
-    platform: Platform;
-    ext: string;
-    filesize: number;
-    resolution: string;
-    width: number;
-    height: number;
-    fps: number;
-    formats: VideoFormat[];
+    platform: string;
+    formats: Format[];
+    ext?: string;
+    filesize?: number;
+    width?: number;
+    height?: number;
+    fps?: number;
 }
 
-export interface DownloadResult {
-    processId: string;
-    outputDir: string;
-    exitCode: number;
-    output: string;
+export interface ValidationResult {
+    valid: boolean;
+    platform: string | null;
 }
 
 export interface DownloadProgress {
@@ -58,9 +51,11 @@ export interface DownloadProgress {
     line: string;
 }
 
-export interface ValidationResult {
-    valid: boolean;
-    platform: string | null;
+export interface DownloadResult {
+    processId: string;
+    outputDir: string;
+    exitCode: number;
+    output: string;
 }
 
 export interface DownloadedFile {
@@ -70,67 +65,47 @@ export interface DownloadedFile {
     modified: number;
 }
 
-export type Platform =
-    | 'YouTube'
-    | 'Instagram'
-    | 'Facebook'
-    | 'TikTok'
-    | 'Spotify'
-    | 'X'
-    | 'Pinterest'
-    | 'SoundCloud'
-    | 'Unknown';
+// Shared Data from Intent
+export interface SharedData {
+    url: string;
+    platform: string | null;
+    autoFetch: boolean;
+}
 
-export type UpdateStatus = 'DONE' | 'ALREADY_UP_TO_DATE' | 'ERROR';
-
-// Native module interface
-interface YtDlpNativeModule {
+// Native Module Interface
+export interface YtDlpNativeModule {
     fetchInfo(url: string): Promise<VideoInfo>;
     download(url: string, formatId: string | null, processId: string): Promise<DownloadResult>;
     cancelDownload(processId: string): Promise<boolean>;
-    updateYtDlp(): Promise<{ status: UpdateStatus }>;
+    updateYtDlp(): Promise<{ status: string }>;
     getSupportedPlatforms(): Promise<string[]>;
     validateUrl(url: string): Promise<ValidationResult>;
     getOutputDirectory(): Promise<string>;
     listDownloadedFiles(): Promise<DownloadedFile[]>;
     deleteFile(filePath: string): Promise<boolean>;
+    // Share Intent Methods
+    getSharedText(): Promise<string | null>;
+    getSharedData(): Promise<SharedData | null>;
+    saveThumbnail(url: string, title: string): Promise<string>;
+    getClipboardText(): Promise<string>;
 }
 
 const { YtDlpModule } = NativeModules;
 
-if (!YtDlpModule) {
-    throw new Error(
-        'YtDlpModule native module is not available. Make sure you are running on Android and the native module is properly linked.'
-    );
-}
-
-// Export the native module with proper typing
 export const YtDlpNative: YtDlpNativeModule = YtDlpModule;
 
-// Event emitter for download progress
 export const ytDlpEventEmitter = new NativeEventEmitter(YtDlpModule);
 
-/**
- * Subscribe to download progress events
- */
-export function onDownloadProgress(
-    callback: (progress: DownloadProgress) => void
-): () => void {
+export function onDownloadProgress(callback: (progress: DownloadProgress) => void): () => void {
     const subscription = ytDlpEventEmitter.addListener('onDownloadProgress', callback);
     return () => subscription.remove();
 }
 
-/**
- * Generate a unique process ID for downloads
- */
-export function generateProcessId(): string {
-    return `download_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-}
+export declare type VideoFormat = Format;
 
-/**
- * Format duration from seconds to HH:MM:SS
- */
-export function formatDuration(seconds: number): string {
+// Helpers
+export const formatDuration = (seconds: number): string => {
+    if (!seconds) return '0:00';
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
@@ -139,44 +114,25 @@ export function formatDuration(seconds: number): string {
         return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     }
     return `${m}:${s.toString().padStart(2, '0')}`;
-}
+};
 
-/**
- * Format file size to human readable string
- */
-export function formatFileSize(bytes: number): string {
-    if (bytes === 0) return 'Unknown size';
-
+export const formatFileSize = (bytes: number): string => {
+    if (!bytes) return 'N/A';
     const units = ['B', 'KB', 'MB', 'GB'];
-    const k = 1024;
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    let size = bytes;
+    let unitIndex = 0;
 
-    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${units[i]}`;
-}
+    while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex++;
+    }
 
-/**
- * Format view count to human readable string
- */
-export function formatViewCount(count: number): string {
-    if (count >= 1000000000) {
-        return `${(count / 1000000000).toFixed(1)}B`;
-    }
-    if (count >= 1000000) {
-        return `${(count / 1000000).toFixed(1)}M`;
-    }
-    if (count >= 1000) {
-        return `${(count / 1000).toFixed(1)}K`;
-    }
+    return `${size.toFixed(1)} ${units[unitIndex]}`;
+};
+
+export const formatViewCount = (count: number): string => {
+    if (!count) return '0';
+    if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`;
+    if (count >= 1000) return `${(count / 1000).toFixed(1)}K`;
     return count.toString();
-}
-
-// Default export
-export default {
-    YtDlpNative,
-    ytDlpEventEmitter,
-    onDownloadProgress,
-    generateProcessId,
-    formatDuration,
-    formatFileSize,
-    formatViewCount,
 };

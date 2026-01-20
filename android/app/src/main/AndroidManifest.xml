@@ -31,7 +31,6 @@
       android:theme="@style/AppTheme"
       android:usesCleartextTraffic="${usesCleartextTraffic}"
       android:supportsRtl="true"
-      android:extractNativeLibs="true"
       android:requestLegacyExternalStorage="true">
       
       <activity
@@ -44,6 +43,13 @@
         <intent-filter>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent-filter>
+        
+        <!-- Handle Shared Links -->
+        <intent-filter>
+            <action android:name="android.intent.action.SEND" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <data android:mimeType="text/plain" />
         </intent-filter>
         
         <!-- Handle shared URLs from other apps -->

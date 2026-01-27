@@ -16,6 +16,8 @@ import {
     AppState,
     Animated,
     Easing,
+    TouchableOpacity,
+    AppStateStatus,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, BorderRadius, Spacing, Typography, PlatformThemes, getPlatformColor } from '../theme';
@@ -33,7 +35,8 @@ import { DownloadIcon, SparkleIcon } from '../components/Icons';
 
 export const HomeScreen: React.FC = () => {
     const [url, setUrl] = useState('');
-    const [detectedPlatform, setDetectedPlatform] = useState<string | null>(null);
+    const [detectedPlatform, setDetectedPlatform] = useState<string | null>('youtube'); // Default to YouTube
+    const [userSelectedPlatform, setUserSelectedPlatform] = useState(false); // Track manual selection
 
     const [state, actions] = useYtDlp();
 
@@ -157,24 +160,26 @@ export const HomeScreen: React.FC = () => {
     }, [detectedPlatform]);
 
     // Validate URL and detect platform with error handling
+    // Only auto-detect if user hasn't manually selected a platform
     useEffect(() => {
         const validateAndDetect = async () => {
             if (url.trim().length > 5) {
                 try {
                     const result = await actions.validateUrl(url);
-                    setDetectedPlatform(result.platform);
+                    // Only auto-update platform if user didn't manually select
+                    if (!userSelectedPlatform) {
+                        setDetectedPlatform(result.platform);
+                    }
                 } catch (error) {
                     console.warn('URL validation error:', error);
-                    // Don't update platform on error
                 }
-            } else {
-                setDetectedPlatform(null);
             }
+            // Don't reset platform when URL is short - keep user's manual selection
         };
 
         const timer = setTimeout(validateAndDetect, 500);
         return () => clearTimeout(timer);
-    }, [url, actions]);
+    }, [url, actions, userSelectedPlatform]);
 
     // Permissions and intent handling
     useEffect(() => {
@@ -199,7 +204,7 @@ export const HomeScreen: React.FC = () => {
             }
         });
 
-        const appStateSubscription = AppState.addEventListener('change', nextAppState => {
+        const appStateSubscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
             if (nextAppState === 'active') {
                 checkShareIntent();
             }
@@ -225,8 +230,8 @@ export const HomeScreen: React.FC = () => {
                 ToastAndroid.show('Download complete!', ToastAndroid.LONG);
                 Alert.alert(
                     '✅ Download Complete',
-                    'Your file has been saved to the Movies folder.',
-                    [{ text: 'OK' }],
+                    'Your file has been saved! Check the Library tab to play, share, or manage your downloads. Videos and images are also added to your Gallery.',
+                    [{ text: 'Got it!' }],
                 );
             }
         } catch (error: any) {
@@ -285,6 +290,8 @@ export const HomeScreen: React.FC = () => {
         }
     }, [actions]);
 
+
+
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: currentTheme.background }]} edges={['top']}>
             <StatusBar barStyle="light-content" backgroundColor={currentTheme.background} animated />
@@ -319,7 +326,10 @@ export const HomeScreen: React.FC = () => {
                 {/* Platform Selector */}
                 <PlatformSelector
                     selectedPlatform={detectedPlatform}
-                    onSelectPlatform={(id) => setDetectedPlatform(id)}
+                    onSelectPlatform={(id) => {
+                        setDetectedPlatform(id);
+                        setUserSelectedPlatform(true); // Mark as manual selection
+                    }}
                     disabled={state.isLoading || state.isDownloading}
                 />
 
@@ -327,7 +337,14 @@ export const HomeScreen: React.FC = () => {
                 <View style={styles.inputSection}>
                     <URLInput
                         value={url}
-                        onChangeText={setUrl}
+                        onChangeText={(text) => {
+                            setUrl(text);
+                            // Reset to default when URL is cleared
+                            if (text.trim().length === 0) {
+                                setUserSelectedPlatform(false);
+                                setDetectedPlatform('youtube'); // Reset to YouTube default
+                            }
+                        }}
                         onSubmit={() => handleFetch(url)}
                         isLoading={state.isLoading}
                         onPaste={handlePaste}

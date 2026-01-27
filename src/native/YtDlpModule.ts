@@ -63,6 +63,10 @@ export interface DownloadedFile {
     path: string;
     size: number;
     modified: number;
+    platform: string;
+    contentType: string;
+    extension: string;
+    thumbnail?: string | null;
 }
 
 // Shared Data from Intent
@@ -83,6 +87,8 @@ export interface YtDlpNativeModule {
     getOutputDirectory(): Promise<string>;
     listDownloadedFiles(): Promise<DownloadedFile[]>;
     deleteFile(filePath: string): Promise<boolean>;
+    openFile(filePath: string): Promise<boolean>;
+    shareFile(filePath: string): Promise<boolean>;
     // Share Intent Methods
     getSharedText(): Promise<string | null>;
     getSharedData(): Promise<SharedData | null>;

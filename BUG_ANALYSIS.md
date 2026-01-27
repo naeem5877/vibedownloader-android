@@ -1,6 +1,46 @@
 # 🐛 Bug Analysis & Fixes Report
 
-## ✅ **ALL BUGS FIXED** - No Errors Found!
+## 🔧 **CRITICAL FIX: Android 13+ Download Not Starting** (January 2026)
+
+### **Issue:**
+Downloads fail to start on Android 13+ devices (OnePlus Nord 2, etc.) while working fine on Android 9 (Samsung J7 Pro).
+- Folder structure gets created (YouTube/Shorts etc.) ✅
+- Thumbnails save correctly ✅
+- Download progress never starts ❌
+- File doesn't download ❌
+
+### **Root Cause:**
+1. **yt-dlp outdated** - The bundled yt-dlp may not support latest YouTube/site changes
+2. **SSL/TLS certificate issues** on Android 13+ with stricter security
+3. **IPv6 connectivity issues** on certain networks
+4. **Library version** - Using older youtubedl-android version
+
+### **Fixes Applied:**
+
+1. **Updated youtubedl-android library:** `0.18.1` → `0.19.0`
+   - File: `android/build.gradle`
+
+2. **Auto-update yt-dlp on startup:**
+   - Added background update check in `initializeYtDlp()`
+   - File: `YtDlpModule.kt`
+
+3. **SSL/Network compatibility options:**
+   ```kotlin
+   request.addOption("--no-check-certificate")
+   request.addOption("--prefer-insecure")
+   request.addOption("--force-ipv4")
+   ```
+
+4. **Added verbose logging** for debugging download issues
+
+### **After this fix:**
+- Build a new APK and test on Android 13+ device
+- Check Logcat for `YtDlpModule` logs to see download progress
+- The first download may be slower as yt-dlp updates in background
+
+---
+
+## ✅ **ALL OTHER BUGS FIXED** - No Errors Found!
 
 After thorough analysis of both **Desktop** and **Android** codebases, here's the comprehensive report:
 

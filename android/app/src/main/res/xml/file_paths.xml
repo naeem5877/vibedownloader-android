@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- External public storage (Movies, Download, etc.) -->
+    <external-path name="external_files" path="." />
+    
+    <!-- Movies/VibeDownloader (legacy) -->
+    <external-path name="vibe_movies" path="Movies/VibeDownloader" />
+    
+    <!-- Download folder -->
+    <external-path name="download" path="Download" />
+    
+    <!-- App-specific external files (Android 11+ compatible) -->
+    <external-files-path name="vibedownloader" path="vibedownloader" />
+    
+    <!-- Cache directory -->
+    <cache-path name="cache" path="." />
+    
+    <!-- Files directory -->
+    <files-path name="files" path="." />
+</paths>
+

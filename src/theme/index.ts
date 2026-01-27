@@ -3,55 +3,54 @@
  */
 
 export const Colors = {
-    // Brand - Vibrant gradient-inspired palette
-    primary: '#FF0050', // Hot Pink
-    primaryLight: '#FF4081',
-    primaryDark: '#C51162',
-    secondary: '#00F2EA', // Cyan accent
-    secondaryLight: '#64FFDA',
-    secondaryDark: '#00BFA5',
-    accent: '#7C4DFF', // Purple accent
-    accentLight: '#B388FF',
+    // Brand - TikTok Inspired Vibrant Palette
+    primary: '#FE2C55', // TikTok Hot Pink/Red
+    primaryLight: '#FF4D79',
+    primaryDark: '#C51035',
+    secondary: '#25F4EE', // TikTok Cyan/Aqua
+    secondaryLight: '#69FFF8',
+    secondaryDark: '#00D6CE',
+    accent: '#FE2C55', // Matching primary
 
-    // Background - Deep premium blacks
-    background: '#0A0A0C', // Near-black with blue tint
-    backgroundGradientStart: '#0F0F12',
-    backgroundGradientEnd: '#0A0A0C',
+    // Background - Deep Pure Blacks
+    background: '#010101', // Pure Black
+    backgroundGradientStart: '#000000',
+    backgroundGradientEnd: '#161616',
 
-    // Surfaces - Glassmorphism ready
-    surface: '#16161A', // Card background
-    surfaceElevated: '#1E1E24', // Modal/Dropdown
-    surfaceHover: '#252530',
-    surfaceGlass: 'rgba(30, 30, 40, 0.7)', // Glassmorphism
-    surfaceGlassLight: 'rgba(40, 40, 55, 0.5)',
+    // Surfaces - Dark and Sleek
+    surface: '#121212', // Slightly lighter black for cards
+    surfaceElevated: '#1E1E1E', // Modals
+    surfaceHover: '#2A2A2A',
+    surfaceGlass: 'rgba(18, 18, 24, 0.85)', // Glassmorphism
+    surfaceGlassLight: 'rgba(255, 255, 255, 0.05)',
 
     // Text
     textPrimary: '#FFFFFF',
-    textSecondary: '#9CA3AF',
-    textMuted: '#6B7280',
-    textAccent: '#FF0050',
+    textSecondary: '#EBEBEB',
+    textMuted: '#8F8F8F',
+    textAccent: '#25F4EE', // Cyan text for accents
 
     // Status
-    success: '#10B981',
-    successLight: '#34D399',
-    error: '#EF4444',
-    errorLight: '#F87171',
-    warning: '#F59E0B',
-    warningLight: '#FBBF24',
-    info: '#3B82F6',
-    infoLight: '#60A5FA',
+    success: '#00E676',
+    successLight: '#69F0AE',
+    error: '#FE2C55', // Use brand color for error/delete
+    errorLight: '#FF5C8D',
+    warning: '#FFEA00',
+    warningLight: '#FFFF00',
+    info: '#2979FF',
+    infoLight: '#448AFF',
 
     // UI
-    border: 'rgba(255, 255, 255, 0.08)',
-    borderLight: 'rgba(255, 255, 255, 0.12)',
-    borderAccent: 'rgba(255, 0, 80, 0.3)',
-    overlay: 'rgba(0, 0, 0, 0.85)',
-    overlayLight: 'rgba(0, 0, 0, 0.5)',
+    border: '#2F2F2F',
+    borderLight: '#3D3D3D',
+    borderAccent: 'rgba(37, 244, 238, 0.4)', // Cyan border
+    overlay: 'rgba(0, 0, 0, 0.9)',
+    overlayLight: 'rgba(0, 0, 0, 0.7)',
 
     // Gradients Colors
-    gradientPink: '#FF0050',
+    gradientPink: '#FE2C55',
     gradientPurple: '#7C4DFF',
-    gradientCyan: '#00F2EA',
+    gradientCyan: '#25F4EE',
     gradientOrange: '#FF6B35',
 
     // Platforms - Dynamic Theming
@@ -90,40 +89,40 @@ export const PlatformThemes: Record<string, {
         gradient: ['#1877F2', '#0C5DC7'],
     },
     TikTok: {
-        primary: '#FE2C55',
-        background: '#0A0A0C',
-        surface: '#1A1014',
-        gradient: ['#25F4EE', '#FE2C55'],
+        primary: Colors.tiktok,
+        background: Colors.background, // #010101
+        surface: Colors.surface,
+        gradient: [Colors.secondary, Colors.primary],
     },
     Spotify: {
         primary: '#1DB954',
-        background: '#080C08',
-        surface: '#0F180F',
+        background: Colors.background,
+        surface: Colors.surface,
         gradient: ['#1DB954', '#169C46'],
     },
     X: {
         primary: '#1DA1F2',
-        background: '#080A0F',
-        surface: '#0F1520',
+        background: Colors.background,
+        surface: Colors.surface,
         gradient: ['#1DA1F2', '#0C85D0'],
     },
     Pinterest: {
         primary: '#BD081C',
-        background: '#0C0808',
-        surface: '#180F0F',
+        background: Colors.background,
+        surface: Colors.surface,
         gradient: ['#BD081C', '#9C0617'],
     },
     SoundCloud: {
         primary: '#FF5500',
-        background: '#0C0A08',
-        surface: '#1A140F',
+        background: Colors.background,
+        surface: Colors.surface,
         gradient: ['#FF8800', '#FF5500'],
     },
     default: {
-        primary: '#FF0050',
-        background: '#0A0A0C',
-        surface: '#16161A',
-        gradient: ['#FF0050', '#7C4DFF'],
+        primary: Colors.primary,
+        background: Colors.background,
+        surface: Colors.surface,
+        gradient: [Colors.primary, Colors.secondary],
     }
 };
 

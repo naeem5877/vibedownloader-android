@@ -26,4 +26,18 @@ allprojects {
     }
 }
 
+// Workaround for Gradle 9.0 task dependency issues with React Native libraries
+subprojects { subproject ->
+    afterEvaluate {
+        // Fix task dependency ordering for codegen artifacts
+        tasks.matching { it.name.endsWith("SourcesJar") }.configureEach { sourcesJarTask ->
+            def codegenTask = tasks.findByName("generateCodegenArtifactsFromSchema")
+            if (codegenTask != null) {
+                sourcesJarTask.dependsOn(codegenTask)
+            }
+        }
+    }
+}
+
 apply plugin: "com.facebook.react.rootproject"
+

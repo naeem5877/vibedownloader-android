@@ -67,25 +67,11 @@ export const URLInput: React.FC<URLInputProps> = ({
         outputRange: [Colors.border, platformColor],
     });
 
-    const glowOpacity = focusAnimation.interpolate({
-        inputRange: [0, 1],
-        outputRange: [0, 0.15],
-    });
+
 
     return (
         <View style={styles.container}>
-            {/* Glow Effect */}
-            <Animated.View
-                style={[
-                    styles.glowEffect,
-                    {
-                        backgroundColor: platformColor,
-                        opacity: glowOpacity,
-                    }
-                ]}
-            />
-
-            <Animated.View
+            {/* Search Icon */}\n            <Animated.View
                 style={[
                     styles.inputWrapper,
                     {
@@ -172,25 +158,15 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: Spacing.sm,
-        position: 'relative',
-    },
-    glowEffect: {
-        position: 'absolute',
-        left: Spacing.md,
-        right: Spacing.md + 58,
-        top: -10,
-        bottom: -10,
-        borderRadius: BorderRadius.xxl,
-        transform: [{ scaleX: 1.1 }, { scaleY: 1.5 }],
     },
     inputWrapper: {
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: Colors.surface,
+        backgroundColor: Colors.surfaceElevated,
         borderRadius: BorderRadius.xxl,
-        borderWidth: 1.5,
-        height: 56,
+        borderWidth: 2,
+        height: 60,
         overflow: 'hidden',
     },
     iconContainer: {
@@ -203,6 +179,7 @@ const styles = StyleSheet.create({
         fontSize: Typography.sizes.base,
         height: '100%',
         paddingVertical: 0,
+        fontWeight: '500',
     },
     rightActions: {
         flexDirection: 'row',
@@ -210,41 +187,44 @@ const styles = StyleSheet.create({
         paddingRight: Spacing.sm,
     },
     clearButton: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
+        width: 36,
+        height: 36,
+        borderRadius: 18,
         backgroundColor: Colors.surfaceHover,
         justifyContent: 'center',
         alignItems: 'center',
     },
     pasteButton: {
-        backgroundColor: Colors.surfaceElevated,
+        backgroundColor: `${Colors.primary}15`,
         paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.xs,
-        borderRadius: BorderRadius.round,
-        borderWidth: 1,
-        borderColor: Colors.borderLight,
+        paddingVertical: 8,
+        borderRadius: BorderRadius.lg,
     },
     pasteText: {
-        color: Colors.textSecondary,
-        fontSize: Typography.sizes.xxs,
+        color: Colors.primary,
+        fontSize: Typography.sizes.xs,
         fontWeight: Typography.weights.bold,
-        letterSpacing: Typography.letterSpacing.wider,
+        letterSpacing: 1,
     },
     actionButton: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
+        width: 60,
+        height: 60,
+        borderRadius: 30,
         overflow: 'hidden',
+        elevation: 4,
+        shadowColor: Colors.primary,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
     },
     actionButtonInner: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        ...Shadows.md,
     },
     actionButtonDisabled: {
-        opacity: 0.5,
+        opacity: 0.6,
+        shadowOpacity: 0,
     },
 });
 

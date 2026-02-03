@@ -20,31 +20,41 @@ import {
     AppStateStatus,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, BorderRadius, Spacing, Typography, PlatformThemes, getPlatformColor } from '../theme';
+import { Colors, BorderRadius, Spacing, Typography, PlatformThemes, getPlatformColor, Shadows } from '../theme';
 import {
     PlatformSelector,
     URLInput,
     VideoInfoCard,
     FormatList,
     DownloadProgress,
+    OfflineBanner,
 } from '../components';
+// FormatToggle removed - automatic mode detection
+import { PlaylistSelectionModal } from '../components/PlaylistSelectionModal';
 import { SkeletonCard } from '../components/SkeletonCard';
 import { useYtDlp } from '../hooks/useYtDlp';
-import { VideoFormat, ytDlpEventEmitter } from '../native/YtDlpModule';
+import { VideoFormat, ytDlpEventEmitter, YtDlpNative } from '../native/YtDlpModule';
 import { DownloadIcon, SparkleIcon } from '../components/Icons';
+import { getSpotifyPlaylist, extractSpotifyId, getTrackInfo, buildYouTubeSearchQuery, formatTrackMetadata } from '../services/SpotifyService';
 
 export const HomeScreen: React.FC = () => {
     const [url, setUrl] = useState('');
-    const [detectedPlatform, setDetectedPlatform] = useState<string | null>('youtube'); // Default to YouTube
-    const [userSelectedPlatform, setUserSelectedPlatform] = useState(false); // Track manual selection
+    const [detectedPlatform, setDetectedPlatform] = useState<string | null>('youtube');
+    const [userSelectedPlatform, setUserSelectedPlatform] = useState(false);
+    // Removed downloadMode toggle - auto-detect based on platform (Spotify/SoundCloud = audio)
+
+    // Playlist State
+    const [playlistModalVisible, setPlaylistModalVisible] = useState(false);
+    const [playlistItems, setPlaylistItems] = useState<any[]>([]);
+    const [playlistTitle, setPlaylistTitle] = useState('');
+    const [playlistImage, setPlaylistImage] = useState<string | undefined>(undefined);
+    const [isPlaylistLoading, setIsPlaylistLoading] = useState(false);
 
     const [state, actions] = useYtDlp();
 
-    // Header animation
+    // ... refs ...
     const headerFadeAnim = useRef(new Animated.Value(0)).current;
     const headerSlideAnim = useRef(new Animated.Value(-20)).current;
-
-    // --- Logic Actions ---
 
     const handleFetch = useCallback(async (text: string = url) => {
         if (!text.trim()) {
@@ -52,6 +62,117 @@ export const HomeScreen: React.FC = () => {
             return;
         }
 
+        // 1. Check Spotify
+        const spotifyData = extractSpotifyId(text);
+
+        // Spotify Playlist / Album
+        if (spotifyData && (spotifyData.type === 'playlist' || spotifyData.type === 'album')) {
+            setIsPlaylistLoading(true);
+            setPlaylistModalVisible(true);
+            try {
+                const data = await getSpotifyPlaylist(spotifyData.id);
+                setPlaylistTitle(data.name);
+                setPlaylistImage(data.images?.[0]?.url);
+
+                const items = data.tracks.items.map((item: any) => ({
+                    id: item.track.id,
+                    title: item.track.name,
+                    author: item.track.artists.map((a: any) => a.name).join(', '),
+                    duration: item.track.duration_ms ? `${Math.floor(item.track.duration_ms / 60000)}:${((item.track.duration_ms % 60000) / 1000).toFixed(0).padStart(2, '0')}` : undefined,
+                    thumbnail: item.track.album.images?.[0]?.url,
+                    url: item.track.external_urls.spotify,
+                    type: 'spotify',
+                    searchQuery: buildYouTubeSearchQuery(item.track),
+                    rawTrack: item.track
+                }));
+
+                setPlaylistItems(items);
+            } catch (error: any) {
+                console.error('Spotify error:', error);
+                ToastAndroid.show('Failed to fetch Spotify playlist: ' + error.message, ToastAndroid.SHORT);
+                setPlaylistModalVisible(false);
+            } finally {
+                setIsPlaylistLoading(false);
+            }
+            return;
+        }
+
+        // Spotify Single Track
+        if (spotifyData && spotifyData.type === 'track') {
+            try {
+                // Manually trigger loading state if we could, but for now we'll just wait
+                ToastAndroid.show('Fetching Spotify track...', ToastAndroid.SHORT);
+
+                const track = await getTrackInfo(spotifyData.id);
+                const metadata = formatTrackMetadata(track);
+
+
+
+                // Create synthetic VideoInfo for UI to display
+                const syntheticInfo: any = {
+                    id: track.id,
+                    title: track.name,
+                    description: `Artist: ${metadata.artist}\nAlbum: ${metadata.album}`,
+                    thumbnail: metadata.thumbnail,
+                    uploader: metadata.artist,
+                    uploaderUrl: '',
+                    duration: metadata.duration,
+                    viewCount: 0,
+                    likeCount: 0,
+                    uploadDate: metadata.releaseDate,
+                    extractor: 'spotify',
+                    url: text,
+                    platform: 'Spotify',
+                    formats: [
+                        { formatId: 'audio_mp3', ext: 'mp3', formatNote: 'High Quality', filesize: 0 }
+                    ],
+                    // Extra data for downloader
+                    searchQuery: buildYouTubeSearchQuery(track),
+                    rawMetadata: metadata
+                };
+
+                actions.setVideoInfo(syntheticInfo);
+
+            } catch (error: any) {
+                console.error('Spotify Track Error', error);
+                ToastAndroid.show('Failed to fetch Spotify track', ToastAndroid.SHORT);
+            }
+            return;
+        }
+
+        // 2. Check YouTube Playlist
+        if (text.includes('list=') || text.includes('playlist')) {
+            setIsPlaylistLoading(true);
+            setPlaylistModalVisible(true);
+            try {
+                const json = await YtDlpNative.getPlaylistInfo(text);
+                const data = JSON.parse(json);
+                setPlaylistTitle(data.title || 'Playlist');
+                // setPlaylistImage... yt-dlp dump-single-json flat-playlist excludes thumbnails usually to be fast
+
+                const items = (data.entries || []).map((entry: any) => ({
+                    id: entry.id,
+                    title: entry.title,
+                    author: entry.uploader,
+                    duration: entry.duration ? `${Math.floor(entry.duration / 60)}:${(entry.duration % 60).toString().padStart(2, '0')}` : undefined,
+                    url: entry.url || `https://youtu.be/${entry.id}`,
+                    type: 'youtube'
+                }));
+
+                setPlaylistItems(items);
+            } catch (error: any) {
+                console.error('Playlist fetch error:', error);
+                ToastAndroid.show('Failed to fetch playlist info', ToastAndroid.SHORT);
+                setPlaylistModalVisible(false); // Fallback to single?
+                // If playlist fetch fails, maybe try single fetch?
+                actions.fetchInfo(text);
+            } finally {
+                setIsPlaylistLoading(false);
+            }
+            return;
+        }
+
+        // 3. Normal Single Fetch
         try {
             await actions.fetchInfo(text);
         } catch (error: any) {
@@ -129,6 +250,57 @@ export const HomeScreen: React.FC = () => {
         }
     };
 
+    const handleSaveThumbnail = useCallback(async () => {
+        if (!state.videoInfo) return;
+
+        ToastAndroid.show('Saving thumbnail...', ToastAndroid.SHORT);
+        try {
+            await actions.saveThumbnail(state.videoInfo.thumbnail, state.videoInfo.title);
+            ToastAndroid.show('Thumbnail saved to Gallery', ToastAndroid.SHORT);
+        } catch (e: any) {
+            console.error('Thumbnail save error:', e);
+            ToastAndroid.show('Failed to save thumbnail', ToastAndroid.SHORT);
+        }
+    }, [state.videoInfo, actions]);
+
+    const handleCancelDownload = useCallback(async () => {
+        Alert.alert(
+            'Cancel Download',
+            'Are you sure you want to cancel?',
+            [
+                { text: 'No', style: 'cancel' },
+                {
+                    text: 'Yes',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            await actions.cancelDownload();
+                            ToastAndroid.show('Cancelled', ToastAndroid.SHORT);
+                        } catch (error) {
+                            console.warn('Cancel error:', error);
+                        }
+                    },
+                },
+            ],
+        );
+    }, [actions]);
+
+    const handlePaste = useCallback(async () => {
+        try {
+            const text = await actions.getClipboardText();
+            if (text) {
+                setUrl(text);
+                // Optional: Auto-fetch on paste if it looks like a URL
+                if (text.startsWith('http')) {
+                    handleFetch(text);
+                }
+            }
+        } catch (error) {
+            console.warn('Clipboard error:', error);
+            ToastAndroid.show('Failed to paste from clipboard', ToastAndroid.SHORT);
+        }
+    }, [actions, handleFetch]);
+
     // --- Effects ---
 
     useEffect(() => {
@@ -160,7 +332,6 @@ export const HomeScreen: React.FC = () => {
     }, [detectedPlatform]);
 
     // Validate URL and detect platform with error handling
-    // Only auto-detect if user hasn't manually selected a platform
     useEffect(() => {
         const validateAndDetect = async () => {
             if (url.trim().length > 5) {
@@ -174,7 +345,6 @@ export const HomeScreen: React.FC = () => {
                     console.warn('URL validation error:', error);
                 }
             }
-            // Don't reset platform when URL is short - keep user's manual selection
         };
 
         const timer = setTimeout(validateAndDetect, 500);
@@ -217,85 +387,67 @@ export const HomeScreen: React.FC = () => {
         };
     }, [handleFetch, checkShareIntent]);
 
+    const handleBatchDownload = async (selectedItems: any[], mode: 'video' | 'audio') => {
+        setPlaylistModalVisible(false);
+        ToastAndroid.show(`Starting ${selectedItems.length} downloads...`, ToastAndroid.SHORT);
+
+        const formatId = mode === 'audio' ? 'audio_mp3' : null; // null = bestvideo+bestaudio
+
+        // Fire and forget (native module handles queue)
+        selectedItems.forEach(async (item, index) => {
+            try {
+                // Add small delay to prevent freezing UI?
+                setTimeout(async () => {
+                    if (item.type === 'spotify' && item.searchQuery) {
+                        try {
+                            await actions.downloadSpotifyTrack(
+                                item.searchQuery,
+                                item.title,
+                                item.author,
+                                item.thumbnail
+                            );
+                        } catch (e) {
+                            console.error(`Failed to download Spotify track ${item.title}`, e);
+                        }
+                    } else {
+                        await YtDlpNative.download(item.url, formatId, Math.random().toString(36).substring(7));
+                    }
+                }, index * 1000);
+            } catch (e) {
+                console.error(`Failed to start download for ${item.title}`, e);
+            }
+        });
+    };
+
     const handleDownload = useCallback(async (format: VideoFormat | string) => {
         if (!state.videoInfo) return;
 
         ToastAndroid.show('Starting download...', ToastAndroid.SHORT);
 
         try {
-            const formatId = typeof format === 'string' ? format : format.formatId;
-            const result = await actions.download(state.videoInfo.url, formatId);
-
-            if (result) {
-                ToastAndroid.show('Download complete!', ToastAndroid.LONG);
-                Alert.alert(
-                    '✅ Download Complete',
-                    'Your file has been saved! Check the Library tab to play, share, or manage your downloads. Videos and images are also added to your Gallery.',
-                    [{ text: 'Got it!' }],
+            // Check if it's a Spotify track (we'll check platform field or custom field)
+            if (state.videoInfo.platform === 'Spotify' && (state.videoInfo as any).searchQuery) {
+                const info = state.videoInfo as any;
+                await actions.downloadSpotifyTrack(
+                    info.searchQuery,
+                    info.title,
+                    info.uploader, // stored artist here
+                    info.thumbnail
                 );
+            } else {
+                let formatId = typeof format === 'string' ? format : format.formatId;
+                await actions.download(state.videoInfo.url, formatId);
             }
         } catch (error: any) {
             console.error('Download error:', error);
-            ToastAndroid.show(
-                error?.message || 'Download failed',
-                ToastAndroid.LONG
-            );
+            ToastAndroid.show(error?.message || 'Download failed', ToastAndroid.LONG);
         }
     }, [state.videoInfo, actions]);
-
-    const handleSaveThumbnail = useCallback(async () => {
-        if (!state.videoInfo) return;
-
-        ToastAndroid.show('Saving thumbnail...', ToastAndroid.SHORT);
-        try {
-            await actions.saveThumbnail(state.videoInfo.thumbnail, state.videoInfo.title);
-            ToastAndroid.show('Thumbnail saved to Gallery', ToastAndroid.SHORT);
-        } catch (e: any) {
-            console.error('Thumbnail save error:', e);
-            ToastAndroid.show('Failed to save thumbnail', ToastAndroid.SHORT);
-        }
-    }, [state.videoInfo, actions]);
-
-    const handleCancelDownload = useCallback(async () => {
-        Alert.alert(
-            'Cancel Download',
-            'Are you sure you want to cancel?',
-            [
-                { text: 'No', style: 'cancel' },
-                {
-                    text: 'Yes',
-                    style: 'destructive',
-                    onPress: async () => {
-                        try {
-                            await actions.cancelDownload();
-                            ToastAndroid.show('Cancelled', ToastAndroid.SHORT);
-                        } catch (error) {
-                            console.warn('Cancel error:', error);
-                        }
-                    },
-                },
-            ],
-        );
-    }, [actions]);
-
-    const handlePaste = useCallback(async () => {
-        try {
-            const text = await actions.getClipboardText();
-            if (text) {
-                setUrl(text);
-            }
-        } catch (error) {
-            console.warn('Clipboard error:', error);
-            ToastAndroid.show('Failed to paste from clipboard', ToastAndroid.SHORT);
-        }
-    }, [actions]);
-
-
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: currentTheme.background }]} edges={['top']}>
+            <OfflineBanner />
             <StatusBar barStyle="light-content" backgroundColor={currentTheme.background} animated />
-
             <ScrollView
                 style={styles.scrollView}
                 contentContainerStyle={styles.scrollContent}
@@ -313,10 +465,7 @@ export const HomeScreen: React.FC = () => {
                     ]}
                 >
                     <View style={styles.logoContainer}>
-                        <Text style={[styles.logo, { color: platformColor }]}>VibeDownloader</Text>
-                        <View style={[styles.betaBadge, { backgroundColor: `${platformColor}20` }]}>
-                            <Text style={[styles.betaText, { color: platformColor }]}>BETA</Text>
-                        </View>
+                        <Text style={[styles.logo, { color: Colors.primary }]}>VibeDownloader</Text>
                     </View>
                     <Text style={styles.tagline}>
                         Download from any platform, instantly
@@ -335,21 +484,22 @@ export const HomeScreen: React.FC = () => {
 
                 {/* URL Input */}
                 <View style={styles.inputSection}>
-                    <URLInput
-                        value={url}
-                        onChangeText={(text) => {
-                            setUrl(text);
-                            // Reset to default when URL is cleared
-                            if (text.trim().length === 0) {
-                                setUserSelectedPlatform(false);
-                                setDetectedPlatform('youtube'); // Reset to YouTube default
-                            }
-                        }}
-                        onSubmit={() => handleFetch(url)}
-                        isLoading={state.isLoading}
-                        onPaste={handlePaste}
-                        platformColor={platformColor}
-                    />
+                    <View style={styles.inputRow}>
+                        <URLInput
+                            value={url}
+                            onChangeText={(text) => {
+                                setUrl(text);
+                                if (text.trim().length === 0) {
+                                    setUserSelectedPlatform(false);
+                                    setDetectedPlatform('youtube');
+                                }
+                            }}
+                            onSubmit={() => handleFetch(url)}
+                            isLoading={state.isLoading}
+                            onPaste={handlePaste} // Assuming handlePaste is defined
+                            platformColor={platformColor}
+                        />
+                    </View>
                 </View>
 
                 {/* Error Message */}
@@ -383,6 +533,7 @@ export const HomeScreen: React.FC = () => {
                 {/* Video Info & Downloads */}
                 {state.videoInfo && !state.isLoading && !state.isDownloading && (
                     <>
+                        {/* ... Info Card ... */}
                         <View style={styles.videoSection}>
                             <VideoInfoCard
                                 videoInfo={state.videoInfo}
@@ -390,9 +541,26 @@ export const HomeScreen: React.FC = () => {
                             />
                         </View>
 
+                        {/* Quick Action - Platform Auto-Detect */}
+                        <View style={styles.quickActionContainer}>
+                            <TouchableOpacity
+                                style={[styles.quickDownloadBtn, { backgroundColor: platformColor }]}
+                                onPress={() => {
+                                    // Auto-detect: Spotify/SoundCloud = audio, others = video
+                                    const isAudioPlatform = detectedPlatform === 'spotify' || detectedPlatform === 'soundcloud';
+                                    handleDownload(isAudioPlatform ? 'audio_mp3' : 'best');
+                                }}
+                            >
+                                <DownloadIcon size={20} color="#FFF" />
+                                <Text style={styles.quickDownloadText}>
+                                    Download {(detectedPlatform === 'spotify' || detectedPlatform === 'soundcloud') ? 'Audio (MP3)' : 'Best Quality'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+
                         <View style={styles.downloadHeader}>
                             <DownloadIcon size={16} color={Colors.textMuted} />
-                            <Text style={styles.downloadHeaderText}>AVAILABLE FORMATS</Text>
+                            <Text style={styles.downloadHeaderText}>ALL FORMATS</Text>
                         </View>
 
                         <FormatList
@@ -429,6 +597,18 @@ export const HomeScreen: React.FC = () => {
                         </View>
                     </View>
                 )}
+
+                {/* Playlist Modal */}
+                <PlaylistSelectionModal
+                    visible={playlistModalVisible}
+                    onClose={() => setPlaylistModalVisible(false)}
+                    onDownload={handleBatchDownload}
+                    playlistTitle={playlistTitle}
+                    playlistImage={playlistImage}
+                    items={playlistItems}
+                    platformColor={platformColor}
+                    isLoading={isPlaylistLoading}
+                />
 
                 <View style={{ height: 100 }} />
             </ScrollView>
@@ -478,6 +658,28 @@ const styles = StyleSheet.create({
     },
     inputSection: {
         marginTop: Spacing.md,
+        paddingHorizontal: Spacing.md,
+    },
+    inputRow: {
+        marginBottom: Spacing.sm,
+    },
+    quickActionContainer: {
+        marginHorizontal: Spacing.md,
+        marginTop: Spacing.md,
+    },
+    quickDownloadBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: Spacing.md,
+        borderRadius: BorderRadius.lg,
+        gap: Spacing.sm,
+        ...Shadows.md,
+    },
+    quickDownloadText: {
+        color: '#FFF',
+        fontSize: Typography.sizes.base,
+        fontWeight: Typography.weights.bold,
     },
     errorContainer: {
         marginHorizontal: Spacing.md,

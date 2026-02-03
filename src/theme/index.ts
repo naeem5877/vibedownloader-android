@@ -1,16 +1,17 @@
 /**
  * Design System - Premium Advanced Theme
+ * Updated to match the app logo: Purple/Blue gradient with Orange accent
  */
 
 export const Colors = {
-    // Brand - TikTok Inspired Vibrant Palette
-    primary: '#FE2C55', // TikTok Hot Pink/Red
-    primaryLight: '#FF4D79',
-    primaryDark: '#C51035',
-    secondary: '#25F4EE', // TikTok Cyan/Aqua
-    secondaryLight: '#69FFF8',
-    secondaryDark: '#00D6CE',
-    accent: '#FE2C55', // Matching primary
+    // Brand - Logo-Inspired Vibrant Palette
+    primary: '#6366F1', // Vibrant Purple from logo
+    primaryLight: '#818CF8',
+    primaryDark: '#4338CA',
+    secondary: '#3B82F6', // Blue from logo gradient
+    secondaryLight: '#60A5FA',
+    secondaryDark: '#2563EB',
+    accent: '#F97316', // Orange accent from logo
 
     // Background - Deep Pure Blacks
     background: '#010101', // Pure Black
@@ -28,36 +29,36 @@ export const Colors = {
     textPrimary: '#FFFFFF',
     textSecondary: '#EBEBEB',
     textMuted: '#8F8F8F',
-    textAccent: '#25F4EE', // Cyan text for accents
+    textAccent: '#F97316', // Orange text for accents
 
     // Status
     success: '#00E676',
     successLight: '#69F0AE',
-    error: '#FE2C55', // Use brand color for error/delete
-    errorLight: '#FF5C8D',
+    error: '#EF4444', // Red for errors
+    errorLight: '#F87171',
     warning: '#FFEA00',
     warningLight: '#FFFF00',
-    info: '#2979FF',
-    infoLight: '#448AFF',
+    info: '#3B82F6',
+    infoLight: '#60A5FA',
 
     // UI
     border: '#2F2F2F',
     borderLight: '#3D3D3D',
-    borderAccent: 'rgba(37, 244, 238, 0.4)', // Cyan border
+    borderAccent: 'rgba(99, 102, 241, 0.4)', // Purple border
     overlay: 'rgba(0, 0, 0, 0.9)',
     overlayLight: 'rgba(0, 0, 0, 0.7)',
 
-    // Gradients Colors
-    gradientPink: '#FE2C55',
-    gradientPurple: '#7C4DFF',
-    gradientCyan: '#25F4EE',
-    gradientOrange: '#FF6B35',
+    // Gradients Colors (matching logo)
+    gradientPurple: '#6366F1',
+    gradientBlue: '#3B82F6',
+    gradientIndigo: '#4F46E5',
+    gradientOrange: '#F97316',
 
     // Platforms - Dynamic Theming
-    youtube: '#FF0000',
+    youtube: '#FF0000', // RED for YouTube
     instagram: '#E1306C',
     facebook: '#1877F2',
-    tiktok: '#FE2C55',
+    tiktok: '#00F2EA', // CYAN for TikTok
     spotify: '#1DB954',
     x: '#FFFFFF',
     pinterest: '#BD081C',
@@ -71,7 +72,7 @@ export const PlatformThemes: Record<string, {
     gradient: string[]
 }> = {
     YouTube: {
-        primary: '#FF0000',
+        primary: '#FF0000', // Red
         background: '#0A0A0C',
         surface: '#1A1010',
         gradient: ['#FF0000', '#CC0000'],
@@ -89,10 +90,10 @@ export const PlatformThemes: Record<string, {
         gradient: ['#1877F2', '#0C5DC7'],
     },
     TikTok: {
-        primary: Colors.tiktok,
-        background: Colors.background, // #010101
+        primary: '#00F2EA', // Cyan
+        background: Colors.background,
         surface: Colors.surface,
-        gradient: [Colors.secondary, Colors.primary],
+        gradient: ['#00F2EA', '#FF0050'],
     },
     Spotify: {
         primary: '#1DB954',
@@ -122,7 +123,7 @@ export const PlatformThemes: Record<string, {
         primary: Colors.primary,
         background: Colors.background,
         surface: Colors.surface,
-        gradient: [Colors.primary, Colors.secondary],
+        gradient: [Colors.primary, Colors.secondary], // Purple to blue like logo
     }
 };
 

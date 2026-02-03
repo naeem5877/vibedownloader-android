@@ -80,11 +80,13 @@ export interface SharedData {
 export interface YtDlpNativeModule {
     fetchInfo(url: string): Promise<VideoInfo>;
     download(url: string, formatId: string | null, processId: string): Promise<DownloadResult>;
+    downloadSpotifyTrack(searchQuery: string, title: string, artist: string, thumbnail: string | null, processId: string): Promise<DownloadResult>;
     cancelDownload(processId: string): Promise<boolean>;
     updateYtDlp(): Promise<{ status: string }>;
     getSupportedPlatforms(): Promise<string[]>;
     validateUrl(url: string): Promise<ValidationResult>;
     getOutputDirectory(): Promise<string>;
+    getPlaylistInfo(url: string): Promise<string>;
     listDownloadedFiles(): Promise<DownloadedFile[]>;
     deleteFile(filePath: string): Promise<boolean>;
     openFile(filePath: string): Promise<boolean>;

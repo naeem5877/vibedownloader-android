@@ -40,6 +40,8 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         const val TAG = "YtDlpModule"
         const val CHANNEL_ID = "vibe_download_complete"
         const val CHANNEL_NAME = "Download Complete"
+        const val CHANNEL_PROGRESS_ID = "vibe_download_progress"
+        const val CHANNEL_PROGRESS_NAME = "Download Progress"
         
         // Supported platforms
         private val SUPPORTED_DOMAINS = listOf(
@@ -98,8 +100,53 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
             val channel = NotificationChannel(CHANNEL_ID, CHANNEL_NAME, importance).apply {
                 description = "Notifications for completed downloads"
             }
+            // Channel 2: Progress (Low importance to avoid sound spam)
+            val progressImportance = NotificationManager.IMPORTANCE_LOW
+            val progressChannel = NotificationChannel(CHANNEL_PROGRESS_ID, CHANNEL_PROGRESS_NAME, progressImportance).apply {
+                description = "Shows active download progress"
+                setSound(null, null)
+            }
+            
             val notificationManager = reactApplicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
+            notificationManager.createNotificationChannel(progressChannel)
+        }
+    }
+
+    private fun showProgressNotification(processId: String, title: String, progress: Int, line: String) {
+        try {
+            // Generate a unique Int ID based on processId string hash code
+            val notifId = processId.hashCode()
+
+            val builder = NotificationCompat.Builder(reactApplicationContext, CHANNEL_PROGRESS_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentTitle(if (title.length > 25) title.substring(0, 25) + "..." else title)
+                .setContentText(line) // e.g. "55% - 2.5MiB/s"
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setOnlyAlertOnce(true) // Updates won't re-alert
+                .setOngoing(true) // Cannot be swiped away
+                .setProgress(100, progress, progress == 0)
+
+            with(NotificationManagerCompat.from(reactApplicationContext)) {
+                if (androidx.core.content.ContextCompat.checkSelfPermission(
+                        reactApplicationContext,
+                        android.Manifest.permission.POST_NOTIFICATIONS
+                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                ) {
+                    notify(notifId, builder.build())
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to show progress notification: ${e.message}")
+        }
+    }
+
+    private fun cancelNotification(processId: String) {
+        try {
+            val notifId = processId.hashCode()
+            NotificationManagerCompat.from(reactApplicationContext).cancel(notifId)
+        } catch (e: Exception) {
+             Log.w(TAG, "Failed to cancel notification")
         }
     }
     
@@ -492,18 +539,28 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     private fun moveToPublicStorage(sourceFile: File, platform: String, contentType: String): File? {
         val extension = sourceFile.extension.lowercase()
         val isVideo = listOf("mp4", "mkv", "webm").contains(extension)
-        val isAudio = listOf("mp3", "m4a", "wav").contains(extension)
-        val isImage = listOf("jpg", "png", "webp").contains(extension)
+        val isAudio = listOf("mp3", "m4a", "wav", "aac").contains(extension)
+        val isImage = listOf("jpg", "png", "webp", "jpeg").contains(extension)
         
-        val relativePath = "Movies/VibeDownloader/$platform/$contentType"
+        // Use proper directories based on file type for better gallery integration
+        val relativePath = when {
+            isAudio -> "Music/VibeDownloader/$platform"
+            isVideo -> "Movies/VibeDownloader/$platform/$contentType"
+            isImage -> "Pictures/VibeDownloader/$platform"
+            else -> "Download/VibeDownloader/$platform"
+        }
+        
         val mimeType = when(extension) {
             "mp4" -> "video/mp4"
             "mkv" -> "video/x-matroska"
             "webm" -> "video/webm"
             "mp3" -> "audio/mpeg"
             "m4a" -> "audio/mp4"
+            "aac" -> "audio/aac"
+            "wav" -> "audio/wav"
             "jpg", "jpeg" -> "image/jpeg"
             "png" -> "image/png"
+            "webp" -> "image/webp"
             else -> "*/*"
         }
 
@@ -550,10 +607,27 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
             }
         } else {
             // Legacy implementation for Android 9 and below
-            val publicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
-            val targetDir = File(publicDir, "VibeDownloader/$platform/$contentType")
+            val publicDir = when {
+                isAudio -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+                isImage -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                else -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+            }
+            val targetDir = if (isAudio) {
+                File(publicDir, "VibeDownloader/$platform")
+            } else {
+                File(publicDir, "VibeDownloader/$platform/$contentType")
+            }
             if (!targetDir.exists()) targetDir.mkdirs()
-            val targetFile = File(targetDir, sourceFile.name)
+            
+            // Handle naming collisions
+            var targetFile = File(targetDir, sourceFile.name)
+            var count = 1
+            val name = sourceFile.nameWithoutExtension
+            val ext = sourceFile.extension
+            while (targetFile.exists()) {
+                targetFile = File(targetDir, "$name ($count).$ext")
+                count++
+            }
             
             return try {
                 sourceFile.copyTo(targetFile, overwrite = true)
@@ -570,6 +644,24 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to move file (Legacy)", e)
                 null
+            }
+        }
+    }
+
+    @ReactMethod
+    fun getPlaylistInfo(url: String, promise: Promise) {
+        scope.launch {
+            try {
+                if (!isInitialized) initializeYtDlp()
+
+                val request = YoutubeDLRequest(url)
+                request.addOption("--dump-single-json")
+                request.addOption("--flat-playlist")
+                
+                val response = YoutubeDL.getInstance().execute(request)
+                promise.resolve(response.out)
+            } catch (e: Exception) {
+                 promise.reject("PLAYLIST_ERROR", e.message)
             }
         }
     }
@@ -597,11 +689,14 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 Log.d(TAG, "Starting download to cache: ${cacheDir.absolutePath}")
 
                 val request = YoutubeDLRequest(url)
-                request.addOption("-o", "${cacheDir.absolutePath}/%(title).100s.%(ext)s")
+                // Use [id] to ensure uniqueness and avoid accidental overwrites of different videos with same title
+                request.addOption("-o", "${cacheDir.absolutePath}/%(title).100s [%(id)s].%(ext)s")
                 request.addOption("--no-playlist")
                 request.addOption("--restrict-filenames")
                 
                 // --- Codec Compatibility & Format Selection ---
+                val isAudioDownload = formatId?.startsWith("audio") == true || formatId == "audio_best" || formatId == "audio_mp3"
+                
                 if (!formatId.isNullOrEmpty()) {
                      when {
                         formatId == "audio_best" || formatId == "audio_mp3" -> {
@@ -627,6 +722,12 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                             request.addOption("-f", "bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best")
                             request.addOption("--merge-output-format", "mp4")
                         }
+                        "Spotify", "SoundCloud" -> {
+                            // Audio platforms - always extract audio
+                            request.addOption("-x")
+                            request.addOption("--audio-format", "mp3")
+                            request.addOption("--audio-quality", "0")
+                        }
                         else -> {
                             // General: Prefer MP4 container
                             request.addOption("-f", "best[ext=mp4]/best")
@@ -635,24 +736,54 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                     }
                 }
                 
-                // Metadata & Thumbnails
+                // Metadata & Thumbnails - Critical for gallery visibility
                 request.addOption("--embed-metadata")
+                request.addOption("--add-metadata")
                 request.addOption("--embed-thumbnail")
                 request.addOption("--write-thumbnail")
                 request.addOption("--convert-thumbnails", "jpg")
+                
+                // For audio files, use FFmpeg to properly embed cover art
+                if (isAudioDownload || platform == "Spotify" || platform == "SoundCloud") {
+                    // Use atomicparsley or ffmpeg to embed cover art properly for MP3
+                    request.addOption("--ppa", "ffmpeg:-metadata:s:v title=\"Album cover\" -metadata:s:v comment=\"Cover (front)\"")
+                }
+                
+                // Network & compatibility options
                 request.addOption("--force-ipv4")
                 request.addOption("--no-check-certificate")
+                // Skip JS challenges timeout - speeds up downloads
+                request.addOption("--socket-timeout", "30")
                 
                 val response = YoutubeDL.getInstance().execute(request, processId) { progress, eta, line ->
                     if (isCancelled.get()) return@execute
+                    
+                    // Clean up the progress line for user-friendly display
+                    val displayLine = when {
+                        line.isNullOrEmpty() -> "Preparing..."
+                        line.contains("Solving", ignoreCase = true) -> "Preparing download..."
+                        line.contains("Downloading", ignoreCase = true) && progress > 0 -> "${progress.toInt()}% - Downloading..."
+                        line.contains("Merging", ignoreCase = true) -> "Finishing up..."
+                        line.contains("Converting", ignoreCase = true) -> "Converting audio..."
+                        line.contains("Extracting", ignoreCase = true) -> "Extracting audio..."
+                        line.contains("ffmpeg", ignoreCase = true) -> "Processing..."
+                        else -> line.take(50).let { if (it.length < line.length) "$it..." else it }
+                    }
+                    
                     val params = WritableNativeMap().apply {
                         putString("processId", processId)
                         putDouble("progress", progress.toDouble())
                         putDouble("eta", eta.toDouble())
-                        putString("line", line ?: "")
+                        putString("line", displayLine)
                     }
                     sendEvent("onDownloadProgress", params)
+                    
+                    // Show Notification Progress with clean message
+                    showProgressNotification(processId, "Downloading...", progress.toInt(), displayLine)
                 }
+                
+                // Done - cancel progress notification
+                cancelNotification(processId)
                 
                 // Check cancellation
                 activeDownloads.remove(processId)
@@ -729,51 +860,205 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         }
     }
     
+    /**
+     * Download Spotify track by searching on YouTube
+     * This method bypasses Spotify DRM by using YouTube as the audio source
+     * @param searchQuery - YouTube search query (e.g., "Artist - Song Title")
+     * @param title - Track title from Spotify
+     * @param artist - Artist name from Spotify
+     * @param thumbnail - Thumbnail URL from Spotify (for embedding)
+     * @param processId - Unique process ID for tracking
+     */
+    @ReactMethod
+    fun downloadSpotifyTrack(searchQuery: String, title: String, artist: String, thumbnail: String?, processId: String, promise: Promise) {
+        if (!isInitialized) initializeYtDlp()
+        
+        val isCancelled = AtomicBoolean(false)
+        activeDownloads[processId] = isCancelled
+        
+        scope.launch {
+            try {
+                // Use YouTube search instead of direct Spotify URL
+                val ytSearchUrl = "ytsearch1:$searchQuery"
+                
+                // 1. Download to temp cache directory first
+                val cacheDir = File(reactApplicationContext.cacheDir, "temp_download")
+                if (!cacheDir.exists()) cacheDir.mkdirs()
+                
+                Log.d(TAG, "Starting Spotify download via YouTube search: $searchQuery")
+                
+                val request = YoutubeDLRequest(ytSearchUrl)
+                val safeFileName = "$artist - $title".replace(Regex("[^a-zA-Z0-9 \\-_]"), "_").take(100)
+                request.addOption("-o", "${cacheDir.absolutePath}/$safeFileName.%(ext)s")
+                request.addOption("--no-playlist")
+                request.addOption("--restrict-filenames")
+                
+                // Audio download settings
+                request.addOption("-x")
+                request.addOption("--audio-format", "mp3")
+                request.addOption("--audio-quality", "0")
+                
+                // Metadata & Thumbnails
+                request.addOption("--embed-metadata")
+                request.addOption("--add-metadata")
+                
+                // Network options
+                request.addOption("--force-ipv4")
+                request.addOption("--no-check-certificate")
+                request.addOption("--socket-timeout", "30")
+                
+                val response = YoutubeDL.getInstance().execute(request, processId) { progress, eta, line ->
+                    if (isCancelled.get()) return@execute
+                    
+                    val displayLine = when {
+                        line.isNullOrEmpty() -> "Preparing..."
+                        line.contains("Searching", ignoreCase = true) -> "Searching YouTube..."
+                        line.contains("Downloading", ignoreCase = true) && progress > 0 -> "${progress.toInt()}% - Downloading..."
+                        line.contains("Converting", ignoreCase = true) -> "Converting to MP3..."
+                        line.contains("Extracting", ignoreCase = true) -> "Extracting audio..."
+                        line.contains("ffmpeg", ignoreCase = true) -> "Processing..."
+                        else -> line.take(50).let { if (it.length < line.length) "$it..." else it }
+                    }
+                    
+                    val params = WritableNativeMap().apply {
+                        putString("processId", processId)
+                        putDouble("progress", progress.toDouble())
+                        putDouble("eta", eta.toDouble())
+                        putString("line", displayLine)
+                    }
+                    sendEvent("onDownloadProgress", params)
+                    showProgressNotification(processId, "Downloading $title...", progress.toInt(), displayLine)
+                }
+                
+                cancelNotification(processId)
+                activeDownloads.remove(processId)
+                
+                if (isCancelled.get()) {
+                    cacheDir.listFiles()?.forEach { it.delete() }
+                    withContext(Dispatchers.Main) { promise.reject("CANCELLED", "Download was cancelled") }
+                    return@launch
+                }
+                
+                // Find downloaded file
+                val downloadedFile = cacheDir.listFiles()
+                    ?.filter { it.isFile && it.lastModified() > System.currentTimeMillis() - 300000 && it.extension == "mp3" }
+                    ?.maxByOrNull { it.lastModified() }
+                
+                if (downloadedFile != null && downloadedFile.exists()) {
+                    // 1. Move MP3 to public storage
+                    val finalFile = moveToPublicStorage(downloadedFile, "Spotify", "Music")
+                    
+                    if (finalFile != null) {
+                         // 2. Download and Save Thumbnail (Sidecar)
+                         if (!thumbnail.isNullOrEmpty()) {
+                            try {
+                                val thumbFile = File(finalFile.parentFile, "${finalFile.nameWithoutExtension}.jpg")
+                                val thumbUrl = URL(thumbnail)
+                                BufferedInputStream(thumbUrl.openStream()).use { input ->
+                                    FileOutputStream(thumbFile).use { output ->
+                                        val data = ByteArray(1024)
+                                        var count: Int
+                                        while (input.read(data).also { count = it } != -1) {
+                                            output.write(data, 0, count)
+                                        }
+                                    }
+                                }
+                                
+                                // Scan the thumbnail so gallery/music players see it
+                                android.media.MediaScannerConnection.scanFile(
+                                     reactApplicationContext, 
+                                     arrayOf(thumbFile.absolutePath), 
+                                     arrayOf("image/jpeg"), 
+                                     null
+                                )
+                                Log.d(TAG, "Saved sidecar thumbnail: ${thumbFile.absolutePath}")
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to save sidecar thumbnail: ${e.message}")
+                            }
+                         }
+                    
+                        val result = WritableNativeMap().apply {
+                            putString("processId", processId)
+                            putString("outputDir", finalFile.parent)
+                            putString("filePath", finalFile.absolutePath)
+                            putString("fileName", finalFile.name)
+                            putString("platform", "Spotify")
+                        }
+                        
+                        showDownloadNotification("$artist - $title", finalFile.absolutePath, "Spotify")
+                        withContext(Dispatchers.Main) { promise.resolve(result) }
+                    } else {
+                        throw Exception("Failed to move file to public storage")
+                    }
+                } else {
+                    throw Exception("Downloaded file not found")
+                }
+                
+            } catch (e: Exception) {
+                try {
+                    val cacheDir = File(reactApplicationContext.cacheDir, "temp_download")
+                    if (cacheDir.exists()) cacheDir.deleteRecursively()
+                } catch (e2: Exception) {}
+                
+                activeDownloads.remove(processId)
+                withContext(Dispatchers.Main) {
+                    promise.reject("DOWNLOAD_ERROR", e.message ?: "Failed to download from YouTube", e)
+                }
+            }
+        }
+    }
+    
     // ... [Inside listDownloadedFiles method] ...
     
     @ReactMethod
     fun listDownloadedFiles(promise: Promise) {
         scope.launch {
             try {
-                val baseDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
-                val vibeDir = File(baseDir, "VibeDownloader")
                 val thumbDir = File(reactApplicationContext.getExternalFilesDir(null), "thumbnails")
-                
-                if (!vibeDir.exists()) {
-                    withContext(Dispatchers.Main) {
-                        promise.resolve(WritableNativeArray())
-                    }
-                    return@launch
-                }
-                
                 val filesArray = WritableNativeArray()
                 
-                // Recursively find all files in the vibedownloader directory
-                vibeDir.walkTopDown().forEach { file ->
-                    if (file.isFile && !file.isHidden) {
-                        // Extract platform and content type from path
-                        // Path format: vibedownloader/[Platform]/[ContentType]/filename.ext
-                        val relativePath = file.absolutePath.removePrefix(vibeDir.absolutePath + "/")
-                        val pathParts = relativePath.split("/")
-                        
-                        val platform = if (pathParts.size >= 2) pathParts[0] else "Unknown"
-                        val contentType = if (pathParts.size >= 3) pathParts[1] else "Downloads"
-                        
-                        // Check for thumbnail in private dir
-                        val thumbPath = File(thumbDir, "${file.nameWithoutExtension}.jpg")
-                        val thumbnail = if (thumbPath.exists()) "file://${thumbPath.absolutePath}" else null
-                        
-                        val fileMap = WritableNativeMap().apply {
-                            putString("name", file.name)
-                            putString("path", file.absolutePath)
-                            putDouble("size", file.length().toDouble())
-                            putDouble("modified", file.lastModified().toDouble())
-                            putString("platform", platform)
-                            putString("contentType", contentType)
-                            putString("extension", file.extension)
-                            putString("thumbnail", thumbnail)
+                // Scan all VibeDownloader directories (Movies, Music, Pictures)
+                val directories = listOf(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                )
+                
+                for (baseDir in directories) {
+                    val vibeDir = File(baseDir, "VibeDownloader")
+                    if (!vibeDir.exists()) continue
+                    
+                    // Recursively find all files in the vibedownloader directory
+                    vibeDir.walkTopDown().forEach { file ->
+                        if (file.isFile && !file.isHidden) {
+                            // Extract platform and content type from path
+                            // Path format: VibeDownloader/[Platform]/[ContentType]/filename.ext
+                            val relativePath = file.absolutePath.removePrefix(vibeDir.absolutePath + "/")
+                            val pathParts = relativePath.split("/")
+                            
+                            val platform = if (pathParts.size >= 2) pathParts[0] else "Unknown"
+                            val contentType = when {
+                                baseDir.absolutePath.contains("Music") -> "Music"
+                                pathParts.size >= 3 -> pathParts[1]
+                                else -> "Downloads"
+                            }
+                            
+                            // Check for thumbnail in private dir
+                            val thumbPath = File(thumbDir, "${file.nameWithoutExtension}.jpg")
+                            val thumbnail = if (thumbPath.exists()) "file://${thumbPath.absolutePath}" else null
+                            
+                            val fileMap = WritableNativeMap().apply {
+                                putString("name", file.name)
+                                putString("path", file.absolutePath)
+                                putDouble("size", file.length().toDouble())
+                                putDouble("modified", file.lastModified().toDouble())
+                                putString("platform", platform)
+                                putString("contentType", contentType)
+                                putString("extension", file.extension)
+                                putString("thumbnail", thumbnail)
+                            }
+                            filesArray.pushMap(fileMap)
                         }
-                        filesArray.pushMap(fileMap)
                     }
                 }
                 
@@ -850,56 +1135,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         }
     }
 
-    @ReactMethod
-    fun listDownloadedFiles(promise: Promise) {
-        scope.launch {
-            try {
-                val baseDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
-                val vibeDir = File(baseDir, "VibeDownloader")
-                
-                if (!vibeDir.exists()) {
-                    withContext(Dispatchers.Main) {
-                        promise.resolve(WritableNativeArray())
-                    }
-                    return@launch
-                }
-                
-                val filesArray = WritableNativeArray()
-                
-                // Recursively find all files in the vibedownloader directory
-                vibeDir.walkTopDown().forEach { file ->
-                    if (file.isFile) {
-                        // Extract platform and content type from path
-                        // Path format: vibedownloader/[Platform]/[ContentType]/filename.ext
-                        val relativePath = file.absolutePath.removePrefix(vibeDir.absolutePath + "/")
-                        val pathParts = relativePath.split("/")
-                        
-                        val platform = if (pathParts.size >= 2) pathParts[0] else "Unknown"
-                        val contentType = if (pathParts.size >= 3) pathParts[1] else "Downloads"
-                        
-                        val fileMap = WritableNativeMap().apply {
-                            putString("name", file.name)
-                            putString("path", file.absolutePath)
-                            putDouble("size", file.length().toDouble())
-                            putDouble("modified", file.lastModified().toDouble())
-                            putString("platform", platform)
-                            putString("contentType", contentType)
-                            putString("extension", file.extension)
-                        }
-                        filesArray.pushMap(fileMap)
-                    }
-                }
-                
-                withContext(Dispatchers.Main) {
-                    promise.resolve(filesArray)
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    promise.reject("LIST_ERROR", e.message)
-                }
-            }
-        }
-    }
+
     
     @ReactMethod
     fun openFile(filePath: String, promise: Promise) {

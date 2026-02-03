@@ -188,9 +188,9 @@ export async function getAlbumTracks(albumId: string): Promise<SpotifyTrack[]> {
 }
 
 /**
- * Get playlist tracks from Spotify
+ * Get full playlist data from Spotify
  */
-export async function getPlaylistTracks(playlistId: string): Promise<SpotifyTrack[]> {
+export async function getSpotifyPlaylist(playlistId: string): Promise<SpotifyPlaylist> {
     const token = await getAccessToken();
 
     const response = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}`, {
@@ -203,7 +203,33 @@ export async function getPlaylistTracks(playlistId: string): Promise<SpotifyTrac
         throw new Error(`Failed to fetch playlist: ${response.status}`);
     }
 
-    const data: SpotifyPlaylist = await response.json();
+    return response.json();
+}
+
+/**
+ * Get full album data from Spotify
+ */
+export async function getSpotifyAlbum(albumId: string): Promise<SpotifyAlbum & { tracks: { items: SpotifyTrack[] } }> {
+    const token = await getAccessToken();
+
+    const response = await fetch(`https://api.spotify.com/v1/albums/${albumId}`, {
+        headers: {
+            'Authorization': `Bearer ${token}`,
+        },
+    });
+
+    if (!response.ok) {
+        throw new Error(`Failed to fetch album: ${response.status}`);
+    }
+
+    return response.json();
+}
+
+/**
+ * Get playlist tracks from Spotify (helper)
+ */
+export async function getPlaylistTracks(playlistId: string): Promise<SpotifyTrack[]> {
+    const data = await getSpotifyPlaylist(playlistId);
     return data.tracks.items.map(item => item.track).filter(Boolean);
 }
 
@@ -249,6 +275,8 @@ export default {
     getTrackInfo,
     getAlbumTracks,
     getPlaylistTracks,
+    getSpotifyPlaylist,
+    getSpotifyAlbum,
     buildYouTubeSearchQuery,
     getHighQualityThumbnail,
     formatTrackMetadata,

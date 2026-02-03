@@ -4,4 +4,5 @@ export { FormatList } from './FormatList';
 export { PlatformSelector } from './PlatformSelector';
 export { DownloadProgress } from './DownloadProgress';
 export { SkeletonCard } from './SkeletonCard';
+export { OfflineBanner } from './OfflineBanner';
 export * from './Icons';

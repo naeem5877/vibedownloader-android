@@ -23,6 +23,7 @@ interface UseYtDlpState {
 interface UseYtDlpActions {
     fetchInfo: (url: string) => Promise<void>;
     download: (url: string, formatId: string | null) => Promise<DownloadResult | null>;
+    downloadSpotifyTrack: (searchQuery: string, title: string, artist: string, thumbnail: string | null) => Promise<DownloadResult | null>;
     cancelDownload: () => Promise<void>;
     validateUrl: (url: string) => Promise<ValidationResult>;
     reset: () => void;
@@ -30,6 +31,7 @@ interface UseYtDlpActions {
     getSharedData: () => Promise<SharedData | null>;
     getClipboardText: () => Promise<string>;
     saveThumbnail: (url: string, title: string) => Promise<string>;
+    setVideoInfo: (info: VideoInfo) => void;
 }
 
 const initialState: UseYtDlpState = {
@@ -161,6 +163,49 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
         []
     );
 
+    const downloadSpotifyTrack = useCallback(
+        async (searchQuery: string, title: string, artist: string, thumbnail: string | null) => {
+            const processId = generateProcessId();
+            setCurrentProcessId(processId);
+
+            setState((prev) => ({
+                ...prev,
+                isDownloading: true,
+                downloadProgress: 0,
+                downloadEta: 0,
+                downloadError: null,
+            }));
+
+            try {
+                if (!YtDlpNative || !YtDlpNative.downloadSpotifyTrack) {
+                    throw new Error('Native module not available');
+                }
+
+                const result = await YtDlpNative.downloadSpotifyTrack(searchQuery, title, artist, thumbnail, processId);
+                setState((prev) => ({ ...prev, isDownloading: false, downloadProgress: 100 }));
+                return result;
+            } catch (error: any) {
+                if (error.code === 'CANCELLED') {
+                    setState((prev) => ({ ...prev, isDownloading: false }));
+                    return null;
+                }
+
+                const errorMessage = error?.message || 'Download failed. Please try again.';
+                console.error('downloadSpotifyTrack error:', error);
+
+                setState((prev) => ({
+                    ...prev,
+                    isDownloading: false,
+                    downloadError: errorMessage,
+                }));
+                return null;
+            } finally {
+                setCurrentProcessId(null);
+            }
+        },
+        []
+    );
+
     const cancelDownload = useCallback(async () => {
         try {
             if (currentProcessId && YtDlpNative?.cancelDownload) {
@@ -244,18 +289,30 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
         }
     }, []);
 
+    const setVideoInfo = useCallback((info: VideoInfo) => {
+        setState((prev) => ({
+            ...prev,
+            videoInfo: info,
+            isLoading: false,
+            fetchError: null,
+            downloadError: null
+        }));
+    }, []);
+
     return [
         state,
         {
             fetchInfo,
             download,
+            downloadSpotifyTrack,
             cancelDownload,
             validateUrl,
             reset,
             checkSharedText,
             getSharedData,
             getClipboardText,
-            saveThumbnail
+            saveThumbnail,
+            setVideoInfo
         },
     ];
 };

@@ -16,7 +16,7 @@ import {
   Dimensions
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { HomeScreen, LibraryScreen } from './src/screens';
+import { HomeScreen, LibraryScreen, SplashScreen } from './src/screens';
 import { Colors, BorderRadius, Spacing, Typography, Shadows } from './src/theme';
 import { HomeIcon, LibraryIcon, DownloadIcon } from './src/components/Icons';
 
@@ -92,6 +92,7 @@ const TabButton: React.FC<TabButtonProps> = ({ id, label, icon, activeIcon, isAc
 };
 
 function App(): React.JSX.Element {
+  const [showSplash, setShowSplash] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const slideAnim = useRef(new Animated.Value(0)).current;
 
@@ -106,57 +107,63 @@ function App(): React.JSX.Element {
 
   return (
     <SafeAreaProvider>
-      <StatusBar
-        barStyle="light-content"
-        backgroundColor={Colors.background}
-        translucent={false}
-      />
-      <View style={styles.container}>
-        {/* Screen Container */}
-        <View style={styles.screenContainer}>
-          <Animated.View
-            style={[
-              styles.screenWrapper,
-              { transform: [{ translateX: slideAnim }] }
-            ]}
-          >
-            {/* Home Screen */}
-            <View style={styles.screen}>
-              <HomeScreen />
+      {showSplash ? (
+        <SplashScreen onFinish={() => setShowSplash(false)} />
+      ) : (
+        <>
+          <StatusBar
+            barStyle="light-content"
+            backgroundColor={Colors.background}
+            translucent={false}
+          />
+          <View style={styles.container}>
+            {/* Screen Container */}
+            <View style={styles.screenContainer}>
+              <Animated.View
+                style={[
+                  styles.screenWrapper,
+                  { transform: [{ translateX: slideAnim }] }
+                ]}
+              >
+                {/* Home Screen */}
+                <View style={styles.screen}>
+                  <HomeScreen />
+                </View>
+
+                {/* Library Screen */}
+                <View style={styles.screen}>
+                  <LibraryScreen />
+                </View>
+              </Animated.View>
             </View>
 
-            {/* Library Screen */}
-            <View style={styles.screen}>
-              <LibraryScreen />
-            </View>
-          </Animated.View>
-        </View>
+            {/* Bottom Navigation */}
+            <SafeAreaView edges={['bottom']} style={styles.bottomNavSafeArea}>
+              <View style={styles.bottomNav}>
+                <View style={styles.navContent}>
+                  <TabButton
+                    id="home"
+                    label="Download"
+                    icon={<DownloadIcon size={24} color={Colors.textMuted} />}
+                    activeIcon={<DownloadIcon size={24} color={Colors.primary} />}
+                    isActive={activeTab === 'home'}
+                    onPress={() => setActiveTab('home')}
+                  />
 
-        {/* Bottom Navigation */}
-        <SafeAreaView edges={['bottom']} style={styles.bottomNavSafeArea}>
-          <View style={styles.bottomNav}>
-            <View style={styles.navContent}>
-              <TabButton
-                id="home"
-                label="Download"
-                icon={<DownloadIcon size={24} color={Colors.textMuted} />}
-                activeIcon={<DownloadIcon size={22} color={Colors.textPrimary} />}
-                isActive={activeTab === 'home'}
-                onPress={() => setActiveTab('home')}
-              />
-
-              <TabButton
-                id="library"
-                label="Library"
-                icon={<LibraryIcon size={24} color={Colors.textMuted} />}
-                activeIcon={<LibraryIcon size={22} color={Colors.textPrimary} />}
-                isActive={activeTab === 'library'}
-                onPress={() => setActiveTab('library')}
-              />
-            </View>
+                  <TabButton
+                    id="library"
+                    label="Library"
+                    icon={<LibraryIcon size={24} color={Colors.textMuted} />}
+                    activeIcon={<LibraryIcon size={24} color={Colors.primary} />}
+                    isActive={activeTab === 'library'}
+                    onPress={() => setActiveTab('library')}
+                  />
+                </View>
+              </View>
+            </SafeAreaView>
           </View>
-        </SafeAreaView>
-      </View>
+        </>
+      )}
     </SafeAreaProvider>
   );
 }
@@ -181,35 +188,41 @@ const styles = StyleSheet.create({
   },
   bottomNavSafeArea: {
     backgroundColor: Colors.surface,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -5 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 20,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
   },
   bottomNav: {
     backgroundColor: Colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.sm,
-    ...Shadows.lg,
+    height: 75,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   navContent: {
+    flex: 1,
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-evenly',
     alignItems: 'center',
-    paddingHorizontal: Spacing.xl,
   },
   tabButton: {
     alignItems: 'center',
     justifyContent: 'center',
+    flex: 1,
     paddingVertical: Spacing.xs,
-    paddingHorizontal: Spacing.lg,
-    minWidth: 80,
   },
   tabIconContainer: {
-    marginBottom: Spacing.xs,
+    marginBottom: 2,
   },
   activeIconBg: {
-    backgroundColor: Colors.primary,
-    borderRadius: BorderRadius.round,
-    padding: Spacing.sm,
+    backgroundColor: `${Colors.primary}20`,
+    borderRadius: 18, // Squircle shape
+    padding: 12,
   },
   tabLabel: {
     fontSize: Typography.sizes.xs,

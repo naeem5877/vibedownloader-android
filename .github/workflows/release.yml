@@ -1,0 +1,54 @@
+name: Release Android
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Grant Execute Permission to Gradlew
+        run: cd android && chmod +x gradlew
+
+      - name: Build Android Release APK
+        run: |
+          cd android
+          ./gradlew assembleRelease --no-daemon
+
+      - name: List Build Outputs
+        run: ls -R android/app/build/outputs/apk/
+
+      - name: Rename APK
+        run: |
+          # The universal APK is usually named app-universal-release.apk
+          mv android/app/build/outputs/apk/release/app-universal-release.apk VibeDownloader-Android.apk
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: VibeDownloader-Android.apk
+          token: ${{ secrets.GITHUB_TOKEN }}
+          generate_release_notes: true

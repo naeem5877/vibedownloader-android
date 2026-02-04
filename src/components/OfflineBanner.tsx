@@ -1,25 +1,43 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
-import NetInfo from '@react-native-community/netinfo';
 import { Colors, Spacing, Typography, Shadows, BorderRadius } from '../theme';
+
+// Safe Import for NetInfo to prevent crashes if package is missing
+let NetInfo: any;
+try {
+    // Try to require the module
+    NetInfo = require('@react-native-community/netinfo');
+    // Handle ES Module default export if necessary
+    if (NetInfo && NetInfo.default) {
+        NetInfo = NetInfo.default;
+    }
+} catch (e) {
+    console.warn('NetInfo package not installed. Offline detection disabled.');
+    NetInfo = null;
+}
 
 export const OfflineBanner = () => {
     const [isConnected, setIsConnected] = useState<boolean | null>(true);
     const slideAnim = useRef(new Animated.Value(-100)).current;
 
     useEffect(() => {
-        const unsubscribe = NetInfo.addEventListener(state => {
+        // If NetInfo is missing, assume always online and do nothing
+        if (!NetInfo) return;
+
+        const unsubscribe = NetInfo.addEventListener((state: any) => {
             const online = state.isConnected;
             setIsConnected(online);
 
             Animated.spring(slideAnim, {
-                toValue: online === false ? 0 : -100, // Show (0) if offline, Hide (-100) if online
+                toValue: online === false ? 0 : -100,
                 friction: 8,
                 useNativeDriver: true,
             }).start();
         });
 
-        return () => unsubscribe();
+        return () => {
+            if (unsubscribe) unsubscribe();
+        };
     }, []);
 
     return (

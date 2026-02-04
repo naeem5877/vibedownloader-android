@@ -81,6 +81,107 @@ const StorageInfoCard: React.FC<{ basePath: string; onPress: () => void }> = ({ 
     );
 };
 
+// Platform Storage Usage Card - Shows storage per platform like YouTube, Instagram etc.
+interface PlatformStorageUsage {
+    platform: string;
+    size: number;
+    color: string;
+}
+
+// Individual storage item component for proper hooks usage
+const PlatformStorageItem: React.FC<{
+    platform: PlatformStorageUsage;
+    maxSize: number;
+    index: number;
+}> = ({ platform, maxSize, index }) => {
+    const percentage = (platform.size / maxSize) * 100;
+    const widthAnim = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        Animated.timing(widthAnim, {
+            toValue: percentage,
+            duration: 800,
+            delay: index * 100,
+            useNativeDriver: false,
+        }).start();
+    }, [percentage, index]);
+
+    return (
+        <View style={styles.platformStorageItem}>
+            <View style={styles.platformStorageItemHeader}>
+                <View style={styles.platformStorageItemLeft}>
+                    <View style={[styles.platformDot, { backgroundColor: platform.color }]} />
+                    <Text style={styles.platformStorageItemName}>{platform.platform}</Text>
+                </View>
+                <Text style={styles.platformStorageItemSize}>
+                    {formatFileSize(platform.size)}
+                </Text>
+            </View>
+            <View style={styles.platformStorageBar}>
+                <Animated.View
+                    style={[
+                        styles.platformStorageBarFill,
+                        {
+                            backgroundColor: platform.color,
+                            width: widthAnim.interpolate({
+                                inputRange: [0, 100],
+                                outputRange: ['0%', '100%']
+                            })
+                        }
+                    ]}
+                />
+            </View>
+        </View>
+    );
+};
+
+const PlatformStorageUsageCard: React.FC<{ folders: PlatformFolder[] }> = ({ folders }) => {
+    const totalSize = folders.reduce((sum, f) => sum + f.totalSize, 0);
+
+    if (totalSize === 0) return null;
+
+    // Sort by size descending
+    const sortedPlatforms: PlatformStorageUsage[] = folders
+        .map(f => ({
+            platform: f.platform,
+            size: f.totalSize,
+            color: getPlatformColor(f.platform)
+        }))
+        .sort((a, b) => b.size - a.size);
+
+    const maxSize = sortedPlatforms[0]?.size || 1;
+
+    return (
+        <View style={styles.platformStorageCard}>
+            <View style={styles.platformStorageHeader}>
+                <View style={styles.platformStorageHeaderLeft}>
+                    <FolderIcon size={20} color={Colors.primary} />
+                    <Text style={styles.platformStorageTitle}>Storage by Platform</Text>
+                </View>
+                <Text style={styles.platformStorageTotal}>{formatFileSize(totalSize)}</Text>
+            </View>
+
+            <View style={styles.platformStorageList}>
+                {sortedPlatforms.slice(0, 5).map((platform, index) => (
+                    <PlatformStorageItem
+                        key={platform.platform}
+                        platform={platform}
+                        maxSize={maxSize}
+                        index={index}
+                    />
+                ))}
+            </View>
+
+            {sortedPlatforms.length > 5 && (
+                <Text style={styles.platformStorageMore}>
+                    +{sortedPlatforms.length - 5} more platforms
+                </Text>
+            )}
+        </View>
+    );
+};
+
+
 // Platform Folder Card Component
 const PlatformFolderCard: React.FC<{
     folder: PlatformFolder;
@@ -612,6 +713,9 @@ export const LibraryScreen: React.FC = () => {
                             onPress={() => setShowStorageInfo(true)}
                         />
 
+                        {/* Platform Storage Usage Card */}
+                        <PlatformStorageUsageCard folders={folders} />
+
                         {/* Empty State */}
                         {isEmpty && (
                             <View style={styles.emptyState}>
@@ -728,6 +832,83 @@ const styles = StyleSheet.create({
     },
     storageAction: {
         padding: Spacing.sm,
+    },
+    // Platform Storage Usage Card
+    platformStorageCard: {
+        backgroundColor: Colors.surface,
+        borderRadius: BorderRadius.lg,
+        padding: Spacing.md,
+        marginBottom: Spacing.lg,
+        borderWidth: 1,
+        borderColor: Colors.border,
+    },
+    platformStorageHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: Spacing.md,
+    },
+    platformStorageHeaderLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+    },
+    platformStorageTitle: {
+        fontSize: Typography.sizes.base,
+        fontWeight: Typography.weights.semibold,
+        color: Colors.textPrimary,
+    },
+    platformStorageTotal: {
+        fontSize: Typography.sizes.sm,
+        fontWeight: Typography.weights.bold,
+        color: Colors.primary,
+    },
+    platformStorageList: {
+        gap: Spacing.md,
+    },
+    platformStorageItem: {
+        gap: 6,
+    },
+    platformStorageItemHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    platformStorageItemLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+    },
+    platformDot: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+    },
+    platformStorageItemName: {
+        fontSize: Typography.sizes.sm,
+        color: Colors.textSecondary,
+        fontWeight: Typography.weights.medium,
+    },
+    platformStorageItemSize: {
+        fontSize: Typography.sizes.xs,
+        color: Colors.textMuted,
+        fontWeight: Typography.weights.medium,
+    },
+    platformStorageBar: {
+        height: 6,
+        backgroundColor: Colors.border,
+        borderRadius: 3,
+        overflow: 'hidden',
+    },
+    platformStorageBarFill: {
+        height: '100%',
+        borderRadius: 3,
+    },
+    platformStorageMore: {
+        fontSize: Typography.sizes.xs,
+        color: Colors.textMuted,
+        textAlign: 'center',
+        marginTop: Spacing.md,
     },
     // Folder Card
     folderCard: {

@@ -18,6 +18,7 @@ import {
     Easing,
     TouchableOpacity,
     AppStateStatus,
+    Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, BorderRadius, Spacing, Typography, PlatformThemes, getPlatformColor, Shadows } from '../theme';
@@ -34,7 +35,8 @@ import { PlaylistSelectionModal } from '../components/PlaylistSelectionModal';
 import { SkeletonCard } from '../components/SkeletonCard';
 import { useYtDlp } from '../hooks/useYtDlp';
 import { VideoFormat, ytDlpEventEmitter, YtDlpNative } from '../native/YtDlpModule';
-import { DownloadIcon, SparkleIcon } from '../components/Icons';
+import { DownloadIcon, SparkleIcon, ShareIcon, GitHubIcon, DesktopIcon, StarIcon } from '../components/Icons';
+import { checkForUpdates } from '../services/GitHubUpdateService';
 import { getSpotifyPlaylist, extractSpotifyId, getTrackInfo, buildYouTubeSearchQuery, formatTrackMetadata } from '../services/SpotifyService';
 
 export const HomeScreen: React.FC = () => {
@@ -317,6 +319,9 @@ export const HomeScreen: React.FC = () => {
                 useNativeDriver: true,
             }),
         ]).start();
+
+        // Check for updates on mount
+        setTimeout(() => checkForUpdates(true), 1500);
     }, []);
 
     // Dynamic Theme State
@@ -458,18 +463,41 @@ export const HomeScreen: React.FC = () => {
                 <Animated.View
                     style={[
                         styles.header,
-                        {
-                            opacity: headerFadeAnim,
-                            transform: [{ translateY: headerSlideAnim }],
-                        }
+                        { opacity: headerFadeAnim, transform: [{ translateY: headerSlideAnim }] }
                     ]}
                 >
-                    <View style={styles.logoContainer}>
-                        <Text style={[styles.logo, { color: Colors.primary }]}>VibeDownloader</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                        <View>
+                            <View style={styles.logoContainer}>
+                                <Text style={[styles.logo, { color: Colors.primary }]}>VibeDownloader</Text>
+                            </View>
+                            <Text style={styles.tagline}>
+                                Download from any platform, instantly
+                            </Text>
+                        </View>
+
+                        {/* Header Actions */}
+                        <View style={{ flexDirection: 'row', gap: 12 }}>
+                            <TouchableOpacity
+                                onPress={() => Share.share({ message: 'Check out VibeDownloader - The ultimate media downloader for Android! https://github.com/naeem5877/vibedownloader-android' })}
+                                style={{ padding: 4 }}
+                            >
+                                <ShareIcon size={22} color={Colors.textSecondary} />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                onPress={() => Linking.openURL('https://github.com/naeem5877/vibedownloader-android')}
+                                style={{ padding: 4 }}
+                            >
+                                <StarIcon size={22} color="#FFD700" />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                onPress={() => Linking.openURL('https://github.com/naeem5877/VibeDownloader')}
+                                style={{ padding: 4 }}
+                            >
+                                <DesktopIcon size={22} color={Colors.textSecondary} />
+                            </TouchableOpacity>
+                        </View>
                     </View>
-                    <Text style={styles.tagline}>
-                        Download from any platform, instantly
-                    </Text>
                 </Animated.View>
 
                 {/* Platform Selector */}

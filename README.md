@@ -1,245 +1,201 @@
-# VibeDownloader Mobile
+<div align="center">
+  <img src="transparent_logo.png" alt="VibeDownloader Logo" width="140" height="auto" />
+  <br />
+  <br />
 
-A React Native Android app for downloading media from multiple platforms using yt-dlp.
+  <h1>VibeDownloader Mobile</h1>
+  
+  <p>
+    <strong>The premium open-source video downloader for Android.</strong>
+  </p>
+  
+  <p>
+    Download videos, audio, and playlists from YouTube, Instagram, Tiktok, Spotify, and more — directly to your device, ad-free, and privacy-first.
+  </p>
 
-## Features (V1)
+  <p>
+    <a href="https://github.com/naeem5877/vibedownloader-android">
+      <img src="https://img.shields.io/badge/Get_it_on-GitHub-181717?style=for-the-badge&logo=github" alt="Get it on GitHub" />
+    </a>
+    <a href="https://github.com/naeem5877/vibedownloader-desktop">
+      <img src="https://img.shields.io/badge/Desktop_Version-Available-blue?style=for-the-badge&logo=windows" alt="Desktop Version" />
+    </a>
+  </p>
 
-- ✅ URL input with clipboard paste support
-- ✅ Platform validation (8 supported platforms)
-- ✅ Fetch metadata using yt-dlp JSON mode
-- ✅ Display video info with thumbnail, duration, quality
-- ✅ Download best available format
-- ✅ Real-time progress events
-- ✅ Cancel download support
-- ✅ Scoped storage (Android 10+)
+  <p>
+    <a href="https://github.com/naeem5877/vibedownloader-android/releases/latest">
+      <img src="https://img.shields.io/github/v/release/naeem5877/vibedownloader-android?style=for-the-badge" alt="Latest Release" />
+    </a>
+    <a href="https://github.com/naeem5877/vibedownloader-android/releases">
+      <img src="https://img.shields.io/github/downloads/naeem5877/vibedownloader-android/total?style=for-the-badge&color=orange" alt="Total Downloads" />
+    </a>
+  </p>
+</div>
 
-## Supported Platforms
+<br />
 
-| Platform | Status |
-|----------|--------|
-| YouTube | ✅ |
-| Instagram | ✅ |
-| Facebook | ✅ |
-| TikTok | ✅ |
-| Spotify | ✅ |
-| X (Twitter) | ✅ |
-| Pinterest | ✅ |
-| SoundCloud | ✅ |
+---
 
-## Project Structure
+## 🌟 Why VibeDownloader?
 
-```
-VibeDownloaderMobile/
-├── android/
-│   └── app/
-│       └── src/main/java/com/vibedownloadermobile/
-│           ├── MainActivity.kt
-│           ├── MainApplication.kt
-│           └── ytdlp/
-│               ├── YtDlpModule.kt      # Native module (yt-dlp logic)
-│               └── YtDlpPackage.kt     # React Native package registration
-├── src/
-│   ├── components/
-│   │   ├── Icons.tsx                   # Platform & UI icons
-│   │   ├── PlatformSelector.tsx        # Platform icon selector
-│   │   ├── URLInput.tsx                # URL input with paste
-│   │   ├── VideoInfoCard.tsx           # Video metadata display
-│   │   ├── FormatList.tsx              # Quality selection list
-│   │   └── DownloadProgress.tsx        # Progress indicator
-│   ├── hooks/
-│   │   └── useYtDlp.ts                 # React hook for yt-dlp
-│   ├── native/
-│   │   └── YtDlpModule.ts              # TypeScript bridge
-│   ├── screens/
-│   │   └── HomeScreen.tsx              # Main screen
-│   └── theme/
-│       └── index.ts                    # Design system
-├── App.tsx                             # App entry point
-└── package.json
-```
+VibeDownloader Mobile is built for users who want **native performance, zero ads, and total control**.
 
-## Native Module API
+Unlike web-based downloaders cluttered with ads and trackers, VibeDownloader runs **entirely on your device**, powered by the robust `yt-dlp` engine under the hood.
 
-### YtDlpModule (Kotlin → React Native)
+<div align="center">
 
-```typescript
-// Fetch video metadata
-const info = await YtDlpNative.fetchInfo(url);
+### 🚫 No Ads • 🔒 No Tracking • ✨ Native Experience
 
-// Download with progress
-const result = await YtDlpNative.download(url, formatId, processId);
+</div>
 
-// Cancel download
-await YtDlpNative.cancelDownload(processId);
+---
 
-// Validate URL
-const { valid, platform } = await YtDlpNative.validateUrl(url);
+## ✨ Key Features
 
-// Update yt-dlp binary
-await YtDlpNative.updateYtDlp();
+<table>
+<tr>
+<td width="50%">
 
-// List downloaded files
-const files = await YtDlpNative.listDownloadedFiles();
+### 🎥 Multi-Platform Support
+Download from YouTube, Instagram (Reels, Stories), TikTok (No Watermark), Facebook, X (Twitter), Pinterest, and SoundCloud.
 
-// Delete file
-await YtDlpNative.deleteFile(filePath);
-```
+### 🎵 Spotify & Music
+Download tracks, albums, and playlists from Spotify with auto-tagged metadata and cover art.
 
-### Progress Events
+### 🔄 Smart Link Detection
+**Share to Download:** Share any link directly from YouTube, Instagram, or Spotify to VibeDownloader for instant processing.
 
-```typescript
-import { onDownloadProgress } from './src/native/YtDlpModule';
+### ⚡ Fast & Efficient
+Multi-threaded downloads for maximum speed with background processing support.
 
-const unsubscribe = onDownloadProgress((progress) => {
-  console.log(`${progress.progress}% - ETA: ${progress.eta}s`);
-});
+</td>
+<td width="50%">
 
-// Later: unsubscribe();
-```
+### 💎 Premium Design
+A sleek, modern dark mode interface with smooth animations and fluid transitions.
 
-## Installation
+### 🔐 Privacy-First
+Runs locally with no server-side processing. Your data stays on your phone.
 
-### Prerequisites
+### 📦 Smart Library
+Built-in file manager to view, play, and share media. Organized folders by platform (e.g., `Instagram/Reels`).
 
-- Node.js 20+
-- Java 17+
-- Android SDK (API 24+)
-- Android NDK
+### 🖼️ Gallery Integration
+Videos and photos are automatically saved to your system Gallery. Music goes straight to your audio library.
 
-### Setup
+</td>
+</tr>
+</table>
+
+---
+
+## 💻 Also Available on Desktop
+
+Need to download 4K videos on your PC? Check out VibeDownloader Desktop for **Windows, macOS, and Linux**.
+
+<div align="center">
+  <a href="https://github.com/naeem5877/vibedownloader-desktop">
+    <img src="https://img.shields.io/badge/View_Desktop_Repository-2ea44f?style=for-the-badge&logo=github" alt="Desktop Repo" />
+  </a>
+</div>
+
+---
+
+## 📥 Download & Installation
+
+<div align="center">
+
+### 🤖 Android
+
+</div>
+
+1. Download the latest `.apk` file from the [**Releases page**](https://github.com/naeem5877/vibedownloader-android/releases/latest).
+2. Open the downloaded file.
+3. If prompted, allow installation from **Unknown Sources** (this is safe, the app is open source!).
+4. Click **Install**.
+
+> **Note:** Since this app downloads from YouTube, it cannot be published on the Google Play Store due to their policies.
+
+---
+
+## 🛠️ For Developers
+
+Built with **React Native** and **TypeScript**.
+
+### Setup Development Environment
 
 ```bash
+# Clone the repository
+git clone https://github.com/naeem5877/vibedownloader-android.git
+cd vibedownloader-android
+
 # Install dependencies
 npm install
 
-# Start Metro bundler
-npm start
-
-# Build debug APK
+# Run on Android
 npm run android
-
-# Or build directly
-cd android && ./gradlew assembleDebug
 ```
 
-### Build Release APK
+### Tech Stack
 
-```bash
-cd android && ./gradlew assembleRelease
-```
-
-APKs will be in `android/app/build/outputs/apk/`
-
-## Android Permissions
-
-The app requests these permissions:
-
-```xml
-<!-- Network -->
-<uses-permission android:name="android.permission.INTERNET" />
-
-<!-- Storage (Android 12 and below) -->
-<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-
-<!-- Android 13+ Media Permissions -->
-<uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-<uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-
-<!-- Foreground Service -->
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-
-<!-- Notifications (Android 13+) -->
-<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-```
-
-## Storage Location
-
-Files are saved to scoped storage:
-```
-/Android/data/com.vibedownloadermobile/files/Movies/
-```
-
-This location is accessible without special permissions and survives app updates.
+- **Framework:** React Native (0.73+)
+- **Language:** TypeScript
+- **Engine:** yt-dlp (Python via Chaquopy)
+- **UI:** Custom Native Components
 
 ---
 
-## ⚠️ Play Store Risks & Legal Considerations
+## 🤝 Contributing
 
-### Distribution Warnings
+Contributions are welcome!
 
-1. **Google Play Store Ban**: Apps that download content from YouTube and similar platforms typically violate Google Play's policies. This app is **NOT suitable for Google Play distribution**.
+1. **Fork** the repository
+2. Create a **feature branch** (`git checkout -b feature/amazing-feature`)
+3. **Commit** your changes (`git commit -m 'Add some amazing feature'`)
+4. **Push** to the branch (`git push origin feature/amazing-feature`)
+5. Open a **Pull Request**
 
-2. **Alternative Distribution**:
-   - APK sideloading
-   - F-Droid (if open source)
-   - GitHub Releases
-   - Your own website
-
-### Legal Considerations
-
-1. **Copyright**: Downloading copyrighted content may be illegal in your jurisdiction.
-
-2. **Terms of Service**: Downloading from YouTube, Instagram, etc. may violate their Terms of Service.
-
-3. **Fair Use**: The app is intended for downloading content you have rights to (your own uploads, Creative Commons, etc.).
-
-4. **User Responsibility**: Users are responsible for ensuring they have the right to download content.
-
-### youtubedl-android License
-
-The [youtubedl-android](https://github.com/yausername/youtubedl-android) library is under the **GPL-3.0 license**. If you distribute this app:
-- You must also release your source code under GPL-3.0
-- You must include the license text
-- You must provide access to the source code
-
-### Disclaimer
-
-This software is provided for educational purposes. The developers are not responsible for:
-- How users choose to use the app
-- Any copyright infringement by users
-- Any violation of platform Terms of Service
-- Any legal consequences of using this app
+Please follow our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ---
 
-## Development Notes
+## 📄 License & Brand Usage
 
-### Adding New Platforms
+### Code License
 
-1. Add domain patterns in `YtDlpModule.kt`:
-   ```kotlin
-   private val SUPPORTED_DOMAINS = listOf(
-       // Add new domain here
-       "newplatform.com",
-   )
-   ```
+This project is licensed under the **GNU GPL v3.0**.
 
-2. Add platform color in `src/theme/index.ts`
-3. Add icon in `src/components/Icons.tsx`
-4. Update `SUPPORTED_PLATFORMS` array
+You are free to:
+- ✅ View the source code
+- ✅ Modify the code
+- ✅ Distribute modified versions
 
-### Debugging Native Module
+**Under the condition that:**
+- 📋 You disclose the source code
+- 📋 State all changes made
+- 📋 Use the same GPL v3.0 license
 
-```bash
-# View Android logs
-adb logcat | grep -E "(YtDlpModule|ReactNativeJS)"
-```
+See the [LICENSE](LICENSE) file for full details.
 
-### Common Issues
+### Brand Notice
 
-1. **"YtDlpModule not found"**: Ensure the package is registered in `MainApplication.kt`
+⚠️ **The VibeDownloader name, logo, and branding are reserved.**
 
-2. **Download fails immediately**: Check internet permission and network connectivity
+If you create a fork or modified version:
+- ❌ Must **NOT** use the "VibeDownloader" name
+- ❌ Must **NOT** use the official logo
+- ❌ Must **NOT** present itself as an official build
 
-3. **Progress not updating**: Verify event listener is subscribed before starting download
+**Why?** This helps users distinguish official releases from community forks and ensures trust in the brand.
 
-## Tech Stack
+---
 
-- **React Native** 0.83.1
-- **Kotlin** 2.1.20
-- **youtubedl-android** 0.18.1 (includes yt-dlp + Python)
-- **FFmpeg** (bundled with youtubedl-android)
+<div align="center">
+  
+### Made with ❤️ by [Naeem](https://github.com/naeem5877)
 
-## License
+**If you find this project useful, consider giving it a ⭐**
 
-This project is licensed under GPL-3.0 to comply with youtubedl-android's license.
+<sub>© 2026 VibeDownloader.</sub>
+
+</div>

@@ -16,9 +16,21 @@ import {
   Dimensions
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { HomeScreen, LibraryScreen, SplashScreen } from './src/screens';
+import { HomeScreen, LibraryScreen, SplashScreen, OnboardingScreen } from './src/screens';
 import { Colors, BorderRadius, Spacing, Typography, Shadows } from './src/theme';
 import { HomeIcon, LibraryIcon, DownloadIcon } from './src/components/Icons';
+
+// Safe Storage Wrapper
+let AppStorage = {
+  getItem: async (key: string) => null,
+  setItem: async (key: string, value: string) => { },
+};
+try {
+  const AS = require('@react-native-async-storage/async-storage').default;
+  if (AS) AppStorage = AS;
+} catch (e) {
+  console.warn('AsyncStorage not found, persistence disabled');
+}
 
 const { width } = Dimensions.get('window');
 
@@ -92,10 +104,28 @@ const TabButton: React.FC<TabButtonProps> = ({ id, label, icon, activeIcon, isAc
 };
 
 function App(): React.JSX.Element {
-  const [showSplash, setShowSplash] = useState(true);
+  const [appState, setAppState] = useState<'splash' | 'onboarding' | 'main'>('splash');
   const [activeTab, setActiveTab] = useState<TabType>('home');
+  const [isFirstLaunch, setIsFirstLaunch] = useState<boolean | null>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
+  const storageChecked = useRef(false);
 
+  // Check storage on mount - only once
+  useEffect(() => {
+    if (!storageChecked.current) {
+      storageChecked.current = true;
+      AppStorage.getItem('hasLaunched')
+        .then((value: string | null) => {
+          setIsFirstLaunch(value === null);
+        })
+        .catch(() => {
+          // If storage fails, assume not first launch to avoid annoying users
+          setIsFirstLaunch(false);
+        });
+    }
+  }, []);
+
+  // Tab animation
   useEffect(() => {
     Animated.spring(slideAnim, {
       toValue: activeTab === 'home' ? 0 : -width,
@@ -105,65 +135,92 @@ function App(): React.JSX.Element {
     }).start();
   }, [activeTab]);
 
+  const handleSplashFinish = () => {
+    // If storage hasn't been checked yet, wait a bit more
+    if (isFirstLaunch === null) {
+      // Retry after a short delay
+      const retryTimer = setInterval(() => {
+        if (isFirstLaunch !== null) {
+          clearInterval(retryTimer);
+          setAppState(isFirstLaunch ? 'onboarding' : 'main');
+        }
+      }, 100);
+      // Fallback after 2 seconds
+      setTimeout(() => {
+        clearInterval(retryTimer);
+        if (isFirstLaunch === null) {
+          setAppState('main'); // Default to main if storage check fails
+        }
+      }, 2000);
+      return;
+    }
+    setAppState(isFirstLaunch ? 'onboarding' : 'main');
+  };
+
+  const handleOnboardingDone = async () => {
+    try {
+      await AppStorage.setItem('hasLaunched', 'true');
+    } catch (e) {
+      console.warn('Failed to save launch state:', e);
+    }
+    setIsFirstLaunch(false);
+    setAppState('main');
+  };
+
   return (
     <SafeAreaProvider>
-      {showSplash ? (
-        <SplashScreen onFinish={() => setShowSplash(false)} />
-      ) : (
-        <>
-          <StatusBar
-            barStyle="light-content"
-            backgroundColor={Colors.background}
-            translucent={false}
-          />
-          <View style={styles.container}>
-            {/* Screen Container */}
-            <View style={styles.screenContainer}>
-              <Animated.View
-                style={[
-                  styles.screenWrapper,
-                  { transform: [{ translateX: slideAnim }] }
-                ]}
-              >
-                {/* Home Screen */}
-                <View style={styles.screen}>
-                  <HomeScreen />
-                </View>
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor={Colors.background}
+        translucent={false}
+      />
 
-                {/* Library Screen */}
-                <View style={styles.screen}>
-                  <LibraryScreen />
-                </View>
-              </Animated.View>
+      {appState === 'splash' && <SplashScreen onFinish={handleSplashFinish} />}
+
+      {appState === 'onboarding' && <OnboardingScreen onDone={handleOnboardingDone} />}
+
+      <View style={[styles.container, { display: appState === 'main' ? 'flex' : 'none' }]}>
+        <View style={styles.screenContainer}>
+          <Animated.View
+            style={[
+              styles.screenWrapper,
+              { transform: [{ translateX: slideAnim }] }
+            ]}
+          >
+            <View style={styles.screen}>
+              <HomeScreen />
             </View>
 
-            {/* Bottom Navigation */}
-            <SafeAreaView edges={['bottom']} style={styles.bottomNavSafeArea}>
-              <View style={styles.bottomNav}>
-                <View style={styles.navContent}>
-                  <TabButton
-                    id="home"
-                    label="Download"
-                    icon={<DownloadIcon size={24} color={Colors.textMuted} />}
-                    activeIcon={<DownloadIcon size={24} color={Colors.primary} />}
-                    isActive={activeTab === 'home'}
-                    onPress={() => setActiveTab('home')}
-                  />
+            <View style={styles.screen}>
+              <LibraryScreen />
+            </View>
+          </Animated.View>
+        </View>
 
-                  <TabButton
-                    id="library"
-                    label="Library"
-                    icon={<LibraryIcon size={24} color={Colors.textMuted} />}
-                    activeIcon={<LibraryIcon size={24} color={Colors.primary} />}
-                    isActive={activeTab === 'library'}
-                    onPress={() => setActiveTab('library')}
-                  />
-                </View>
-              </View>
-            </SafeAreaView>
+        <SafeAreaView edges={['bottom']} style={styles.bottomNavSafeArea}>
+          <View style={styles.bottomNav}>
+            <View style={styles.navContent}>
+              <TabButton
+                id="home"
+                label="Download"
+                icon={<DownloadIcon size={24} color={Colors.textMuted} />}
+                activeIcon={<DownloadIcon size={24} color={Colors.primary} />}
+                isActive={activeTab === 'home'}
+                onPress={() => setActiveTab('home')}
+              />
+
+              <TabButton
+                id="library"
+                label="Library"
+                icon={<LibraryIcon size={24} color={Colors.textMuted} />}
+                activeIcon={<LibraryIcon size={24} color={Colors.primary} />}
+                isActive={activeTab === 'library'}
+                onPress={() => setActiveTab('library')}
+              />
+            </View>
           </View>
-        </>
-      )}
+        </SafeAreaView>
+      </View>
     </SafeAreaProvider>
   );
 }

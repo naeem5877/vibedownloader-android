@@ -480,7 +480,7 @@ export interface LibraryScreenProps {
     isFocused?: boolean;
 }
 
-const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = false }) => {
+export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = false }) => {
     const [folders, setFolders] = useState<PlatformFolder[]>([]);
     const [refreshing, setRefreshing] = useState(false);
     const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({}); // Changed from expandedPlatform

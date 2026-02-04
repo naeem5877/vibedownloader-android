@@ -605,7 +605,10 @@ const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = false }) => {
     }, []);
 
     const togglePlatformExpand = (platform: string) => {
-        setExpandedPlatform(prev => prev === platform ? null : platform);
+        setExpandedFolders(prev => ({
+            ...prev,
+            [platform]: !prev[platform]
+        }));
     };
 
     const handleFilePress = (file: DownloadedFile) => {
@@ -664,7 +667,7 @@ const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = false }) => {
     };
 
     const renderFolder = (folder: PlatformFolder) => {
-        const isExpanded = expandedPlatform === folder.platform;
+        const isExpanded = !!expandedFolders[folder.platform];
         const platformColor = getPlatformColor(folder.platform);
 
         return (

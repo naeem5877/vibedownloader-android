@@ -192,7 +192,7 @@ function App(): React.JSX.Element {
             </View>
 
             <View style={styles.screen}>
-              <LibraryScreen />
+              <LibraryScreen isFocused={activeTab === 'library'} />
             </View>
           </Animated.View>
         </View>

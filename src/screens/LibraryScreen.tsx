@@ -476,14 +476,20 @@ const StorageInfoModal: React.FC<{
 };
 
 // Main Library Screen
-export const LibraryScreen: React.FC = () => {
+export interface LibraryScreenProps {
+    isFocused?: boolean;
+}
+
+const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = false }) => {
     const [folders, setFolders] = useState<PlatformFolder[]>([]);
-    const [expandedPlatform, setExpandedPlatform] = useState<string | null>(null);
+    const [refreshing, setRefreshing] = useState(false);
+    const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({}); // Changed from expandedPlatform
+    const [basePath, setBasePath] = useState<string>('');
     const [selectedFile, setSelectedFile] = useState<DownloadedFile | null>(null);
     const [showFileModal, setShowFileModal] = useState(false);
     const [showStorageInfo, setShowStorageInfo] = useState(false);
-    const [refreshing, setRefreshing] = useState(false);
-    const [basePath, setBasePath] = useState('');
+    // Keeping isEmpty as it was not explicitly removed in the instruction's state list,
+    // but the instruction's `loadFiles` was a placeholder.
     const [isEmpty, setIsEmpty] = useState(false);
 
     const headerFadeAnim = useRef(new Animated.Value(0)).current;
@@ -507,6 +513,13 @@ export const LibraryScreen: React.FC = () => {
         loadFiles();
         loadBasePath();
     }, []);
+
+    // Auto-refresh when focused
+    useEffect(() => {
+        if (isFocused) {
+            loadFiles();
+        }
+    }, [isFocused]);
 
     const loadBasePath = async () => {
         try {

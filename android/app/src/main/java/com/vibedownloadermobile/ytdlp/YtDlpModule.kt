@@ -466,6 +466,11 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 val platform = getPlatformName(url)
                 val request = YoutubeDLRequest(url)
                 
+                // Network options to prevent DNS/IPv6 issues
+                request.addOption("--force-ipv4")
+                request.addOption("--no-check-certificate")
+                request.addOption("--socket-timeout", "30")
+                
                 if (platform == "YouTube") {
                     request.addOption("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best")
                 }

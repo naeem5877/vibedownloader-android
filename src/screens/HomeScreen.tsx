@@ -29,6 +29,7 @@ import {
     FormatList,
     DownloadProgress,
     OfflineBanner,
+    UpdateModal,
 } from '../components';
 // FormatToggle removed - automatic mode detection
 import { PlaylistSelectionModal } from '../components/PlaylistSelectionModal';
@@ -36,7 +37,7 @@ import { SkeletonCard } from '../components/SkeletonCard';
 import { useYtDlp } from '../hooks/useYtDlp';
 import { VideoFormat, ytDlpEventEmitter, YtDlpNative } from '../native/YtDlpModule';
 import { DownloadIcon, SparkleIcon, ShareIcon, GitHubIcon, DesktopIcon, StarIcon } from '../components/Icons';
-import { checkForUpdates } from '../services/GitHubUpdateService';
+import { checkForUpdates, UpdateInfo } from '../services/GitHubUpdateService';
 import { getSpotifyPlaylist, extractSpotifyId, getTrackInfo, buildYouTubeSearchQuery, formatTrackMetadata } from '../services/SpotifyService';
 
 export const HomeScreen: React.FC = () => {
@@ -51,6 +52,10 @@ export const HomeScreen: React.FC = () => {
     const [playlistTitle, setPlaylistTitle] = useState('');
     const [playlistImage, setPlaylistImage] = useState<string | undefined>(undefined);
     const [isPlaylistLoading, setIsPlaylistLoading] = useState(false);
+
+    // Update Modal State
+    const [updateModalVisible, setUpdateModalVisible] = useState(false);
+    const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
 
     const [state, actions] = useYtDlp();
 
@@ -321,7 +326,13 @@ export const HomeScreen: React.FC = () => {
         ]).start();
 
         // Check for updates on mount
-        setTimeout(() => checkForUpdates(true), 1500);
+        setTimeout(async () => {
+            const info = await checkForUpdates();
+            if (info.available) {
+                setUpdateInfo(info);
+                setUpdateModalVisible(true);
+            }
+        }, 1500);
     }, []);
 
     // Dynamic Theme State
@@ -637,6 +648,18 @@ export const HomeScreen: React.FC = () => {
                     platformColor={platformColor}
                     isLoading={isPlaylistLoading}
                 />
+
+                {/* Update Modal */}
+                {updateInfo && (
+                    <UpdateModal
+                        visible={updateModalVisible}
+                        onClose={() => setUpdateModalVisible(false)}
+                        version={updateInfo.version}
+                        releaseUrl={updateInfo.releaseUrl}
+                        downloadUrl={updateInfo.downloadUrl}
+                        features={updateInfo.features}
+                    />
+                )}
 
                 <View style={{ height: 100 }} />
             </ScrollView>

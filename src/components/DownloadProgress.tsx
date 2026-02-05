@@ -54,10 +54,11 @@ export const DownloadProgress: React.FC<DownloadProgressProps> = ({
         ]).start();
     }, []);
 
-    // Progress animation
+    // Progress animation - clamp between 0 and 100
     useEffect(() => {
+        const clampedProgress = Math.max(0, Math.min(progress, 100));
         Animated.timing(progressAnim, {
-            toValue: Math.min(progress, 100),
+            toValue: clampedProgress,
             duration: 300,
             useNativeDriver: false,
             easing: Easing.out(Easing.cubic),
@@ -167,7 +168,7 @@ export const DownloadProgress: React.FC<DownloadProgressProps> = ({
                     </Svg>
                     <View style={styles.progressTextContainer}>
                         <Text style={[styles.progressPercent, { color: platformColor }]}>
-                            {Math.round(progress)}%
+                            {Math.max(0, Math.round(progress))}%
                         </Text>
                     </View>
                 </View>

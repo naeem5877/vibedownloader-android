@@ -40,15 +40,39 @@ jobs:
       - name: List Build Outputs
         run: ls -R android/app/build/outputs/apk/
 
-      - name: Rename APK
+      - name: Rename APKs with Version
         run: |
-          # The universal APK is usually named app-universal-release.apk
-          mv android/app/build/outputs/apk/release/app-universal-release.apk VibeDownloader-Android.apk
+          cd android/app/build/outputs/apk/release
+          for file in *.apk; do
+            # Extract architecture from filename (e.g., app-arm64-v8a-release.apk -> arm64-v8a)
+            arch=$(echo "$file" | sed 's/app-//g' | sed 's/-release.apk//g')
+            mv "$file" "VibeDownloader-${{ github.ref_name }}-${arch}.apk"
+          done
+          ls -la
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: VibeDownloader-Android.apk
+          files: android/app/build/outputs/apk/release/*.apk
           token: ${{ secrets.GITHUB_TOKEN }}
-          generate_release_notes: true
+          generate_release_notes: false
+          body: |
+            ## 🚀 VibeDownloader Mobile ${{ github.ref_name }}
+
+            ### ✨ What's New
+            - Fixed download progress showing -1% at start
+            - Fixed onboarding screen reappearing on every launch
+            - Premium styled update notification modal
+            - Improved version comparison for updates
+
+            ### 📦 Download
+            Choose your architecture:
+            - **arm64-v8a** - Modern 64-bit devices (recommended)
+            - **armeabi-v7a** - Older 32-bit devices
+            - **x86_64** - 64-bit emulators
+            - **x86** - 32-bit emulators
+            - **universal** - All architectures (larger file)
+
+            ---
+            **Full Changelog**: https://github.com/naeem5877/vibedownloader-android/compare/v1.0.3...${{ github.ref_name }}

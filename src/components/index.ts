@@ -5,4 +5,5 @@ export { PlatformSelector } from './PlatformSelector';
 export { DownloadProgress } from './DownloadProgress';
 export { SkeletonCard } from './SkeletonCard';
 export { OfflineBanner } from './OfflineBanner';
+export { UpdateModal } from './UpdateModal';
 export * from './Icons';

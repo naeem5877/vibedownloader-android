@@ -58,9 +58,11 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 'onDownloadProgress',
                 (event) => {
                     if (event.processId === currentProcessId) {
+                        // Clamp progress between 0 and 100 to prevent -1% display
+                        const clampedProgress = Math.max(0, Math.min(event.progress || 0, 100));
                         setState((prev) => ({
                             ...prev,
-                            downloadProgress: event.progress || 0,
+                            downloadProgress: clampedProgress,
                             downloadEta: event.eta || 0,
                             downloadLine: event.line || '',
                         }));

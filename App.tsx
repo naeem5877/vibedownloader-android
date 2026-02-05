@@ -16,21 +16,13 @@ import {
   Dimensions
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { HomeScreen, LibraryScreen, SplashScreen, OnboardingScreen } from './src/screens';
 import { Colors, BorderRadius, Spacing, Typography, Shadows } from './src/theme';
 import { HomeIcon, LibraryIcon, DownloadIcon } from './src/components/Icons';
 
-// Safe Storage Wrapper
-let AppStorage = {
-  getItem: async (key: string) => null,
-  setItem: async (key: string, value: string) => { },
-};
-try {
-  const AS = require('@react-native-async-storage/async-storage').default;
-  if (AS) AppStorage = AS;
-} catch (e) {
-  console.warn('AsyncStorage not found, persistence disabled');
-}
+// Storage key constant
+const ONBOARDING_COMPLETE_KEY = 'hasLaunched';
 
 const { width } = Dimensions.get('window');
 
@@ -114,7 +106,7 @@ function App(): React.JSX.Element {
   useEffect(() => {
     if (!storageChecked.current) {
       storageChecked.current = true;
-      AppStorage.getItem('hasLaunched')
+      AsyncStorage.getItem(ONBOARDING_COMPLETE_KEY)
         .then((value: string | null) => {
           setIsFirstLaunch(value === null);
         })
@@ -159,7 +151,7 @@ function App(): React.JSX.Element {
 
   const handleOnboardingDone = async () => {
     try {
-      await AppStorage.setItem('hasLaunched', 'true');
+      await AsyncStorage.setItem(ONBOARDING_COMPLETE_KEY, 'true');
     } catch (e) {
       console.warn('Failed to save launch state:', e);
     }

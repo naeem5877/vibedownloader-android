@@ -517,6 +517,7 @@ export const HomeScreen: React.FC = () => {
                     onSelectPlatform={(id) => {
                         setDetectedPlatform(id);
                         setUserSelectedPlatform(true); // Mark as manual selection
+                        actions.reset();
                     }}
                     disabled={state.isLoading || state.isDownloading}
                 />
@@ -531,6 +532,7 @@ export const HomeScreen: React.FC = () => {
                                 if (text.trim().length === 0) {
                                     setUserSelectedPlatform(false);
                                     setDetectedPlatform('youtube');
+                                    actions.reset();
                                 }
                             }}
                             onSubmit={() => handleFetch(url)}

@@ -11,11 +11,12 @@ import {
     Animated,
     Dimensions,
     Linking,
+    ScrollView,
 } from 'react-native';
 import { Colors, BorderRadius, Spacing, Typography, Shadows } from '../theme';
-import { SparkleIcon, DownloadIcon, CloseIcon } from './Icons';
+import { SparkleIcon, DownloadIcon, CloseIcon, ChevronRightIcon } from './Icons';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 interface UpdateModalProps {
     visible: boolean;
@@ -34,27 +35,34 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
     downloadUrl,
     features = [],
 }) => {
-    const scaleAnim = useRef(new Animated.Value(0.8)).current;
+    const scaleAnim = useRef(new Animated.Value(0.9)).current;
     const opacityAnim = useRef(new Animated.Value(0)).current;
+    const translateY = useRef(new Animated.Value(20)).current;
 
     useEffect(() => {
         if (visible) {
             Animated.parallel([
                 Animated.spring(scaleAnim, {
                     toValue: 1,
-                    tension: 100,
-                    friction: 10,
+                    tension: 120,
+                    friction: 14,
                     useNativeDriver: true,
                 }),
                 Animated.timing(opacityAnim, {
                     toValue: 1,
-                    duration: 200,
+                    duration: 300,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(translateY, {
+                    toValue: 0,
+                    duration: 300,
                     useNativeDriver: true,
                 }),
             ]).start();
         } else {
-            scaleAnim.setValue(0.8);
+            scaleAnim.setValue(0.9);
             opacityAnim.setValue(0);
+            translateY.setValue(20);
         }
     }, [visible]);
 
@@ -72,6 +80,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
             visible={visible}
             animationType="none"
             onRequestClose={onClose}
+            statusBarTranslucent
         >
             <View style={styles.overlay}>
                 <Animated.View
@@ -79,61 +88,70 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                         styles.modalContainer,
                         {
                             opacity: opacityAnim,
-                            transform: [{ scale: scaleAnim }],
+                            transform: [
+                                { scale: scaleAnim },
+                                { translateY: translateY }
+                            ],
                         },
                     ]}
                 >
-                    {/* Close Button */}
-                    <TouchableOpacity
-                        style={styles.closeButton}
-                        onPress={onClose}
-                        activeOpacity={0.7}
-                    >
-                        <CloseIcon size={20} color={Colors.textMuted} />
-                    </TouchableOpacity>
+                    {/* Background decoration */}
+                    <View style={styles.decorationCircle} />
 
-                    {/* Icon */}
-                    <View style={styles.iconContainer}>
-                        <SparkleIcon size={36} color={Colors.primary} />
-                    </View>
-
-                    {/* Title */}
-                    <Text style={styles.title}>Update Available</Text>
-                    <View style={styles.versionBadge}>
-                        <Text style={styles.versionText}>v{version}</Text>
-                    </View>
-
-                    {/* Features */}
-                    {features.length > 0 && (
-                        <View style={styles.featuresContainer}>
-                            <Text style={styles.featuresTitle}>What's New</Text>
-                            {features.slice(0, 4).map((feature, index) => (
-                                <View key={index} style={styles.featureItem}>
-                                    <View style={styles.featureBullet} />
-                                    <Text style={styles.featureText}>{feature}</Text>
-                                </View>
-                            ))}
+                    <View style={styles.contentContainer}>
+                        {/* Header Section */}
+                        <View style={styles.header}>
+                            <View style={styles.iconBadge}>
+                                <SparkleIcon size={32} color="#FFF" />
+                            </View>
+                            <View style={styles.headerTextContainer}>
+                                <Text style={styles.updateAvailableText}>Update Available</Text>
+                                <Text style={styles.versionText}>Version {version} is ready!</Text>
+                            </View>
                         </View>
-                    )}
 
-                    {/* Buttons */}
-                    <View style={styles.buttonsContainer}>
-                        <TouchableOpacity
-                            style={styles.laterButton}
-                            onPress={onClose}
-                            activeOpacity={0.7}
-                        >
-                            <Text style={styles.laterButtonText}>Later</Text>
-                        </TouchableOpacity>
+                        {/* Features List */}
+                        <View style={styles.divider} />
 
-                        <TouchableOpacity
-                            style={styles.updateButton}
-                            onPress={handleUpdate}
-                            activeOpacity={0.8}
-                        >
-                            <DownloadIcon size={18} color="#FFF" />
-                            <Text style={styles.updateButtonText}>Update Now</Text>
-                        </TouchableOpacity>
+                        <View style={styles.featuresSection}>
+                            <Text style={styles.featuresTitle}>WHAT'S NEW</Text>
+                            <ScrollView style={styles.featuresList} showsVerticalScrollIndicator={false}>
+                                {features.length > 0 ? features.map((feature, index) => (
+                                    <View key={index} style={styles.featureItem}>
+                                        <View style={styles.featureIcon}>
+                                            <ChevronRightIcon size={14} color={Colors.primary} />
+                                        </View>
+                                        <Text style={styles.featureText}>{feature}</Text>
+                                    </View>
+                                )) : (
+                                    <Text style={styles.noFeaturesText}>
+                                        Bug fixes and performance improvements.
+                                    </Text>
+                                )}
+                            </ScrollView>
+                        </View>
+
+                        {/* Actions */}
+                        <View style={styles.actions}>
+                            <TouchableOpacity
+                                style={styles.updateButton}
+                                onPress={handleUpdate}
+                                activeOpacity={0.8}
+                            >
+                                <View style={styles.updateIconBg}>
+                                    <DownloadIcon size={20} color={Colors.primary} />
+                                </View>
+                                <Text style={styles.updateButtonText}>Update Now</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={styles.laterButton}
+                                onPress={onClose}
+                                activeOpacity={0.6}
+                            >
+                                <Text style={styles.laterButtonText}>Maybe later</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 </Animated.View>
             </View>
@@ -144,86 +162,90 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
 const styles = StyleSheet.create({
     overlay: {
         flex: 1,
-        backgroundColor: Colors.overlay,
+        backgroundColor: 'rgba(0,0,0,0.7)',
         justifyContent: 'center',
         alignItems: 'center',
-        padding: Spacing.lg,
+        paddingHorizontal: Spacing.lg,
     },
     modalContainer: {
-        width: width - Spacing.xl * 2,
-        backgroundColor: Colors.surfaceElevated,
+        width: '100%',
+        maxWidth: 380,
+        backgroundColor: Colors.surface, // Use a solid dark color or Colors.surfaceElevated
         borderRadius: BorderRadius.xxl,
-        padding: Spacing.xl,
-        alignItems: 'center',
+        overflow: 'hidden',
+        ...Shadows.xl,
         borderWidth: 1,
         borderColor: Colors.border,
-        ...Shadows.xl,
     },
-    closeButton: {
+    decorationCircle: {
         position: 'absolute',
-        top: Spacing.md,
-        right: Spacing.md,
-        width: 36,
-        height: 36,
-        borderRadius: BorderRadius.round,
-        backgroundColor: Colors.surfaceHover,
-        justifyContent: 'center',
-        alignItems: 'center',
+        top: -100,
+        right: -50,
+        width: 200,
+        height: 200,
+        borderRadius: 100,
+        backgroundColor: `${Colors.primary}10`, // Subtle glow
+        zIndex: 0,
     },
-    iconContainer: {
-        width: 72,
-        height: 72,
-        borderRadius: 22,
-        backgroundColor: `${Colors.primary}20`,
+    contentContainer: {
+        zIndex: 1,
+        padding: Spacing.xl,
+    },
+    header: {
+        alignItems: 'center',
+        marginBottom: Spacing.lg,
+    },
+    iconBadge: {
+        width: 64,
+        height: 64,
+        borderRadius: 32,
+        backgroundColor: Colors.primary,
         justifyContent: 'center',
         alignItems: 'center',
         marginBottom: Spacing.md,
         ...Shadows.glow(Colors.primary),
     },
-    title: {
-        fontSize: Typography.sizes['2xl'],
+    headerTextContainer: {
+        alignItems: 'center',
+    },
+    updateAvailableText: {
+        fontSize: Typography.sizes.lg,
         fontWeight: Typography.weights.bold,
         color: Colors.textPrimary,
-        marginBottom: Spacing.sm,
-    },
-    versionBadge: {
-        backgroundColor: Colors.primary,
-        paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.xs,
-        borderRadius: BorderRadius.round,
-        marginBottom: Spacing.lg,
+        marginBottom: 4,
     },
     versionText: {
-        fontSize: Typography.sizes.sm,
+        fontSize: Typography.sizes.base,
+        color: Colors.primary,
         fontWeight: Typography.weights.semibold,
-        color: '#FFF',
     },
-    featuresContainer: {
+    divider: {
+        height: 1,
+        backgroundColor: Colors.border,
         width: '100%',
-        backgroundColor: Colors.surface,
-        borderRadius: BorderRadius.lg,
-        padding: Spacing.md,
         marginBottom: Spacing.lg,
     },
+    featuresSection: {
+        marginBottom: Spacing.xl,
+        maxHeight: 200,
+    },
     featuresTitle: {
-        fontSize: Typography.sizes.sm,
-        fontWeight: Typography.weights.semibold,
+        fontSize: Typography.sizes.xs,
+        fontWeight: Typography.weights.bold,
         color: Colors.textMuted,
-        marginBottom: Spacing.sm,
-        textTransform: 'uppercase',
-        letterSpacing: 1,
+        letterSpacing: 1.5,
+        marginBottom: Spacing.md,
+    },
+    featuresList: {
+        maxHeight: 150,
     },
     featureItem: {
         flexDirection: 'row',
         alignItems: 'flex-start',
-        marginBottom: Spacing.xs,
+        marginBottom: 12,
     },
-    featureBullet: {
-        width: 6,
-        height: 6,
-        borderRadius: 3,
-        backgroundColor: Colors.primary,
-        marginTop: 6,
+    featureIcon: {
+        marginTop: 3,
         marginRight: Spacing.sm,
     },
     featureText: {
@@ -232,40 +254,46 @@ const styles = StyleSheet.create({
         color: Colors.textSecondary,
         lineHeight: 20,
     },
-    buttonsContainer: {
-        flexDirection: 'row',
-        gap: Spacing.sm,
-        width: '100%',
+    noFeaturesText: {
+        color: Colors.textMuted,
+        fontStyle: 'italic',
+        fontSize: Typography.sizes.sm,
     },
-    laterButton: {
-        flex: 1,
-        paddingVertical: Spacing.md,
-        borderRadius: BorderRadius.lg,
-        backgroundColor: Colors.surfaceHover,
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: Colors.border,
-    },
-    laterButtonText: {
-        fontSize: Typography.sizes.base,
-        fontWeight: Typography.weights.semibold,
-        color: Colors.textSecondary,
+    actions: {
+        gap: Spacing.md,
     },
     updateButton: {
-        flex: 2,
-        flexDirection: 'row',
+        backgroundColor: Colors.textPrimary, // High contrast (White button on dark theme)
+        borderRadius: BorderRadius.xl,
         paddingVertical: Spacing.md,
-        borderRadius: BorderRadius.lg,
-        backgroundColor: Colors.primary,
+        paddingHorizontal: Spacing.lg,
+        flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: Spacing.xs,
-        ...Shadows.glow(Colors.primary),
+        ...Shadows.md,
+    },
+    updateIconBg: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: '#FFF',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: Spacing.sm,
     },
     updateButtonText: {
+        color: Colors.background, // Dark text on light button
         fontSize: Typography.sizes.base,
         fontWeight: Typography.weights.bold,
-        color: '#FFF',
+    },
+    laterButton: {
+        alignItems: 'center',
+        paddingVertical: Spacing.xs,
+    },
+    laterButtonText: {
+        color: Colors.textMuted,
+        fontSize: Typography.sizes.sm,
+        fontWeight: Typography.weights.medium,
     },
 });
 

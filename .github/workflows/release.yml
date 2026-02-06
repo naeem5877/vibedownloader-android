@@ -61,18 +61,17 @@ jobs:
             ## 🚀 VibeDownloader Mobile ${{ github.ref_name }}
 
             ### ✨ What's New
-            - Fixed download progress showing -1% at start
-            - Fixed onboarding screen reappearing on every launch
-            - Premium styled update notification modal
-            - Improved version comparison for updates
+            - **Swipe Navigation**: Easily swipe between Downloader and Library screens
+            - **Cleaner Update UI**: redesigned update popup for a better experience
+            - **Bug Fix**: Fixed search results not clearing when switching platforms
+            - **Bug Fix**: Fixed issue where clearing URL didn't reset the view
 
-            ### 📦 Download
-            Choose your architecture:
-            - **arm64-v8a** - Modern 64-bit devices (recommended)
-            - **armeabi-v7a** - Older 32-bit devices
-            - **x86_64** - 64-bit emulators
-            - **x86** - 32-bit emulators
-            - **universal** - All architectures (larger file)
+            ### 📦 Download Guide
+            Choose the correct APK for your device:
+            - **arm64-v8a** (Recommended) - For most modern Android phones (last 5-6 years)
+            - **armeabi-v7a** - For older or low-end Android devices
+            - **universal** - Works on ALL devices (but larger file size) and emulators
+            - **x86_64 / x86** - Primarily for emulators or specific tablets
 
             ---
-            **Full Changelog**: https://github.com/naeem5877/vibedownloader-android/compare/v1.0.3...${{ github.ref_name }}
+            **Full Changelog**: https://github.com/naeem5877/vibedownloader-android/compare/v1.0.5...${{ github.ref_name }}

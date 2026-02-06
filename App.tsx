@@ -13,7 +13,8 @@ import {
   TouchableOpacity,
   Text,
   Animated,
-  Dimensions
+  Dimensions,
+  PanResponder
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -102,6 +103,9 @@ function App(): React.JSX.Element {
   const slideAnim = useRef(new Animated.Value(0)).current;
   const storageChecked = useRef(false);
 
+  // Ref to track active tab for PanResponder
+  const activeTabRef = useRef(activeTab);
+
   // Check storage on mount - only once
   useEffect(() => {
     if (!storageChecked.current) {
@@ -116,6 +120,30 @@ function App(): React.JSX.Element {
         });
     }
   }, []);
+
+  // Sync activeTabRef
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  // PanResponder for swiping
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // Capture horizontal swipes
+        const isHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+        return isHorizontal && Math.abs(gestureState.dx) > 20;
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        const threshold = 50;
+        if (gestureState.dx < -threshold && activeTabRef.current === 'home') {
+          setActiveTab('library');
+        } else if (gestureState.dx > threshold && activeTabRef.current === 'library') {
+          setActiveTab('home');
+        }
+      },
+    })
+  ).current;
 
   // Tab animation
   useEffect(() => {
@@ -172,7 +200,7 @@ function App(): React.JSX.Element {
       {appState === 'onboarding' && <OnboardingScreen onDone={handleOnboardingDone} />}
 
       <View style={[styles.container, { display: appState === 'main' ? 'flex' : 'none' }]}>
-        <View style={styles.screenContainer}>
+        <View style={styles.screenContainer} {...panResponder.panHandlers}>
           <Animated.View
             style={[
               styles.screenWrapper,

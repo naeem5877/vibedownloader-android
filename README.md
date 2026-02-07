@@ -89,6 +89,23 @@ Videos and photos are automatically saved to your system Gallery. Music goes str
 
 ---
 
+## 🖼️ Screenshots
+
+<div align="center">
+  <img src="Screenshots/screenshot1.jpeg" width="22%" />
+  <img src="Screenshots/screenshot2.jpeg" width="22%" />
+  <img src="Screenshots/screenshot3.jpeg" width="22%" />
+  <img src="Screenshots/screenshot4.jpeg" width="22%" />
+  <br />
+  <br />
+  <img src="Screenshots/screenshot5.jpeg" width="22%" />
+  <img src="Screenshots/screenshot6.jpeg" width="22%" />
+  <img src="Screenshots/screenshot7.jpeg" width="22%" />
+  <img src="Screenshots/screenshot8.jpeg" width="22%" />
+</div>
+
+---
+
 ## 💻 Also Available on Desktop
 
 Need to download 4K videos on your PC? Check out VibeDownloader Desktop for **Windows, macOS, and Linux**.
@@ -157,6 +174,15 @@ Contributions are welcome!
 
 Please follow our [Code of Conduct](CODE_OF_CONDUCT.md).
 
+### Areas We'd Love Help With:
+
+- 🐛 Bug fixes and stability improvements
+- 🌐 Translation and internationalization
+- 📝 Documentation improvements
+- ✨ New feature development
+- 🎨 UI/UX enhancements
+- 📱 Android-specific optimizations
+
 ---
 
 ## 📄 License & Brand Usage
@@ -190,12 +216,36 @@ If you create a fork or modified version:
 
 ---
 
+## 📞 Support & Community
+
+<div align="center">
+
+[![GitHub Issues](https://img.shields.io/github/issues/naeem5877/vibedownloader-android?style=for-the-badge)](https://github.com/naeem5877/vibedownloader-android/issues)
+[![GitHub Stars](https://img.shields.io/github/stars/naeem5877/vibedownloader-android?style=for-the-badge)](https://github.com/naeem5877/vibedownloader-android/stargazers)
+[![License](https://img.shields.io/badge/license-GPL%20v3.0-blue?style=for-the-badge)](LICENSE)
+
+</div>
+
+- 🐛 **Found a bug?** [Open an issue](https://github.com/naeem5877/vibedownloader-android/issues)
+- 💡 **Have an idea?** [Start a discussion](https://github.com/naeem5877/vibedownloader-android/discussions)
+- ⭐ **Like the project?** Give it a star!
+
+---
+
+## 🙏 Acknowledgments
+
+- Built with [yt-dlp](https://github.com/yt-dlp/yt-dlp) - The powerful video downloader
+- Powered by [React Native](https://reactnative.dev/) - Cross-platform mobile framework
+- Python integration via [Chaquopy](https://chaquo.com/chaquopy/) - Python for Android
+
+---
+
 <div align="center">
   
 ### Made with ❤️ by [Naeem](https://github.com/naeem5877)
 
 **If you find this project useful, consider giving it a ⭐**
 
-<sub>© 2026 VibeDownloader.</sub>
+<sub>© 2025 VibeDownloader. Released under GPL v3.0 License.</sub>
 
 </div>

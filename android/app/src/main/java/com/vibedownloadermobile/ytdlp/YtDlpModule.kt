@@ -742,16 +742,20 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 }
                 
                 // Metadata & Thumbnails - Critical for gallery visibility
-                request.addOption("--embed-metadata")
-                request.addOption("--add-metadata")
-                request.addOption("--embed-thumbnail")
-                request.addOption("--write-thumbnail")
-                request.addOption("--convert-thumbnails", "jpg")
-                
-                // For audio files, use FFmpeg to properly embed cover art
                 if (isAudioDownload || platform == "Spotify" || platform == "SoundCloud") {
-                    // Use atomicparsley or ffmpeg to embed cover art properly for MP3
-                    request.addOption("--ppa", "ffmpeg:-metadata:s:v title=\"Album cover\" -metadata:s:v comment=\"Cover (front)\"")
+                    // For audio: simplified pipeline to prevent FFmpeg hangs
+                    request.addOption("--embed-metadata")
+                    request.addOption("--embed-thumbnail")
+                    // Don't use --write-thumbnail + --convert-thumbnails + --ppa together for audio
+                    // as this combination can cause FFmpeg post-processing to hang
+                    request.addOption("--no-post-overwrites")
+                } else {
+                    // For video: full metadata pipeline
+                    request.addOption("--embed-metadata")
+                    request.addOption("--add-metadata")
+                    request.addOption("--embed-thumbnail")
+                    request.addOption("--write-thumbnail")
+                    request.addOption("--convert-thumbnails", "jpg")
                 }
                 
                 // Network & compatibility options

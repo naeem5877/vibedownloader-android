@@ -1,5 +1,5 @@
 /**
- * Premium PlatformSelector - Horizontal list with animated selection
+ * Premium PlatformSelector - Clean, modern horizontal selector with icon-only buttons
  */
 import React, { useRef, useEffect } from 'react';
 import {
@@ -8,9 +8,12 @@ import {
     StyleSheet,
     ScrollView,
     Animated,
-    Text,
+    LayoutAnimation,
+    Platform,
+    UIManager,
 } from 'react-native';
-import { Colors, BorderRadius, Spacing, Shadows, SUPPORTED_PLATFORMS, Typography } from '../theme';
+import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
+import { Colors, Spacing } from '../theme';
 import {
     YouTubeIcon,
     InstagramIcon,
@@ -22,105 +25,115 @@ import {
     SoundCloudIcon,
 } from './Icons';
 
+// Enable LayoutAnimation for Android
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 interface PlatformSelectorProps {
     selectedPlatform: string | null;
     onSelectPlatform?: (platform: string) => void;
     disabled?: boolean;
 }
 
-const getIconComponent = (platformId: string) => {
-    switch (platformId.toLowerCase()) {
-        case 'youtube': return YouTubeIcon;
-        case 'instagram': return InstagramIcon;
-        case 'tiktok': return TikTokIcon;
-        case 'facebook': return FacebookIcon;
-        case 'spotify': return SpotifyIcon;
-        case 'x':
-        case 'twitter': return XIcon;
-        case 'pinterest': return PinterestIcon;
-        case 'soundcloud': return SoundCloudIcon;
-        default: return YouTubeIcon;
-    }
-};
+// Platform definitions with gradients and colors
+const PLATFORMS = [
+    { id: 'youtube', Icon: YouTubeIcon, color: '#FF0000', gradient: ['#FF0000', '#FF4D4D'] },
+    { id: 'instagram', Icon: InstagramIcon, color: '#E1306C', gradient: ['#833AB4', '#FD1D1D', '#F77737'] },
+    { id: 'tiktok', Icon: TikTokIcon, color: '#00F2EA', gradient: ['#00F2EA', '#FF0050'] },
+    { id: 'facebook', Icon: FacebookIcon, color: '#1877F2', gradient: ['#1877F2', '#3b5998'] },
+    { id: 'spotify', Icon: SpotifyIcon, color: '#1DB954', gradient: ['#1DB954', '#1ED760'] },
+    { id: 'x', Icon: XIcon, color: '#FFFFFF', gradient: ['#000000', '#333333'] },
+    { id: 'pinterest', Icon: PinterestIcon, color: '#E60023', gradient: ['#E60023', '#BD081C'] },
+    { id: 'soundcloud', Icon: SoundCloudIcon, color: '#FF5500', gradient: ['#FF5500', '#FF3300'] },
+];
 
-interface PlatformButtonProps {
-    platform: typeof SUPPORTED_PLATFORMS[number];
+interface PlatformItemProps {
+    platform: typeof PLATFORMS[0];
     isSelected: boolean;
     onPress: () => void;
-    disabled: boolean;
-    index: number;
+    disabled?: boolean;
 }
 
-const PlatformButton: React.FC<PlatformButtonProps> = ({
-    platform,
-    isSelected,
-    onPress,
-    disabled,
-    index
-}) => {
-    const IconComponent = getIconComponent(platform.id);
-    const scaleAnim = useRef(new Animated.Value(1)).current;
+const PlatformItem: React.FC<PlatformItemProps> = ({ platform, isSelected, onPress, disabled }) => {
+    // Animation for inner visual elements (opacity, scale)
+    // We use native driver for best performance
+    const anim = useRef(new Animated.Value(isSelected ? 1 : 0)).current;
 
-    const handlePressIn = () => {
-        if (disabled) return;
-        Animated.spring(scaleAnim, {
-            toValue: 0.95,
-            useNativeDriver: true,
+    useEffect(() => {
+        Animated.spring(anim, {
+            toValue: isSelected ? 1 : 0,
             friction: 8,
+            tension: 50,
+            useNativeDriver: true,
         }).start();
-    };
+    }, [isSelected]);
 
-    const handlePressOut = () => {
-        if (disabled) return;
-        Animated.spring(scaleAnim, {
-            toValue: 1,
-            useNativeDriver: true,
-            friction: 8,
-        }).start();
-    };
+    // Interpolations for visual effects
+    const iconScale = anim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.9, 1.1]
+    });
+
+    const activeOpacity = anim;
+
+    // Invert opacity for inactive elements
+    const inactiveOpacity = anim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, 0]
+    });
+
+    // Create a unique ID string for the gradient
+    const gradId = `grad_${platform.id}`;
+
+    // Conditional styling for the container (LayoutAnimation handles the transition between these)
+    const containerStyle = isSelected ? styles.itemActive : styles.itemInactive;
 
     return (
-        <Animated.View
-            style={{
-                transform: [{ scale: scaleAnim }],
-                opacity: disabled ? 0.4 : 1,
-            }}
+        <TouchableOpacity
+            onPress={onPress}
+            activeOpacity={0.9}
+            disabled={disabled}
+            style={styles.touchableWrapper}
         >
-            <TouchableOpacity
-                onPress={onPress}
-                onPressIn={handlePressIn}
-                onPressOut={handlePressOut}
-                activeOpacity={0.7}
-                disabled={disabled}
-                style={styles.platformButtonContainer}
-            >
-                <View
-                    style={[
-                        styles.platformButton,
-                        isSelected && styles.platformButtonSelected,
-                        { borderColor: isSelected ? platform.color : Colors.border },
-                    ]}
-                >
-                    <IconComponent
-                        size={32}
-                        color={isSelected ? platform.color : Colors.textSecondary}
-                    />
-                </View>
+            <View style={[styles.itemRef, containerStyle]}>
 
-                <Text
-                    style={[
-                        styles.platformName,
-                        isSelected && {
-                            color: platform.color,
-                            fontWeight: Typography.weights.bold
-                        }
-                    ]}
-                    numberOfLines={1}
-                >
-                    {platform.label}
-                </Text>
-            </TouchableOpacity>
-        </Animated.View>
+                {/* 1. Base Dark Background (Visible when inactive) */}
+                <Animated.View style={[StyleSheet.absoluteFill, styles.inactiveBackground, { opacity: inactiveOpacity }]}>
+                    <View style={styles.inactiveBorder} />
+                </Animated.View>
+
+                {/* 2. Gradient Overlay (Visible when active) */}
+                <Animated.View style={[StyleSheet.absoluteFill, { opacity: activeOpacity }]}>
+                    <Svg height="100%" width="100%" style={StyleSheet.absoluteFill}>
+                        <Defs>
+                            <LinearGradient id={gradId} x1="0" y1="1" x2="1" y2="0">
+                                <Stop offset="0" stopColor={platform.gradient[0]} stopOpacity="1" />
+                                <Stop offset="0.5" stopColor={platform.gradient[1]} stopOpacity="1" />
+                                <Stop offset="1" stopColor={platform.gradient[2] || platform.gradient[1]} stopOpacity="1" />
+                            </LinearGradient>
+                        </Defs>
+                        <Rect x="0" y="0" width="100%" height="100%" rx={isSelected ? 20 : 16} ry={isSelected ? 20 : 16} fill={`url(#${gradId})`} />
+                    </Svg>
+                    {/* Extra Glow for pop */}
+                    <View style={[styles.glow, { backgroundColor: platform.gradient[0] }]} />
+                </Animated.View>
+
+                {/* 3. Icon Content */}
+                <Animated.View style={{ transform: [{ scale: iconScale }] }}>
+                    {/* Inactive Icon (Color) */}
+                    <Animated.View style={[styles.iconCenter, { opacity: inactiveOpacity }]}>
+                        <platform.Icon size={24} color={platform.color} />
+                    </Animated.View>
+
+                    {/* Active Icon (White) */}
+                    <Animated.View style={[styles.iconCenter, { opacity: activeOpacity }]}>
+                        <platform.Icon size={28} color="#FFFFFF" />
+                    </Animated.View>
+                </Animated.View>
+
+            </View>
+        </TouchableOpacity>
     );
 };
 
@@ -129,27 +142,34 @@ export const PlatformSelector: React.FC<PlatformSelectorProps> = ({
     onSelectPlatform,
     disabled = false,
 }) => {
+
+    const handleSelect = (id: string) => {
+        if (disabled) return;
+        // Trigger LayoutAnimation for the width/height/margin changes
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        onSelectPlatform?.(id);
+    };
+
     return (
-        <View style={styles.selectorWrapper}>
+        <View style={styles.container}>
             <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.scrollContainer}
+                contentContainerStyle={styles.scrollContent}
                 decelerationRate="fast"
+                keyboardShouldPersistTaps="handled"
             >
-                {SUPPORTED_PLATFORMS.map((platform, index) => {
-                    const isSelected = selectedPlatform?.toLowerCase() === platform.id.toLowerCase();
+                {PLATFORMS.map((platform) => {
+                    const isSelected = selectedPlatform?.toLowerCase() === platform.id ||
+                        (selectedPlatform?.toLowerCase() === 'twitter' && platform.id === 'x');
+
                     return (
-                        <PlatformButton
+                        <PlatformItem
                             key={platform.id}
                             platform={platform}
-                            isSelected={isSelected}
-                            onPress={() => {
-                                console.log('Platform pressed:', platform.id);
-                                onSelectPlatform?.(platform.id);
-                            }}
+                            isSelected={!!isSelected}
+                            onPress={() => handleSelect(platform.id)}
                             disabled={disabled}
-                            index={index}
                         />
                     );
                 })}
@@ -159,42 +179,60 @@ export const PlatformSelector: React.FC<PlatformSelectorProps> = ({
 };
 
 const styles = StyleSheet.create({
-    selectorWrapper: {
-        marginBottom: Spacing.lg,
-        marginTop: Spacing.md,
+    container: {
+        marginBottom: Spacing.md,
     },
-    scrollContainer: {
-        flexDirection: 'row',
-        gap: Spacing.md,
+    scrollContent: {
         paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.md,
-    },
-    platformButtonContainer: {
+        paddingVertical: 12, // More padding for shadow clipping
+        gap: 12,
         alignItems: 'center',
-        gap: 8,
     },
-    platformButton: {
-        width: 72,
-        height: 72,
-        borderRadius: BorderRadius.xl,
-        backgroundColor: Colors.surface,
+    touchableWrapper: {
         justifyContent: 'center',
         alignItems: 'center',
-        borderWidth: 2,
-        borderColor: Colors.border,
-        ...Shadows.lg,
     },
-    platformButtonSelected: {
-        backgroundColor: Colors.surfaceElevated,
-        borderWidth: 3,
+    itemRef: {
+        justifyContent: 'center',
+        alignItems: 'center',
+        overflow: 'hidden', // IMPORTANT: keeps rounded corners clean
     },
-    platformName: {
-        color: Colors.textSecondary,
-        fontSize: Typography.sizes.xs,
-        textAlign: 'center',
-        fontWeight: Typography.weights.semibold,
-        maxWidth: 80,
+    itemInactive: {
+        width: 52,
+        height: 52,
+        borderRadius: 16,
     },
+    itemActive: {
+        width: 64,
+        height: 64,
+        borderRadius: 20,
+        // Elevation/Shadow managed by parent view or surrounding context usually, 
+        // but explicit margin helps vertical alignment during anim
+    },
+    inactiveBackground: {
+        backgroundColor: '#1A1A1A',
+        borderRadius: 16,
+    },
+    inactiveBorder: {
+        ...StyleSheet.absoluteFillObject,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.08)',
+        borderRadius: 16,
+    },
+    glow: {
+        ...StyleSheet.absoluteFillObject,
+        opacity: 0.4,
+        zIndex: -1,
+    },
+    iconCenter: {
+        position: 'absolute',
+        width: 30,
+        height: 30,
+        marginLeft: -15, // center using negative margin relative to center point
+        marginTop: -15,
+        justifyContent: 'center',
+        alignItems: 'center',
+    }
 });
 
 export default PlatformSelector;

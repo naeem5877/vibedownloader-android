@@ -8,29 +8,32 @@ const { width, height } = Dimensions.get('window');
 const SLIDES = [
     {
         id: '1',
-        title: 'Welcome to Vibe',
-        subtitle: 'Universal Media Downloader',
-        description: 'Download videos, music, and photos from YouTube, Spotify, TikTok, Instagram, and many more platforms.',
-        icon: <SparkleIcon size={60} color="#FFF" />,
-        gradient: [Colors.primary, Colors.secondary],
+        title: 'Universal Media Downloader',
+        subtitle: 'VibeDownloader',
+        description: 'Download videos, music, and photos from YouTube, Spotify, TikTok, Instagram, and more with one tap.',
+        icon: <SparkleIcon size={70} color="#FFF" />,
+        gradient: ['#6366F1', '#3B82F6'],
+        themeColor: '#6366F1',
         emoji: '🚀'
     },
     {
         id: '2',
-        title: 'Simple & Fast',
-        subtitle: 'Just Paste & Download',
-        description: 'Copy any link from your favorite apps and paste it here. We handle everything else automatically.',
-        icon: <DownloadIcon size={60} color="#FFF" />,
-        gradient: [Colors.secondary, Colors.accent],
+        title: 'Simple & Lightning Fast',
+        subtitle: 'PASTE & GO',
+        description: 'Auto-detection handles everything. Copy any link, paste, and let Vibe handle the heavy lifting.',
+        icon: <DownloadIcon size={70} color="#FFF" />,
+        gradient: ['#F97316', '#FB923C'],
+        themeColor: '#F97316',
         emoji: '⚡'
     },
     {
         id: '3',
-        title: 'Stay Updated',
-        subtitle: 'Auto-Updates from GitHub',
-        description: 'Get the latest features automatically. Your downloads are saved to your gallery for easy access.',
-        icon: <CheckIcon size={60} color="#FFF" />,
-        gradient: [Colors.success, '#00B894'],
+        title: 'Premium Engineering',
+        subtitle: 'OPEN SOURCE & TRANSPARENT',
+        description: 'Save content directly to your gallery. Always stay updated with the latest fixes from GitHub.',
+        icon: <CheckIcon size={70} color="#FFF" />,
+        gradient: ['#10B981', '#34D399'],
+        themeColor: '#10B981',
         emoji: '✨'
     }
 ];
@@ -77,22 +80,28 @@ const OnboardingScreen: React.FC<OnboardingProps> = ({ onDone }) => {
     const renderItem = ({ item, index }: { item: typeof SLIDES[0]; index: number }) => {
         const inputRange = [(index - 1) * width, index * width, (index + 1) * width];
 
+        const scale = scrollX.interpolate({
+            inputRange,
+            outputRange: [0.8, 1, 0.8],
+            extrapolate: 'clamp'
+        });
+
         const opacity = scrollX.interpolate({
             inputRange,
-            outputRange: [0.3, 1, 0.3],
+            outputRange: [0, 1, 0],
             extrapolate: 'clamp'
         });
 
         const translateY = scrollX.interpolate({
             inputRange,
-            outputRange: [50, 0, 50],
+            outputRange: [100, 0, 100],
             extrapolate: 'clamp'
         });
 
         return (
-            <Animated.View style={[styles.slide, { opacity, transform: [{ translateY }] }]}>
-                {/* Emoji Badge */}
-                <Text style={styles.emojiBadge}>{item.emoji}</Text>
+            <Animated.View style={[styles.slide, { opacity, transform: [{ scale }, { translateY }] }]}>
+                {/* Visual Accent */}
+                <View style={[styles.visualAccent, { backgroundColor: item.themeColor }]} />
 
                 {/* Icon Container with glow */}
                 <Animated.View
@@ -113,26 +122,20 @@ const OnboardingScreen: React.FC<OnboardingProps> = ({ onDone }) => {
 
                 {/* Text Content */}
                 <View style={styles.textContainer}>
-                    <Text style={styles.subtitle}>{item.subtitle}</Text>
+                    <Text style={[styles.subtitle, { color: item.themeColor }]}>{item.subtitle}</Text>
                     <Text style={styles.title}>{item.title}</Text>
                     <Text style={styles.description}>{item.description}</Text>
                 </View>
 
-                {/* Feature Tags */}
+                {/* Platform Grid on first slide */}
                 {index === 0 && (
-                    <View style={styles.featureTags}>
-                        <View style={styles.tag}>
-                            <Text style={styles.tagText}>YouTube</Text>
-                        </View>
-                        <View style={styles.tag}>
-                            <Text style={styles.tagText}>Spotify</Text>
-                        </View>
-                        <View style={styles.tag}>
-                            <Text style={styles.tagText}>TikTok</Text>
-                        </View>
-                        <View style={styles.tag}>
-                            <Text style={styles.tagText}>+ More</Text>
-                        </View>
+                    <View style={styles.platformGrid}>
+                        <View style={styles.tag}><Text style={styles.tagText}>YouTube</Text></View>
+                        <View style={styles.tag}><Text style={styles.tagText}>Spotify</Text></View>
+                        <View style={styles.tag}><Text style={styles.tagText}>TikTok</Text></View>
+                        <View style={styles.tag}><Text style={styles.tagText}>Insta</Text></View>
+                        <View style={styles.tag}><Text style={styles.tagText}>FB</Text></View>
+                        <View style={styles.tag}><Text style={styles.tagText}>+ 10 More</Text></View>
                     </View>
                 )}
             </Animated.View>
@@ -143,16 +146,19 @@ const OnboardingScreen: React.FC<OnboardingProps> = ({ onDone }) => {
 
     return (
         <View style={styles.container}>
-            {/* Background decorations */}
-            <View style={styles.bgDecor1} />
-            <View style={styles.bgDecor2} />
+            {/* Logo in top center */}
+            <View style={styles.headerBranding}>
+                <Image
+                    source={require('../../transparent_logo.png')}
+                    style={styles.onboardingLogo}
+                    resizeMode="contain"
+                />
+                <Text style={styles.brandName}>VibeDownloader</Text>
+            </View>
 
-            {/* Skip button */}
-            {!isLastSlide && (
-                <TouchableOpacity style={styles.skipButton} onPress={onDone}>
-                    <Text style={styles.skipText}>Skip</Text>
-                </TouchableOpacity>
-            )}
+            {/* Background decorations */}
+            <View style={[styles.bgDecorCircle, { top: -100, right: -50, backgroundColor: Colors.primary }]} />
+            <View style={[styles.bgDecorCircle, { bottom: 100, left: -100, backgroundColor: Colors.accent }]} />
 
             {/* Content */}
             <View style={styles.flatListContainer}>
@@ -172,16 +178,34 @@ const OnboardingScreen: React.FC<OnboardingProps> = ({ onDone }) => {
                         const index = Math.round(e.nativeEvent.contentOffset.x / width);
                         setCurrentIndex(index);
                     }}
+                    getItemLayout={(_, index) => ({
+                        length: width,
+                        offset: width * index,
+                        index,
+                    })}
+                    onScrollToIndexFailed={(info) => {
+                        flatListRef.current?.scrollToOffset({
+                            offset: info.averageItemLength * info.index,
+                            animated: true,
+                        });
+                    }}
                     keyExtractor={item => item.id}
                 />
             </View>
 
+            {/* Skip button - moved here to ensure it's on top of the list */}
+            {!isLastSlide && (
+                <TouchableOpacity style={[styles.skipButton, { zIndex: 30 }]} onPress={onDone}>
+                    <Text style={styles.skipText}>Skip</Text>
+                </TouchableOpacity>
+            )}
+
             {/* Pagination */}
             <View style={styles.pagination}>
-                {SLIDES.map((_, index) => {
+                {SLIDES.map((item, index) => {
                     const dotWidth = scrollX.interpolate({
                         inputRange: [(index - 1) * width, index * width, (index + 1) * width],
-                        outputRange: [8, 28, 8],
+                        outputRange: [8, 32, 8],
                         extrapolate: 'clamp'
                     });
                     const dotOpacity = scrollX.interpolate({
@@ -197,7 +221,7 @@ const OnboardingScreen: React.FC<OnboardingProps> = ({ onDone }) => {
                                 {
                                     width: dotWidth,
                                     opacity: dotOpacity,
-                                    backgroundColor: Colors.primary
+                                    backgroundColor: item.themeColor
                                 }
                             ]}
                         />
@@ -206,7 +230,7 @@ const OnboardingScreen: React.FC<OnboardingProps> = ({ onDone }) => {
             </View>
 
             {/* Action Button */}
-            <View style={styles.footer}>
+            <View style={[styles.footer, { zIndex: 20 }]}>
                 <TouchableOpacity
                     style={[
                         styles.button,
@@ -229,42 +253,51 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: Colors.background,
     },
-    bgDecor1: {
+    headerBranding: {
         position: 'absolute',
-        top: -100,
-        right: -100,
+        top: 60,
+        alignItems: 'center',
+        width: '100%',
+        zIndex: 10,
+    },
+    onboardingLogo: {
+        width: 100,
+        height: 100,
+        marginBottom: Spacing.xs,
+    },
+    brandName: {
+        fontSize: 28,
+        fontWeight: '900',
+        color: Colors.textPrimary,
+        letterSpacing: 2,
+    },
+    bgDecorCircle: {
+        position: 'absolute',
         width: 300,
         height: 300,
         borderRadius: 150,
-        backgroundColor: Colors.primary,
-        opacity: 0.05,
-    },
-    bgDecor2: {
-        position: 'absolute',
-        bottom: -50,
-        left: -80,
-        width: 250,
-        height: 250,
-        borderRadius: 125,
-        backgroundColor: Colors.secondary,
-        opacity: 0.05,
+        opacity: 0.04,
     },
     skipButton: {
         position: 'absolute',
-        top: 50,
+        top: 65,
         right: 24,
-        zIndex: 10,
+        zIndex: 100,
+        backgroundColor: 'rgba(255,255,255,0.05)',
         paddingHorizontal: 16,
-        paddingVertical: 8,
+        paddingVertical: 10,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
     },
     skipText: {
         color: Colors.textMuted,
-        fontSize: Typography.sizes.base,
-        fontWeight: '500',
+        fontSize: Typography.sizes.sm,
+        fontWeight: '700',
     },
     flatListContainer: {
         flex: 1,
-        marginTop: 80,
+        marginTop: 60,
     },
     slide: {
         width,
@@ -272,104 +305,114 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingHorizontal: Spacing.xl,
     },
-    emojiBadge: {
-        fontSize: 40,
-        marginBottom: Spacing.lg,
+    visualAccent: {
+        position: 'absolute',
+        width: 200,
+        height: 200,
+        borderRadius: 100,
+        opacity: 0.05,
+        filter: 'blur(50px)',
     },
     iconContainer: {
-        width: 120,
-        height: 120,
-        borderRadius: 35,
+        width: 160,
+        height: 160,
+        borderRadius: 50,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: Spacing.xl,
-        ...Shadows.lg,
+        marginBottom: Spacing.xxl,
+        borderWidth: 2,
+        borderColor: 'rgba(255,255,255,0.2)',
+        ...Shadows.xl,
     },
     iconGlow: {
         position: 'absolute',
-        width: 160,
-        height: 160,
-        borderRadius: 80,
-        opacity: 0.2,
+        width: 200,
+        height: 200,
+        borderRadius: 100,
+        opacity: 0.15,
     },
     textContainer: {
         alignItems: 'center',
-        marginBottom: Spacing.lg,
+        marginBottom: Spacing.xl,
     },
     subtitle: {
-        fontSize: Typography.sizes.xs,
-        color: Colors.primary,
-        fontWeight: '600',
-        letterSpacing: 2,
+        fontSize: 14,
+        fontWeight: '900',
+        letterSpacing: 3,
         textTransform: 'uppercase',
-        marginBottom: Spacing.xs,
+        marginBottom: Spacing.sm,
     },
     title: {
-        fontSize: 34,
-        fontWeight: '800',
+        fontSize: 36,
+        fontWeight: '900',
         color: Colors.textPrimary,
         marginBottom: Spacing.md,
         textAlign: 'center',
+        lineHeight: 44,
     },
     description: {
-        fontSize: Typography.sizes.base,
+        fontSize: 17,
         color: Colors.textSecondary,
         textAlign: 'center',
-        lineHeight: 26,
+        lineHeight: 28,
         paddingHorizontal: Spacing.md,
     },
-    featureTags: {
+    platformGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         justifyContent: 'center',
-        gap: 8,
-        marginTop: Spacing.md,
+        gap: 10,
+        marginTop: Spacing.xl,
+        maxWidth: 320,
     },
     tag: {
-        backgroundColor: Colors.surface,
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        borderRadius: BorderRadius.round,
+        backgroundColor: 'rgba(255,255,255,0.03)',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderRadius: 25,
         borderWidth: 1,
-        borderColor: Colors.border,
+        borderColor: 'rgba(255,255,255,0.08)',
     },
     tagText: {
-        color: Colors.textSecondary,
-        fontSize: Typography.sizes.sm,
-        fontWeight: '500',
+        color: Colors.textMuted,
+        fontSize: Typography.sizes.xs,
+        fontWeight: '700',
+        letterSpacing: 0.5,
     },
     pagination: {
         flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: Spacing.xl,
+        marginBottom: 60,
     },
     dot: {
-        height: 8,
-        borderRadius: 4,
-        marginHorizontal: 4,
+        height: 10,
+        borderRadius: 5,
+        marginHorizontal: 6,
     },
     footer: {
         paddingHorizontal: Spacing.xl,
-        paddingBottom: 50,
+        paddingBottom: 60,
     },
     button: {
         backgroundColor: Colors.surface,
-        paddingVertical: 18,
-        borderRadius: BorderRadius.xl,
+        paddingVertical: 22,
+        borderRadius: 24,
         alignItems: 'center',
         borderWidth: 1,
         borderColor: Colors.border,
+        ...Shadows.md,
     },
     buttonGetStarted: {
-        backgroundColor: Colors.primary,
-        borderColor: Colors.primary,
-        ...Shadows.glow(Colors.primary),
+        backgroundColor: '#6366F1',
+        borderColor: '#818CF8',
+        ...Shadows.glow('#6366F1'),
     },
     buttonText: {
         color: Colors.textPrimary,
-        fontSize: Typography.sizes.lg,
-        fontWeight: '700',
+        fontSize: 18,
+        fontWeight: '900',
+        letterSpacing: 0.5,
     }
 });
 

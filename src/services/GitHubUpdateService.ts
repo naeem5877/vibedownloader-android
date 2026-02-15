@@ -3,7 +3,7 @@
  */
 
 // App version - KEEP IN SYNC WITH package.json
-const APP_VERSION = '1.0.6';
+const APP_VERSION = '1.0.7';
 
 const REPO_OWNER = 'naeem5877';
 const REPO_NAME = 'vibedownloader-android';

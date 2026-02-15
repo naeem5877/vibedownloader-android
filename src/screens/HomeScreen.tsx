@@ -19,6 +19,7 @@ import {
     TouchableOpacity,
     AppStateStatus,
     Share,
+    Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, BorderRadius, Spacing, Typography, PlatformThemes, getPlatformColor, Shadows } from '../theme';
@@ -34,11 +35,15 @@ import {
 // FormatToggle removed - automatic mode detection
 import { PlaylistSelectionModal } from '../components/PlaylistSelectionModal';
 import { SkeletonCard } from '../components/SkeletonCard';
+import { DiscordButton } from '../components/DiscordButton';
 import { useYtDlp } from '../hooks/useYtDlp';
 import { VideoFormat, ytDlpEventEmitter, YtDlpNative } from '../native/YtDlpModule';
-import { DownloadIcon, SparkleIcon, ShareIcon, GitHubIcon, DesktopIcon, StarIcon } from '../components/Icons';
+import { DownloadIcon, SparkleIcon, ShareIcon, GitHubIcon, DesktopIcon, StarIcon, WaveformIcon } from '../components/Icons';
 import { checkForUpdates, UpdateInfo } from '../services/GitHubUpdateService';
 import { getSpotifyPlaylist, extractSpotifyId, getTrackInfo, buildYouTubeSearchQuery, formatTrackMetadata } from '../services/SpotifyService';
+import { detectPlatform } from '../utils/platform';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export const HomeScreen: React.FC = () => {
     const [url, setUrl] = useState('');
@@ -59,9 +64,14 @@ export const HomeScreen: React.FC = () => {
 
     const [state, actions] = useYtDlp();
 
-    // ... refs ...
+    // Animation refs
     const headerFadeAnim = useRef(new Animated.Value(0)).current;
     const headerSlideAnim = useRef(new Animated.Value(-20)).current;
+    const emptyFadeAnim = useRef(new Animated.Value(0)).current;
+    const emptySlideAnim = useRef(new Animated.Value(30)).current;
+    const pillAnims = useRef([0, 1, 2, 3, 4].map(() => new Animated.Value(0))).current;
+    const orbAnim1 = useRef(new Animated.Value(0)).current;
+    const orbAnim2 = useRef(new Animated.Value(0)).current;
 
     const handleFetch = useCallback(async (text: string = url) => {
         if (!text.trim()) {
@@ -226,6 +236,8 @@ export const HomeScreen: React.FC = () => {
                     const sharedUrl = urlMatch[0];
                     setUrl(sharedUrl);
                     // Auto-detect platform and fetch
+                    const detected = detectPlatform(sharedUrl);
+                    if (detected !== 'YouTube') setDetectedPlatform(detected);
                     setTimeout(() => handleFetch(sharedUrl), 500);
                 }
             }
@@ -299,6 +311,10 @@ export const HomeScreen: React.FC = () => {
                 setUrl(text);
                 // Optional: Auto-fetch on paste if it looks like a URL
                 if (text.startsWith('http')) {
+                    const detected = detectPlatform(text);
+                    if (detected !== 'YouTube') {
+                        setDetectedPlatform(detected);
+                    }
                     handleFetch(text);
                 }
             }
@@ -311,6 +327,7 @@ export const HomeScreen: React.FC = () => {
     // --- Effects ---
 
     useEffect(() => {
+        // Header entrance
         Animated.parallel([
             Animated.timing(headerFadeAnim, {
                 toValue: 1,
@@ -324,6 +341,49 @@ export const HomeScreen: React.FC = () => {
                 useNativeDriver: true,
             }),
         ]).start();
+
+        // Empty state entrance
+        Animated.parallel([
+            Animated.timing(emptyFadeAnim, {
+                toValue: 1,
+                duration: 800,
+                delay: 300,
+                easing: Easing.out(Easing.cubic),
+                useNativeDriver: true,
+            }),
+            Animated.spring(emptySlideAnim, {
+                toValue: 0,
+                tension: 40,
+                friction: 8,
+                delay: 300,
+                useNativeDriver: true,
+            }),
+        ]).start();
+
+        // Staggered pill animations
+        pillAnims.forEach((anim, index) => {
+            Animated.spring(anim, {
+                toValue: 1,
+                tension: 50,
+                friction: 8,
+                delay: 600 + index * 100,
+                useNativeDriver: true,
+            }).start();
+        });
+
+        // Floating orb animations
+        Animated.loop(
+            Animated.sequence([
+                Animated.timing(orbAnim1, { toValue: -15, duration: 3000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+                Animated.timing(orbAnim1, { toValue: 15, duration: 3000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+            ])
+        ).start();
+        Animated.loop(
+            Animated.sequence([
+                Animated.timing(orbAnim2, { toValue: 12, duration: 2500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+                Animated.timing(orbAnim2, { toValue: -12, duration: 2500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+            ])
+        ).start();
 
         // Check for updates on mount
         setTimeout(async () => {
@@ -351,14 +411,21 @@ export const HomeScreen: React.FC = () => {
     useEffect(() => {
         const validateAndDetect = async () => {
             if (url.trim().length > 5) {
-                try {
-                    const result = await actions.validateUrl(url);
-                    // Only auto-update platform if user didn't manually select
-                    if (!userSelectedPlatform) {
-                        setDetectedPlatform(result.platform);
+                // Use JS-based detection first as it's faster and handles common cases
+                const detected = detectPlatform(url);
+                if (detected !== 'YouTube' && !userSelectedPlatform) {
+                    setDetectedPlatform(detected);
+                } else {
+                    // Fallback to native validation if needed or just trust JS
+                    try {
+                        const result = await actions.validateUrl(url);
+                        // Only auto-update platform if user didn't manually select
+                        if (!userSelectedPlatform && result.platform && result.platform !== 'Unknown') {
+                            setDetectedPlatform(result.platform);
+                        }
+                    } catch (error) {
+                        console.warn('URL validation error:', error);
                     }
-                } catch (error) {
-                    console.warn('URL validation error:', error);
                 }
             }
         };
@@ -470,45 +537,46 @@ export const HomeScreen: React.FC = () => {
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
             >
-                {/* Premium Header */}
+                {/* Modern Header */}
                 <Animated.View
                     style={[
                         styles.header,
                         { opacity: headerFadeAnim, transform: [{ translateY: headerSlideAnim }] }
                     ]}
                 >
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                        <View>
-                            <View style={styles.logoContainer}>
-                                <Text style={[styles.logo, { color: Colors.primary }]}>VibeDownloader</Text>
-                            </View>
-                            <Text style={styles.tagline}>
-                                Download from any platform, instantly
-                            </Text>
+                    <View style={styles.headerTop}>
+                        <View style={styles.headerBrand}>
+                            <View style={styles.logoGlow} />
+                            <Text style={styles.logo}>Vibe</Text>
+                            <Text style={[styles.logo, styles.logoAccent]}>Downloader</Text>
                         </View>
 
                         {/* Header Actions */}
-                        <View style={{ flexDirection: 'row', gap: 12 }}>
+                        <View style={styles.headerActions}>
+                            <DiscordButton compact />
                             <TouchableOpacity
                                 onPress={() => Share.share({ message: 'Check out VibeDownloader - The ultimate media downloader for Android! https://github.com/naeem5877/vibedownloader-android' })}
-                                style={{ padding: 4 }}
+                                style={styles.headerBtn}
                             >
-                                <ShareIcon size={22} color={Colors.textSecondary} />
+                                <ShareIcon size={18} color={Colors.textSecondary} />
                             </TouchableOpacity>
                             <TouchableOpacity
                                 onPress={() => Linking.openURL('https://github.com/naeem5877/vibedownloader-android')}
-                                style={{ padding: 4 }}
+                                style={styles.headerBtn}
                             >
-                                <StarIcon size={22} color="#FFD700" />
+                                <StarIcon size={18} color="#FFD700" />
                             </TouchableOpacity>
                             <TouchableOpacity
                                 onPress={() => Linking.openURL('https://github.com/naeem5877/VibeDownloader')}
-                                style={{ padding: 4 }}
+                                style={styles.headerBtn}
                             >
-                                <DesktopIcon size={22} color={Colors.textSecondary} />
+                                <DesktopIcon size={18} color={Colors.textSecondary} />
                             </TouchableOpacity>
                         </View>
                     </View>
+                    <Text style={styles.tagline}>
+                        Download from any platform, instantly ⚡
+                    </Text>
                 </Animated.View>
 
                 {/* Platform Selector */}
@@ -531,7 +599,7 @@ export const HomeScreen: React.FC = () => {
                                 setUrl(text);
                                 if (text.trim().length === 0) {
                                     setUserSelectedPlatform(false);
-                                    setDetectedPlatform('youtube');
+                                    setDetectedPlatform('YouTube');
                                     actions.reset();
                                 }
                             }}
@@ -612,31 +680,50 @@ export const HomeScreen: React.FC = () => {
                     </>
                 )}
 
-                {/* Premium Empty State */}
+                {/* Animated Empty State */}
                 {!state.videoInfo && !state.isLoading && !state.fetchError && !url && (
-                    <View style={styles.emptyState}>
+                    <Animated.View style={[
+                        styles.emptyState,
+                        { opacity: emptyFadeAnim, transform: [{ translateY: emptySlideAnim }] }
+                    ]}>
+                        {/* Floating Orbs */}
+                        <Animated.View style={[styles.emptyOrb, styles.emptyOrbPrimary, { transform: [{ translateY: orbAnim1 }] }]} />
+                        <Animated.View style={[styles.emptyOrb, styles.emptyOrbSecondary, { transform: [{ translateY: orbAnim2 }] }]} />
+
                         <View style={styles.emptyIconContainer}>
-                            <SparkleIcon size={48} color={Colors.primary} />
+                            <View style={styles.emptyIconGlow} />
+                            <View style={styles.emptyIconRing}>
+                                <SparkleIcon size={44} color={Colors.primary} />
+                            </View>
                         </View>
                         <Text style={styles.emptyTitle}>Universal Downloader</Text>
                         <Text style={styles.emptySubtitle}>
-                            Paste a link from YouTube, Instagram, TikTok, Spotify, and more.
-                            Download videos, audio, and photos in the best quality.
+                            Paste a link from YouTube, Instagram, TikTok, Spotify, and more
                         </Text>
 
-                        {/* Feature Pills */}
+                        {/* Animated Feature Pills */}
                         <View style={styles.featurePills}>
-                            <View style={styles.featurePill}>
-                                <Text style={styles.featurePillText}>🎬 4K Video</Text>
-                            </View>
-                            <View style={styles.featurePill}>
-                                <Text style={styles.featurePillText}>🎵 MP3 Audio</Text>
-                            </View>
-                            <View style={styles.featurePill}>
-                                <Text style={styles.featurePillText}>📸 Photos</Text>
-                            </View>
+                            {['🎬 4K Video', '🎵 MP3 Audio', '📸 Photos', '🔗 8+ Platforms', '⚡ Fast'].map((label, i) => (
+                                <Animated.View
+                                    key={label}
+                                    style={[
+                                        styles.featurePill,
+                                        {
+                                            opacity: pillAnims[i],
+                                            transform: [{
+                                                scale: pillAnims[i].interpolate({
+                                                    inputRange: [0, 1],
+                                                    outputRange: [0.7, 1],
+                                                }),
+                                            }],
+                                        },
+                                    ]}
+                                >
+                                    <Text style={styles.featurePillText}>{label}</Text>
+                                </Animated.View>
+                            ))}
                         </View>
-                    </View>
+                    </Animated.View>
                 )}
 
                 {/* Playlist Modal */}
@@ -679,36 +766,64 @@ const styles = StyleSheet.create({
     scrollContent: {
         paddingBottom: Spacing.xxl,
     },
+    // ── Modern Header ──
     header: {
-        alignItems: 'center',
-        paddingTop: Spacing.xl,
-        paddingBottom: Spacing.lg,
+        paddingTop: Spacing.lg,
+        paddingBottom: Spacing.sm,
         paddingHorizontal: Spacing.md,
     },
-    logoContainer: {
+    headerTop: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        width: '100%',
+    },
+    headerBrand: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.sm,
+        position: 'relative',
+    },
+    logoGlow: {
+        position: 'absolute',
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        backgroundColor: Colors.primary,
+        opacity: 0.08,
+        left: -10,
+        top: -12,
     },
     logo: {
-        fontSize: Typography.sizes['3xl'],
-        fontWeight: Typography.weights.bold,
+        fontSize: 24,
+        fontWeight: '800',
+        color: Colors.textPrimary,
+        letterSpacing: -0.5,
     },
-    betaBadge: {
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: 2,
-        borderRadius: BorderRadius.round,
+    logoAccent: {
+        color: Colors.primary,
     },
-    betaText: {
-        fontSize: Typography.sizes.xxs,
-        fontWeight: Typography.weights.bold,
-        letterSpacing: 1,
+    headerActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    headerBtn: {
+        width: 38,
+        height: 38,
+        borderRadius: 12,
+        backgroundColor: Colors.surface,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: Colors.border,
     },
     tagline: {
         color: Colors.textMuted,
-        fontSize: Typography.sizes.sm,
-        marginTop: Spacing.xs,
+        fontSize: 13,
+        marginTop: 8,
+        letterSpacing: 0.2,
     },
+    // ── Input Section ──
     inputSection: {
         marginTop: Spacing.md,
         paddingHorizontal: Spacing.md,
@@ -716,6 +831,7 @@ const styles = StyleSheet.create({
     inputRow: {
         marginBottom: Spacing.sm,
     },
+    // ── Quick Action ──
     quickActionContainer: {
         marginHorizontal: Spacing.md,
         marginTop: Spacing.md,
@@ -724,35 +840,43 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: Spacing.md,
-        borderRadius: BorderRadius.lg,
+        paddingVertical: 16,
+        borderRadius: 16,
         gap: Spacing.sm,
-        ...Shadows.md,
+        shadowColor: Colors.primary,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.3,
+        shadowRadius: 12,
+        elevation: 8,
     },
     quickDownloadText: {
         color: '#FFF',
-        fontSize: Typography.sizes.base,
-        fontWeight: Typography.weights.bold,
+        fontSize: 16,
+        fontWeight: '700',
+        letterSpacing: 0.3,
     },
+    // ── Error ──
     errorContainer: {
         marginHorizontal: Spacing.md,
         marginTop: Spacing.md,
-        backgroundColor: `${Colors.error}10`,
-        borderRadius: BorderRadius.lg,
+        backgroundColor: `${Colors.error}08`,
+        borderRadius: 16,
         padding: Spacing.md,
         borderWidth: 1,
-        borderColor: `${Colors.error}30`,
+        borderColor: `${Colors.error}25`,
     },
     errorTitle: {
         color: Colors.error,
-        fontSize: Typography.sizes.sm,
-        fontWeight: Typography.weights.semibold,
+        fontSize: 14,
+        fontWeight: '700',
         marginBottom: 4,
     },
     errorText: {
         color: Colors.errorLight,
-        fontSize: Typography.sizes.sm,
+        fontSize: 13,
+        lineHeight: 18,
     },
+    // ── Progress ──
     progressSection: {
         marginTop: Spacing.lg,
     },
@@ -760,6 +884,7 @@ const styles = StyleSheet.create({
         marginTop: Spacing.xl,
         marginHorizontal: Spacing.md,
     },
+    // ── Downloads ──
     downloadHeader: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -771,56 +896,95 @@ const styles = StyleSheet.create({
     },
     downloadHeaderText: {
         color: Colors.textMuted,
-        fontSize: Typography.sizes.xxs,
-        fontWeight: Typography.weights.bold,
-        letterSpacing: Typography.letterSpacing.widest,
+        fontSize: 11,
+        fontWeight: '800',
+        letterSpacing: 1.5,
     },
+    // ── Animated Empty State ──
     emptyState: {
         alignItems: 'center',
-        marginTop: Spacing.xxxl,
-        paddingHorizontal: Spacing.xl,
+        marginTop: 48,
+        paddingHorizontal: 28,
+        position: 'relative',
+        minHeight: 360,
     },
-    emptyIconContainer: {
+    emptyOrb: {
+        position: 'absolute',
+        borderRadius: 100,
+        opacity: 0.1,
+    },
+    emptyOrbPrimary: {
+        width: 150,
+        height: 150,
+        backgroundColor: Colors.primary,
+        top: -20,
+        left: -10,
+    },
+    emptyOrbSecondary: {
         width: 100,
         height: 100,
-        borderRadius: 50,
-        backgroundColor: `${Colors.primary}10`,
+        backgroundColor: Colors.secondary,
+        bottom: 40,
+        right: 0,
+    },
+    emptyIconContainer: {
+        marginBottom: 24,
+        position: 'relative',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    emptyIconGlow: {
+        position: 'absolute',
+        width: 120,
+        height: 120,
+        borderRadius: 60,
+        backgroundColor: Colors.primary,
+        opacity: 0.12,
+    },
+    emptyIconRing: {
+        width: 88,
+        height: 88,
+        borderRadius: 44,
+        backgroundColor: `${Colors.primary}0A`,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: Spacing.lg,
+        borderWidth: 2,
+        borderColor: `${Colors.primary}20`,
     },
     emptyTitle: {
         color: Colors.textPrimary,
-        fontSize: Typography.sizes['2xl'],
-        fontWeight: Typography.weights.bold,
-        marginBottom: Spacing.sm,
+        fontSize: 26,
+        fontWeight: '800',
+        marginBottom: 10,
         textAlign: 'center',
+        letterSpacing: -0.5,
     },
     emptySubtitle: {
         color: Colors.textMuted,
-        fontSize: Typography.sizes.base,
+        fontSize: 14,
         textAlign: 'center',
-        lineHeight: 24,
-        marginBottom: Spacing.lg,
+        lineHeight: 22,
+        marginBottom: 24,
+        maxWidth: 300,
     },
     featurePills: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         justifyContent: 'center',
-        gap: Spacing.sm,
+        gap: 10,
     },
     featurePill: {
         backgroundColor: Colors.surface,
-        paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.sm,
-        borderRadius: BorderRadius.round,
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 20,
         borderWidth: 1,
         borderColor: Colors.border,
     },
     featurePillText: {
         color: Colors.textSecondary,
-        fontSize: Typography.sizes.sm,
-        fontWeight: Typography.weights.medium,
+        fontSize: 13,
+        fontWeight: '600',
     },
 });
 

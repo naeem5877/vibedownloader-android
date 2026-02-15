@@ -52,6 +52,9 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
     // Listen for progress events with error handling
     useEffect(() => {
         let subscription: any;
+        let lastProgressTime = Date.now();
+        let lastProgress = -1;
+        let staleTimeout: ReturnType<typeof setTimeout> | null = null;
 
         try {
             subscription = ytDlpEventEmitter.addListener(
@@ -60,12 +63,48 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                     if (event.processId === currentProcessId) {
                         // Clamp progress between 0 and 100 to prevent -1% display
                         const clampedProgress = Math.max(0, Math.min(event.progress || 0, 100));
+
+                        // Track progress changes for stale detection
+                        if (clampedProgress !== lastProgress) {
+                            lastProgress = clampedProgress;
+                            lastProgressTime = Date.now();
+                        }
+
+                        // Determine status message based on line content
+                        let statusLine = event.line || '';
+                        if (statusLine.toLowerCase().includes('processing') ||
+                            statusLine.toLowerCase().includes('ffmpeg') ||
+                            statusLine.toLowerCase().includes('converting')) {
+                            // During post-processing, show a friendly message
+                            statusLine = clampedProgress >= 99 ? 'Almost done... Converting...' : statusLine;
+                        }
+
                         setState((prev) => ({
                             ...prev,
                             downloadProgress: clampedProgress,
                             downloadEta: event.eta || 0,
-                            downloadLine: event.line || '',
+                            downloadLine: statusLine,
                         }));
+
+                        // Clear existing stale timeout
+                        if (staleTimeout) clearTimeout(staleTimeout);
+
+                        // Set stale detection: if no progress change for 120 seconds, flag as stuck
+                        staleTimeout = setTimeout(() => {
+                            const timeSinceLastChange = Date.now() - lastProgressTime;
+                            if (timeSinceLastChange > 120000) {
+                                console.warn('Download appears stale - no progress for 2 minutes');
+                                // Auto-cancel stale download
+                                if (currentProcessId && YtDlpNative?.cancelDownload) {
+                                    YtDlpNative.cancelDownload(currentProcessId).catch(() => { });
+                                }
+                                setState((prev) => ({
+                                    ...prev,
+                                    isDownloading: false,
+                                    downloadError: 'Download timed out during processing. Please try again.',
+                                }));
+                            }
+                        }, 120000);
                     }
                 }
             );
@@ -76,6 +115,7 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
         return () => {
             try {
                 subscription?.remove();
+                if (staleTimeout) clearTimeout(staleTimeout);
             } catch (error) {
                 // Ignore cleanup errors
             }
@@ -132,8 +172,22 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 isDownloading: true,
                 downloadProgress: 0,
                 downloadEta: 0,
+                downloadLine: 'Preparing download...',
                 downloadError: null,
             }));
+
+            // Overall timeout (5 minutes max for any download)
+            const downloadTimeout = setTimeout(() => {
+                console.warn('Download hard timeout reached (5 min)');
+                if (YtDlpNative?.cancelDownload) {
+                    YtDlpNative.cancelDownload(processId).catch(() => { });
+                }
+                setState((prev) => ({
+                    ...prev,
+                    isDownloading: false,
+                    downloadError: 'Download timed out. The server may be slow or the file is too large.',
+                }));
+            }, 300000); // 5 minutes
 
             try {
                 if (!YtDlpNative || !YtDlpNative.download) {
@@ -141,9 +195,11 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 }
 
                 const result = await YtDlpNative.download(url, formatId, processId);
+                clearTimeout(downloadTimeout);
                 setState((prev) => ({ ...prev, isDownloading: false, downloadProgress: 100 }));
                 return result;
             } catch (error: any) {
+                clearTimeout(downloadTimeout);
                 if (error.code === 'CANCELLED') {
                     setState((prev) => ({ ...prev, isDownloading: false }));
                     return null;
@@ -175,8 +231,22 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 isDownloading: true,
                 downloadProgress: 0,
                 downloadEta: 0,
+                downloadLine: 'Searching for track...',
                 downloadError: null,
             }));
+
+            // Overall timeout (5 minutes)
+            const downloadTimeout = setTimeout(() => {
+                console.warn('Spotify download hard timeout reached (5 min)');
+                if (YtDlpNative?.cancelDownload) {
+                    YtDlpNative.cancelDownload(processId).catch(() => { });
+                }
+                setState((prev) => ({
+                    ...prev,
+                    isDownloading: false,
+                    downloadError: 'Download timed out. Please try again.',
+                }));
+            }, 300000);
 
             try {
                 if (!YtDlpNative || !YtDlpNative.downloadSpotifyTrack) {
@@ -184,9 +254,11 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 }
 
                 const result = await YtDlpNative.downloadSpotifyTrack(searchQuery, title, artist, thumbnail, processId);
+                clearTimeout(downloadTimeout);
                 setState((prev) => ({ ...prev, isDownloading: false, downloadProgress: 100 }));
                 return result;
             } catch (error: any) {
+                clearTimeout(downloadTimeout);
                 if (error.code === 'CANCELLED') {
                     setState((prev) => ({ ...prev, isDownloading: false }));
                     return null;

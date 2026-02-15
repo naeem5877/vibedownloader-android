@@ -1,5 +1,5 @@
 /**
- * LibraryScreen - File Management for Downloaded Media
+ * LibraryScreen - Modern File Management for Downloaded Media
  * Displays all downloaded files organized by platform with actions like play, share, delete
  */
 import React, { useState, useCallback, useEffect, useRef } from 'react';
@@ -66,7 +66,8 @@ const StorageInfoCard: React.FC<{ basePath: string; onPress: () => void }> = ({ 
     return (
         <TouchableOpacity style={styles.storageCard} onPress={onPress} activeOpacity={0.7}>
             <View style={styles.storageIconContainer}>
-                <FolderIcon size={24} color={Colors.primary} />
+                <View style={styles.storageIconGlow} />
+                <FolderIcon size={22} color={Colors.primary} />
             </View>
             <View style={styles.storageInfo}>
                 <Text style={styles.storageTitle}>Storage Location</Text>
@@ -75,7 +76,7 @@ const StorageInfoCard: React.FC<{ basePath: string; onPress: () => void }> = ({ 
                 </Text>
             </View>
             <View style={styles.storageAction}>
-                <InfoIcon size={18} color={Colors.textMuted} />
+                <InfoIcon size={16} color={Colors.textMuted} />
             </View>
         </TouchableOpacity>
     );
@@ -710,12 +711,14 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = false 
                 ]}
             >
                 <View style={styles.headerContent}>
-                    <Text style={styles.headerTitle}>Library</Text>
+                    <View>
+                        <Text style={styles.headerTitle}>Library</Text>
+                        <Text style={styles.headerSubtitle}>Your downloaded media</Text>
+                    </View>
                     <TouchableOpacity onPress={handleRefresh} style={styles.refreshButton}>
-                        <RefreshIcon size={22} color={Colors.textSecondary} />
+                        <RefreshIcon size={20} color={Colors.textSecondary} />
                     </TouchableOpacity>
                 </View>
-                <Text style={styles.headerSubtitle}>Your downloaded media</Text>
             </Animated.View>
 
             <FlatList
@@ -736,7 +739,10 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = false 
                         {isEmpty && (
                             <View style={styles.emptyState}>
                                 <View style={styles.emptyIconContainer}>
-                                    <FolderIcon size={48} color={Colors.textMuted} />
+                                    <View style={styles.emptyIconGlow} />
+                                    <View style={styles.emptyIconRing}>
+                                        <FolderIcon size={36} color={Colors.textMuted} />
+                                    </View>
                                 </View>
                                 <Text style={styles.emptyTitle}>No Downloads Yet</Text>
                                 <Text style={styles.emptySubtitle}>
@@ -789,7 +795,7 @@ const styles = StyleSheet.create({
     header: {
         paddingHorizontal: Spacing.md,
         paddingTop: Spacing.lg,
-        paddingBottom: Spacing.md,
+        paddingBottom: Spacing.sm,
     },
     headerContent: {
         flexDirection: 'row',
@@ -797,17 +803,25 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
     },
     headerTitle: {
-        fontSize: Typography.sizes['3xl'],
-        fontWeight: Typography.weights.bold,
+        fontSize: 28,
+        fontWeight: '800',
         color: Colors.textPrimary,
+        letterSpacing: -0.5,
     },
     refreshButton: {
-        padding: Spacing.sm,
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        backgroundColor: Colors.surface,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: Colors.border,
     },
     headerSubtitle: {
-        fontSize: Typography.sizes.sm,
+        fontSize: 13,
         color: Colors.textMuted,
-        marginTop: Spacing.xs,
+        marginTop: 4,
     },
     listContent: {
         paddingHorizontal: Spacing.md,
@@ -818,8 +832,8 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: Colors.surface,
-        borderRadius: BorderRadius.lg,
-        padding: Spacing.md,
+        borderRadius: 18,
+        padding: 16,
         marginBottom: Spacing.lg,
         borderWidth: 1,
         borderColor: Colors.border,
@@ -827,10 +841,19 @@ const styles = StyleSheet.create({
     storageIconContainer: {
         width: 44,
         height: 44,
-        borderRadius: BorderRadius.md,
-        backgroundColor: `${Colors.primary}15`,
+        borderRadius: 14,
+        backgroundColor: `${Colors.primary}12`,
         justifyContent: 'center',
         alignItems: 'center',
+        position: 'relative',
+    },
+    storageIconGlow: {
+        position: 'absolute',
+        width: 44,
+        height: 44,
+        borderRadius: 14,
+        backgroundColor: Colors.primary,
+        opacity: 0.06,
     },
     storageInfo: {
         flex: 1,
@@ -852,8 +875,8 @@ const styles = StyleSheet.create({
     // Platform Storage Usage Card
     platformStorageCard: {
         backgroundColor: Colors.surface,
-        borderRadius: BorderRadius.lg,
-        padding: Spacing.md,
+        borderRadius: 18,
+        padding: 16,
         marginBottom: Spacing.lg,
         borderWidth: 1,
         borderColor: Colors.border,
@@ -1042,29 +1065,46 @@ const styles = StyleSheet.create({
     // Empty State
     emptyState: {
         alignItems: 'center',
-        paddingVertical: Spacing.xxxl,
-        paddingHorizontal: Spacing.xl,
+        paddingVertical: 48,
+        paddingHorizontal: 28,
     },
     emptyIconContainer: {
+        marginBottom: 24,
+        position: 'relative',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    emptyIconGlow: {
+        position: 'absolute',
+        width: 100,
+        height: 100,
+        borderRadius: 50,
+        backgroundColor: Colors.textMuted,
+        opacity: 0.08,
+    },
+    emptyIconRing: {
         width: 80,
         height: 80,
         borderRadius: 40,
-        backgroundColor: Colors.surface,
+        backgroundColor: `${Colors.textMuted}08`,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: Spacing.lg,
+        borderWidth: 2,
+        borderColor: `${Colors.textMuted}15`,
     },
     emptyTitle: {
-        fontSize: Typography.sizes.xl,
-        fontWeight: Typography.weights.bold,
+        fontSize: 22,
+        fontWeight: '800',
         color: Colors.textPrimary,
-        marginBottom: Spacing.sm,
+        marginBottom: 10,
+        letterSpacing: -0.3,
     },
     emptySubtitle: {
-        fontSize: Typography.sizes.sm,
+        fontSize: 14,
         color: Colors.textMuted,
         textAlign: 'center',
         lineHeight: 22,
+        maxWidth: 300,
     },
     // Modal
     modalOverlay: {
@@ -1074,8 +1114,8 @@ const styles = StyleSheet.create({
     },
     modalContent: {
         backgroundColor: Colors.surface,
-        borderTopLeftRadius: BorderRadius.xxl,
-        borderTopRightRadius: BorderRadius.xxl,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
         padding: Spacing.lg,
         maxHeight: '85%',
     },

@@ -44,12 +44,15 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         const val CHANNEL_PROGRESS_NAME = "Download Progress"
         
         // Supported platforms
+
+
         private val SUPPORTED_DOMAINS = listOf(
             "youtube.com", "youtu.be", "youtube-nocookie.com", "m.youtube.com",
             "instagram.com", "www.instagram.com",
             "facebook.com", "fb.watch", "fb.com", "www.facebook.com", "m.facebook.com",
             "tiktok.com", "www.tiktok.com", "vm.tiktok.com",
             "spotify.com", "open.spotify.com",
+            "tidal.com", "listen.tidal.com", "store.tidal.com",
             "twitter.com", "x.com", "mobile.twitter.com",
             "pinterest.com", "pin.it", "www.pinterest.com",
             "soundcloud.com", "www.soundcloud.com", "m.soundcloud.com"
@@ -166,6 +169,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 filePath.endsWith(".mp4") -> "video/mp4"
                 filePath.endsWith(".mp3") -> "audio/mpeg"
                 filePath.endsWith(".m4a") -> "audio/m4a"
+                filePath.endsWith(".flac") -> "audio/flac"
                 filePath.endsWith(".webm") -> "video/webm"
                 else -> "*/*"
             }
@@ -200,13 +204,23 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     }
 
     private fun isValidPlatform(url: String): Boolean {
+        // Always allow direct file downloads (regardless of domain)
+        val lowerUrl = url.lowercase()
+        if (lowerUrl.contains(".flac") || lowerUrl.contains(".mp3") || lowerUrl.contains(".m4a") || lowerUrl.contains(".mp4")) {
+            return true
+        }
+
         return try {
             val host = java.net.URI(url).host?.lowercase() ?: return false
+            // Allow generic audio/video CDNs
+            if (host.contains(".audio") || host.contains("googlevideo.com") || host.contains("fbcdn.net")) return true
+            
             SUPPORTED_DOMAINS.any { domain -> 
                 host == domain || host.endsWith(".$domain") 
             }
         } catch (e: Exception) {
-            false
+            // If URI parsing fails, but yt-dlp might handle it, let's be lenient if it looks like a URL
+            url.startsWith("http")
         }
     }
     
@@ -544,7 +558,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     private fun moveToPublicStorage(sourceFile: File, platform: String, contentType: String): File? {
         val extension = sourceFile.extension.lowercase()
         val isVideo = listOf("mp4", "mkv", "webm").contains(extension)
-        val isAudio = listOf("mp3", "m4a", "wav", "aac").contains(extension)
+        val isAudio = listOf("mp3", "m4a", "wav", "aac", "flac").contains(extension)
         val isImage = listOf("jpg", "png", "webp", "jpeg").contains(extension)
         
         // Use proper directories based on file type for better gallery integration
@@ -563,6 +577,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
             "m4a" -> "audio/mp4"
             "aac" -> "audio/aac"
             "wav" -> "audio/wav"
+            "flac" -> "audio/flac"
             "jpg", "jpeg" -> "image/jpeg"
             "png" -> "image/png"
             "webp" -> "image/webp"
@@ -598,13 +613,19 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
                 resolver.update(uri, values, null, null)
                 
-                // Delete source
+                // Delete source 
                 sourceFile.delete()
                 
-                // Return estimated File object for UI (path is virtual in Scoped Storage but useful for display)
-                val publicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
-                File(publicDir, "VibeDownloader/$platform/$contentType/${sourceFile.name}")
-                
+                // Get the actual physical path from MediaStore for reliable deletion later
+                var finalPath = sourceFile.absolutePath // last resort fallback
+                val projection = arrayOf(android.provider.MediaStore.MediaColumns.DATA)
+                resolver.query(uri, projection, null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val dataIndex = cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns.DATA)
+                        finalPath = cursor.getString(dataIndex)
+                    }
+                }
+                File(finalPath)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to move file to MediaStore", e)
                 resolver.delete(uri, null, null)
@@ -672,7 +693,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     }
 
     @ReactMethod
-    fun download(url: String, formatId: String?, processId: String, promise: Promise) {
+    fun download(url: String, formatId: String?, processId: String, options: ReadableMap?, promise: Promise) {
         if (!isInitialized) initializeYtDlp()
         
         if (!isValidPlatform(url)) {
@@ -685,25 +706,55 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         
         scope.launch {
             try {
-                val platform = getPlatformName(url)
+                // Extract options for custom metadata and naming
+                val forcedTitle = if (options?.hasKey("title") == true) options.getString("title") else null
+                val forcedArtist = if (options?.hasKey("artist") == true) options.getString("artist") else null
+                val forcedPlatform = if (options?.hasKey("platform") == true) options.getString("platform") else null
+                
+                // Determine platform (use forced if provided, e.g. for Spotify lossless)
+                val platform = forcedPlatform ?: getPlatformName(url)
                 
                 // 1. Download to temp cache directory first
-                val cacheDir = File(reactApplicationContext.cacheDir, "temp_download")
+                val cacheDir = File(reactApplicationContext.cacheDir, "temp_download_$processId")
                 if (!cacheDir.exists()) cacheDir.mkdirs()
                 
                 Log.d(TAG, "Starting download to cache: ${cacheDir.absolutePath}")
 
                 val request = YoutubeDLRequest(url)
-                // Use [id] to ensure uniqueness and avoid accidental overwrites of different videos with same title
-                request.addOption("-o", "${cacheDir.absolutePath}/%(title).100s [%(id)s].%(ext)s")
+                
+                // --- Output Filename Template ---
+                // If title is provided, use it to avoid placeholder "0 [0]" for direct CDN links
+                val outputTemplate = if (!forcedTitle.isNullOrEmpty()) {
+                    val safeTitle = forcedTitle.replace(Regex("[^a-zA-Z0-9 \\-_]"), "_").take(80)
+                    val safeArtist = forcedArtist?.replace(Regex("[^a-zA-Z0-9 \\-_]"), "_")?.take(40)
+                    if (!safeArtist.isNullOrEmpty()) {
+                        request.addOption("--metadata-from-title", "%(artist)s - %(title)s")
+                        "${cacheDir.absolutePath}/$safeArtist - $safeTitle.%(ext)s"
+                    } else {
+                        request.addOption("--metadata-from-title", "%(title)s")
+                        "${cacheDir.absolutePath}/$safeTitle.%(ext)s"
+                    }
+                } else {
+                    // Standard yt-dlp template - using [id] to ensure uniqueness
+                    "${cacheDir.absolutePath}/%(title).100s [%(id)s].%(ext)s"
+                }
+                
+                request.addOption("-o", outputTemplate)
                 request.addOption("--no-playlist")
                 request.addOption("--restrict-filenames")
+                request.addOption("--add-metadata") // Force adding metadata post-processor
                 
-                // --- Codec Compatibility & Format Selection ---
-                val isAudioDownload = formatId?.startsWith("audio") == true || formatId == "audio_best" || formatId == "audio_mp3"
+                // --- Format and Codec Selection ---
+                val isAudioDownload = formatId?.startsWith("audio") == true || formatId == "audio_best" || formatId == "audio_mp3" || formatId == "lossless_flac"
                 
                 if (!formatId.isNullOrEmpty()) {
                      when {
+                        formatId == "lossless_flac" -> {
+                            // Direct FLAC/Lossless download
+                            // Use a modern desktop UA to bypass some simple bot checks
+                            request.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                            request.addOption("-f", "best") // Get original quality without re-encoding
+                        }
                         formatId == "audio_best" || formatId == "audio_mp3" -> {
                             request.addOption("-x")
                             request.addOption("--audio-format", "mp3")
@@ -714,67 +765,51 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                             request.addOption("--audio-format", "mp3")
                         }
                         else -> {
-                            // Specific format - ensure MP4 container
+                            // Video format - ensure MP4 container
                             request.addOption("-f", "${formatId}+bestaudio/best")
                             request.addOption("--merge-output-format", "mp4")
                         }
                     }
                 } else {
-                    // Smart defaults - Prefer H.264 (AVC) for compatibility with older players
+                    // Smart defaults based on platform
                     when (platform) {
                         "YouTube" -> {
-                            // Prefer 1080p H.264 if available, otherwise best MP4
                             request.addOption("-f", "bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best")
                             request.addOption("--merge-output-format", "mp4")
                         }
                         "Spotify", "SoundCloud" -> {
-                            // Audio platforms - always extract audio
                             request.addOption("-x")
                             request.addOption("--audio-format", "mp3")
                             request.addOption("--audio-quality", "0")
                         }
                         else -> {
-                            // General: Prefer MP4 container
                             request.addOption("-f", "best[ext=mp4]/best")
                             request.addOption("--merge-output-format", "mp4")
                         }
                     }
                 }
                 
-                // Metadata & Thumbnails - Critical for gallery visibility
-                if (isAudioDownload || platform == "Spotify" || platform == "SoundCloud") {
-                    // For audio: simplified pipeline to prevent FFmpeg hangs
-                    request.addOption("--embed-metadata")
-                    request.addOption("--embed-thumbnail")
-                    // Don't use --write-thumbnail + --convert-thumbnails + --ppa together for audio
-                    // as this combination can cause FFmpeg post-processing to hang
-                    request.addOption("--no-post-overwrites")
-                } else {
-                    // For video: full metadata pipeline
-                    request.addOption("--embed-metadata")
-                    request.addOption("--add-metadata")
-                    request.addOption("--embed-thumbnail")
+                // Metadata and Thumbnail embedding
+                request.addOption("--embed-metadata")
+                request.addOption("--embed-thumbnail")
+                if (!isAudioDownload) {
                     request.addOption("--write-thumbnail")
                     request.addOption("--convert-thumbnails", "jpg")
                 }
                 
-                // Network & compatibility options
                 request.addOption("--force-ipv4")
                 request.addOption("--no-check-certificate")
-                // Skip JS challenges timeout - speeds up downloads
                 request.addOption("--socket-timeout", "30")
                 
                 val response = YoutubeDL.getInstance().execute(request, processId) { progress, eta, line ->
                     if (isCancelled.get()) return@execute
                     
-                    // Clean up the progress line for user-friendly display
                     val displayLine = when {
                         line.isNullOrEmpty() -> "Preparing..."
-                        line.contains("Solving", ignoreCase = true) -> "Preparing download..."
+                        line.contains("Solving", ignoreCase = true) -> "Preparing..."
                         line.contains("Downloading", ignoreCase = true) && progress > 0 -> "${progress.toInt()}% - Downloading..."
-                        line.contains("Merging", ignoreCase = true) -> "Finishing up..."
-                        line.contains("Converting", ignoreCase = true) -> "Converting audio..."
-                        line.contains("Extracting", ignoreCase = true) -> "Extracting audio..."
+                        line.contains("Merging", ignoreCase = true) -> "Finalizing..."
+                        line.contains("Converting", ignoreCase = true) -> "Converting..."
                         line.contains("ffmpeg", ignoreCase = true) -> "Processing..."
                         else -> line.take(50).let { if (it.length < line.length) "$it..." else it }
                     }
@@ -787,44 +822,40 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                     }
                     sendEvent("onDownloadProgress", params)
                     
-                    // Show Notification Progress with clean message
-                    showProgressNotification(processId, "Downloading...", progress.toInt(), displayLine)
+                    // Native notification progress
+                    val titleText = forcedTitle ?: "Downloading..."
+                    showProgressNotification(processId, titleText, progress.toInt(), displayLine)
                 }
                 
-                // Done - cancel progress notification
                 cancelNotification(processId)
-                
-                // Check cancellation
                 activeDownloads.remove(processId)
+                
                 if (isCancelled.get()) {
-                    // Clean up temp file
-                    cacheDir.listFiles()?.forEach { it.delete() }
+                    cacheDir.deleteRecursively()
                     withContext(Dispatchers.Main) { promise.reject("CANCELLED", "Download was cancelled") }
                     return@launch
                 }
                 
-                // Find downloaded file in cache
+                // Scan cache for output file
                 val downloadedFile = cacheDir.listFiles()
-                    ?.filter { it.isFile && it.lastModified() > System.currentTimeMillis() - 300000 && !it.name.endsWith(".jpg") && !it.name.endsWith(".webp") }
+                    ?.filter { it.isFile && it.lastModified() > System.currentTimeMillis() - 600000 && !it.name.endsWith(".jpg") && !it.name.endsWith(".webp") }
                     ?.maxByOrNull { it.lastModified() }
                     
                 if (downloadedFile != null && downloadedFile.exists()) {
-                    // Find matching thumbnail
                     val baseName = downloadedFile.nameWithoutExtension
                     val thumbFile = cacheDir.listFiles()?.find { 
                         it.nameWithoutExtension == baseName && (it.extension == "jpg" || it.extension == "webp" || it.extension == "png") 
                     }
 
-                    // 2. Move to Public Storage (Gallery/Album)
+                    // Move to public storage with proper categorization
                     val contentType = getContentType(url, platform)
                     val finalFile = moveToPublicStorage(downloadedFile, platform, contentType)
                     
-                    // Handle thumbnail - Move to Private Storage to keep Gallery clean
+                    // Preserve thumbnail
                     if (thumbFile != null && thumbFile.exists()) {
                         try {
                             val thumbDir = File(reactApplicationContext.getExternalFilesDir(null), "thumbnails")
                             if (!thumbDir.exists()) thumbDir.mkdirs()
-                            // Use same name as final file if possible, or original base name
                             val finalName = finalFile?.nameWithoutExtension ?: baseName
                             val targetThumb = File(thumbDir, "$finalName.jpg")
                             thumbFile.copyTo(targetThumb, overwrite = true)
@@ -841,29 +872,29 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                             putString("filePath", finalFile.absolutePath)
                             putString("fileName", finalFile.name)
                             putString("platform", platform)
+                            putInt("exitCode", 0) // Important: UI expects exitCode 0 to show success
                         }
                         
-                        // Notify
                         showDownloadNotification(finalFile.name, finalFile.absolutePath, platform)
+                        cacheDir.deleteRecursively() // Cleanup cache
                         
                         withContext(Dispatchers.Main) { promise.resolve(result) }
                     } else {
-                        throw Exception("Failed to move file to public storage")
+                        throw Exception("Failed to move file to storage")
                     }
                 } else {
                     throw Exception("Download file not found")
                 }
                 
             } catch (e: Exception) {
-                // Cleanup temp dir
                 try {
-                    val cacheDir = File(reactApplicationContext.cacheDir, "temp_download")
+                    val cacheDir = File(reactApplicationContext.cacheDir, "temp_download_$processId")
                     if (cacheDir.exists()) cacheDir.deleteRecursively()
                 } catch (e2: Exception) {}
                 
                 activeDownloads.remove(processId)
                 withContext(Dispatchers.Main) {
-                    promise.reject("DOWNLOAD_ERROR", e.message ?: "Download failed", e)
+                    promise.reject("DOWNLOAD_ERROR", "Download failed: ${e.message}", e)
                 }
             }
         }
@@ -1167,6 +1198,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 filePath.endsWith(".mkv") -> "video/x-matroska"
                 filePath.endsWith(".mp3") -> "audio/mpeg"
                 filePath.endsWith(".m4a") -> "audio/m4a"
+                filePath.endsWith(".flac") -> "audio/flac"
                 filePath.endsWith(".jpg") || filePath.endsWith(".jpeg") -> "image/jpeg"
                 filePath.endsWith(".png") -> "image/png"
                 filePath.endsWith(".webp") -> "image/webp"
@@ -1207,6 +1239,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 filePath.endsWith(".mkv") -> "video/x-matroska"
                 filePath.endsWith(".mp3") -> "audio/mpeg"
                 filePath.endsWith(".m4a") -> "audio/m4a"
+                filePath.endsWith(".flac") -> "audio/flac"
                 filePath.endsWith(".jpg") || filePath.endsWith(".jpeg") -> "image/jpeg"
                 filePath.endsWith(".png") -> "image/png"
                 filePath.endsWith(".webp") -> "image/webp"
@@ -1230,93 +1263,88 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     
     @ReactMethod
     fun deleteFile(filePath: String, promise: Promise) {
-        try {
-            val file = File(filePath)
-            
-            // 1. Try cleanups
-
-            
-            // Try to delete associated thumbnail first (cleanup)
+        scope.launch {
             try {
-                val thumbDir = File(reactApplicationContext.getExternalFilesDir(null), "thumbnails")
-                val thumbFile = File(thumbDir, "${file.nameWithoutExtension}.jpg")
-                if (thumbFile.exists()) {
-                    thumbFile.delete()
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to delete thumbnail", e)
-            }
-
-            if (file.exists() && file.delete()) {
-                 // Notify scanner about deletion
-                 android.media.MediaScannerConnection.scanFile(
-                     reactApplicationContext, 
-                     arrayOf(filePath), 
-                     null, 
-                     null
-                 )
-                 promise.resolve(true)
-                 return
-            }
-            
-            // 2. Try MediaStore deletion (Android 10+) if file still exists or simple delete failed
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val resolver = reactApplicationContext.contentResolver
-                val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
-                val selection = "${android.provider.MediaStore.MediaColumns.DATA} = ?"
-                val selectionArgs = arrayOf(filePath)
+                val file = File(filePath)
+                var deleted = false
                 
-                // Helper to check and delete from a specific collection
-                fun deleteFromCollection(collectionUri: Uri): Boolean {
-                    var deleted = false
+                Log.d(TAG, "Attempting to delete file: $filePath")
+
+                // 1. Try cleanup of private sidecar files first
+                try {
+                    val thumbDir = File(reactApplicationContext.getExternalFilesDir(null), "thumbnails")
+                    val thumbFile = File(thumbDir, "${file.nameWithoutExtension}.jpg")
+                    if (thumbFile.exists()) {
+                        thumbFile.delete()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to delete thumbnail sidecar")
+                }
+
+                // 2. Try direct file deletion (Works on legacy storage or app-private dirs)
+                if (file.exists()) {
                     try {
-                        resolver.query(collectionUri, projection, selection, selectionArgs, null)?.use { cursor ->
-                            if (cursor.moveToFirst()) {
-                                try {
+                        if (file.delete()) {
+                            Log.d(TAG, "Direct file deletion success")
+                            deleted = true
+                        }
+                    } catch (e: Exception) {
+                        Log.d(TAG, "Direct deletion failed, will try MediaStore")
+                    }
+                }
+                
+                // 3. MediaStore deletion (Mandatory for Scoped Storage on API 29+)
+                if (!deleted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val resolver = reactApplicationContext.contentResolver
+                    val collections = listOf(
+                        android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                        android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                        android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                        android.provider.MediaStore.Files.getContentUri("external")
+                    )
+                    
+                    val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
+                    val selection = "${android.provider.MediaStore.MediaColumns.DATA} = ?"
+                    val selectionArgs = arrayOf(filePath)
+                    
+                    for (collectionUri in collections) {
+                        try {
+                            resolver.query(collectionUri, projection, selection, selectionArgs, null)?.use { cursor ->
+                                if (cursor.moveToFirst()) {
                                     val idColumn = cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID)
                                     val id = cursor.getLong(idColumn)
                                     val contentUri = android.content.ContentUris.withAppendedId(collectionUri, id)
-                                    resolver.delete(contentUri, null, null)
-                                    deleted = true
-                                } catch (e: Exception) {
-                                    Log.w(TAG, "Failed to delete item from MediaStore: $e")
+                                    val rowsDeleted = resolver.delete(contentUri, null, null)
+                                    if (rowsDeleted > 0) {
+                                        Log.d(TAG, "MediaStore deletion success for: $collectionUri")
+                                        deleted = true
+                                    }
                                 }
                             }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed query/delete in $collectionUri")
                         }
-                    } catch (e: Exception) {
-                         Log.w(TAG, "Query failed: $e")
+                        if (deleted) break
                     }
-                    return deleted
                 }
-
-                // Check standard media collections
-                if (deleteFromCollection(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI)) {
-                    promise.resolve(true)
-                    return
+                
+                // 4. Final verification and scanner update
+                if (deleted || !File(filePath).exists()) {
+                    // Update media scanner so file disappears from gallery apps immediately
+                    android.media.MediaScannerConnection.scanFile(
+                        reactApplicationContext, 
+                        arrayOf(filePath), 
+                        null, 
+                        null
+                    )
+                    withContext(Dispatchers.Main) { promise.resolve(true) }
+                } else {
+                    withContext(Dispatchers.Main) { promise.resolve(false) }
                 }
-                if (deleteFromCollection(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI)) {
-                    promise.resolve(true)
-                    return
-                }
-                if (deleteFromCollection(android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI)) {
-                    promise.resolve(true)
-                    return
-                }
-                // Finally check generic files collection
-                if (deleteFromCollection(android.provider.MediaStore.Files.getContentUri("external"))) {
-                    promise.resolve(true)
-                    return
-                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { promise.reject("DELETE_ERROR", e.message) }
             }
-            
-            // Final check if file is gone (maybe it was deleted but scan failed or race condition)
-            if (!File(filePath).exists()) {
-                promise.resolve(true)
-            } else {
-                promise.resolve(false)
-            }
-        } catch (e: Exception) {
-            promise.reject("DELETE_ERROR", e.message)
         }
     }
 

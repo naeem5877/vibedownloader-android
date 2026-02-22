@@ -17,6 +17,7 @@ import {
     Dimensions,
     RefreshControl,
     Modal,
+    Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, BorderRadius, Spacing, Typography, Shadows, getPlatformColor } from '../theme';
@@ -34,7 +35,9 @@ import {
     MusicIcon,
     ImageIcon,
 } from '../components/Icons';
+import { EmptyState } from '../components/EmptyState';
 import { YtDlpNative, formatFileSize } from '../native/YtDlpModule';
+import { Haptics } from '../utils/haptics';
 
 const { width } = Dimensions.get('window');
 
@@ -61,33 +64,32 @@ interface PlatformFolder {
     totalSize: number;
 }
 
-// Storage Info Component
-const StorageInfoCard: React.FC<{ basePath: string; onPress: () => void }> = ({ basePath, onPress }) => {
-    return (
-        <TouchableOpacity style={styles.storageCard} onPress={onPress} activeOpacity={0.7}>
-            <View style={styles.storageIconContainer}>
-                <View style={styles.storageIconGlow} />
-                <FolderIcon size={22} color={Colors.primary} />
-            </View>
-            <View style={styles.storageInfo}>
-                <Text style={styles.storageTitle}>Storage Location</Text>
-                <Text style={styles.storagePath} numberOfLines={2}>
-                    {basePath || '/Android/data/app/files/vibedownloader'}
-                </Text>
-            </View>
-            <View style={styles.storageAction}>
-                <InfoIcon size={16} color={Colors.textMuted} />
-            </View>
-        </TouchableOpacity>
-    );
-};
-
-// Platform Storage Usage Card - Shows storage per platform like YouTube, Instagram etc.
 interface PlatformStorageUsage {
     platform: string;
     size: number;
     color: string;
 }
+
+// Storage Info Component
+const StorageInfoCard: React.FC<{ basePath: string; onPress: () => void }> = ({ basePath, onPress }) => {
+    return (
+        <TouchableOpacity style={styles.storageCard} onPress={onPress} activeOpacity={0.8}>
+            <View style={styles.storageIconContainer}>
+                <View style={[styles.storageIconGlow, { backgroundColor: Colors.primary }]} />
+                <FolderIcon size={20} color={Colors.primary} />
+            </View>
+            <View style={styles.storageInfo}>
+                <Text style={styles.storageTitle}>STORAGE SYSTEM</Text>
+                <Text style={styles.storagePath} numberOfLines={1}>
+                    {basePath || 'Internal Storage'}
+                </Text>
+            </View>
+            <View style={styles.storageAction}>
+                <ChevronRightIcon size={16} color={Colors.textMuted} />
+            </View>
+        </TouchableOpacity>
+    );
+};
 
 // Individual storage item component for proper hooks usage
 const PlatformStorageItem: React.FC<{
@@ -99,11 +101,12 @@ const PlatformStorageItem: React.FC<{
     const widthAnim = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
-        Animated.timing(widthAnim, {
+        Animated.spring(widthAnim, {
             toValue: percentage,
-            duration: 800,
-            delay: index * 100,
-            useNativeDriver: false,
+            tension: 50,
+            friction: 10,
+            delay: index * 80,
+            useNativeDriver: false, // width is not supported by native driver
         }).start();
     }, [percentage, index]);
 
@@ -156,14 +159,13 @@ const PlatformStorageUsageCard: React.FC<{ folders: PlatformFolder[] }> = ({ fol
         <View style={styles.platformStorageCard}>
             <View style={styles.platformStorageHeader}>
                 <View style={styles.platformStorageHeaderLeft}>
-                    <FolderIcon size={20} color={Colors.primary} />
-                    <Text style={styles.platformStorageTitle}>Storage by Platform</Text>
+                    <Text style={styles.platformStorageTitle}>DISTRIBUTION</Text>
                 </View>
                 <Text style={styles.platformStorageTotal}>{formatFileSize(totalSize)}</Text>
             </View>
 
             <View style={styles.platformStorageList}>
-                {sortedPlatforms.slice(0, 5).map((platform, index) => (
+                {sortedPlatforms.slice(0, 4).map((platform, index) => (
                     <PlatformStorageItem
                         key={platform.platform}
                         platform={platform}
@@ -172,12 +174,6 @@ const PlatformStorageUsageCard: React.FC<{ folders: PlatformFolder[] }> = ({ fol
                     />
                 ))}
             </View>
-
-            {sortedPlatforms.length > 5 && (
-                <Text style={styles.platformStorageMore}>
-                    +{sortedPlatforms.length - 5} more platforms
-                </Text>
-            )}
         </View>
     );
 };
@@ -193,9 +189,10 @@ const PlatformFolderCard: React.FC<{
     const rotateAnim = useRef(new Animated.Value(expanded ? 1 : 0)).current;
 
     useEffect(() => {
-        Animated.timing(rotateAnim, {
+        Animated.spring(rotateAnim, {
             toValue: expanded ? 1 : 0,
-            duration: 200,
+            tension: 50,
+            friction: 8,
             useNativeDriver: true,
         }).start();
     }, [expanded]);
@@ -207,23 +204,23 @@ const PlatformFolderCard: React.FC<{
 
     return (
         <TouchableOpacity
-            style={[styles.folderCard, { borderLeftColor: platformColor }]}
+            style={[styles.folderCard, expanded && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}
             onPress={onPress}
-            activeOpacity={0.7}
+            activeOpacity={0.8}
         >
-            <View style={[styles.folderIconBg, { backgroundColor: `${platformColor}20` }]}>
-                <FolderIcon size={22} color={platformColor} />
+            <View style={[styles.folderIconBg, { backgroundColor: `${platformColor}15` }]}>
+                <FolderIcon size={20} color={platformColor} />
             </View>
 
             <View style={styles.folderInfo}>
-                <Text style={styles.folderName}>{folder.platform}</Text>
+                <Text style={styles.folderName}>{folder.platform.toUpperCase()}</Text>
                 <Text style={styles.folderMeta}>
-                    {folder.totalCount} file{folder.totalCount !== 1 ? 's' : ''} • {formatFileSize(folder.totalSize)}
+                    {folder.totalCount} ITEMS • {formatFileSize(folder.totalSize)}
                 </Text>
             </View>
 
             <Animated.View style={{ transform: [{ rotate: rotation }] }}>
-                <ChevronRightIcon size={20} color={Colors.textMuted} />
+                <ChevronRightIcon size={18} color={Colors.textMuted} />
             </Animated.View>
         </TouchableOpacity>
     );
@@ -239,10 +236,11 @@ const ContentTypeRow: React.FC<{
     return (
         <View style={styles.contentTypeContainer}>
             <View style={styles.contentTypeHeader}>
-                <View style={[styles.contentTypeBadge, { backgroundColor: `${platformColor}30` }]}>
-                    <Text style={[styles.contentTypeText, { color: platformColor }]}>{type}</Text>
-                </View>
-                <Text style={styles.contentTypeCount}>{files.length} files</Text>
+                <View style={styles.contentTypeLine} />
+                <Text style={[styles.contentTypeText, { color: platformColor }]}>
+                    {type.toUpperCase()}
+                </Text>
+                <View style={styles.contentTypeLine} />
             </View>
 
             <FlatList
@@ -265,34 +263,50 @@ const FileCard: React.FC<{
     onPress: () => void;
 }> = ({ file, onPress }) => {
     const isVideo = ['mp4', 'webm', 'mkv'].includes(file.extension.toLowerCase());
-    const isAudio = ['mp3', 'm4a', 'wav', 'aac'].includes(file.extension.toLowerCase());
+    const isAudio = ['mp3', 'm4a', 'wav', 'aac', 'flac'].includes(file.extension.toLowerCase());
     const isImage = ['jpg', 'jpeg', 'png', 'webp'].includes(file.extension.toLowerCase());
+    const isLossless = file.extension.toLowerCase() === 'flac';
 
     const getIcon = () => {
-        if (isVideo) return <VideoIcon size={24} color={Colors.textSecondary} />;
-        if (isAudio) return <MusicIcon size={24} color={Colors.textSecondary} />;
-        if (isImage) return <ImageIcon size={24} color={Colors.textSecondary} />;
-        return <DownloadIcon size={24} color={Colors.textSecondary} />;
+        if (isVideo) return <VideoIcon size={20} color={Colors.textSecondary} />;
+        if (isAudio) return <MusicIcon size={20} color={Colors.textSecondary} />;
+        if (isImage) return <ImageIcon size={20} color={Colors.textSecondary} />;
+        return <DownloadIcon size={20} color={Colors.textSecondary} />;
     };
 
     return (
-        <TouchableOpacity style={styles.fileCard} onPress={onPress} activeOpacity={0.7}>
+        <TouchableOpacity
+            style={[
+                styles.fileCard,
+                isLossless && { borderColor: Colors.lossless, borderWidth: 1 }
+            ]}
+            onPress={onPress}
+            activeOpacity={0.8}
+        >
             <View style={styles.fileThumbnail}>
                 {file.thumbnail ? (
                     <Image source={{ uri: file.thumbnail }} style={styles.thumbnailImage} />
                 ) : (
-                    <View style={styles.filePlaceholder}>
-                        {getIcon()}
+                    <View style={[styles.filePlaceholder, isLossless && { backgroundColor: `${Colors.lossless}10` }]}>
+                        {isLossless ? <MusicIcon size={22} color={Colors.lossless} /> : getIcon()}
                     </View>
                 )}
+                <View style={styles.fileCardOverlay} />
                 {isVideo && (
-                    <View style={styles.playOverlay}>
-                        <PlayIcon size={18} color={Colors.textPrimary} />
+                    <View style={styles.playOverlaySmall}>
+                        <PlayIcon size={14} color={Colors.textPrimary} />
+                    </View>
+                )}
+                {isLossless && (
+                    <View style={styles.losslessBadgeSmall}>
+                        <Text style={styles.losslessBadgeTextSmall}>FLAC</Text>
                     </View>
                 )}
             </View>
-            <Text style={styles.fileName} numberOfLines={2}>{file.name}</Text>
-            <Text style={styles.fileSize}>{formatFileSize(file.size)}</Text>
+            <View style={styles.fileCardInfo}>
+                <Text style={styles.fileName} numberOfLines={1}>{file.name}</Text>
+                <Text style={styles.fileSize}>{formatFileSize(file.size)}</Text>
+            </View>
         </TouchableOpacity>
     );
 };
@@ -310,7 +324,8 @@ const FileDetailModal: React.FC<{
 
     const platformColor = getPlatformColor(file.platform);
     const isVideo = ['mp4', 'webm', 'mkv'].includes(file.extension.toLowerCase());
-    const isAudio = ['mp3', 'm4a', 'wav', 'aac'].includes(file.extension.toLowerCase());
+    const isAudio = ['mp3', 'm4a', 'wav', 'aac', 'flac'].includes(file.extension.toLowerCase());
+    const isLossless = file.extension.toLowerCase() === 'flac';
 
     return (
         <Modal
@@ -329,7 +344,11 @@ const FileDetailModal: React.FC<{
                     </View>
 
                     {/* File Preview */}
-                    <View style={[styles.modalPreview, { borderColor: platformColor }]}>
+                    <View style={[
+                        styles.modalPreview,
+                        { borderColor: isLossless ? Colors.lossless : platformColor },
+                        isLossless && { backgroundColor: `${Colors.lossless}05` }
+                    ]}>
                         {file.thumbnail ? (
                             <Image source={{ uri: file.thumbnail }} style={styles.modalThumbnail} />
                         ) : (
@@ -337,10 +356,15 @@ const FileDetailModal: React.FC<{
                                 {isVideo ? (
                                     <VideoIcon size={48} color={platformColor} />
                                 ) : isAudio ? (
-                                    <MusicIcon size={48} color={platformColor} />
+                                    <MusicIcon size={48} color={isLossless ? Colors.lossless : platformColor} />
                                 ) : (
                                     <DownloadIcon size={48} color={platformColor} />
                                 )}
+                            </View>
+                        )}
+                        {isLossless && (
+                            <View style={styles.losslessBadgeLarge}>
+                                <Text style={styles.losslessBadgeTextLarge}>LOSSLESS AUDIO • FLAC</Text>
                             </View>
                         )}
                     </View>
@@ -639,6 +663,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = false 
 
     const handleDelete = () => {
         if (!selectedFile) return;
+        Haptics.impact();
 
         Alert.alert(
             'Delete File',
@@ -652,12 +677,15 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = false 
                         try {
                             const deleted = await YtDlpNative.deleteFile(selectedFile.path);
                             if (deleted) {
+                                Haptics.success();
                                 ToastAndroid.show('File deleted', ToastAndroid.SHORT);
                                 loadFiles();
                             } else {
+                                Haptics.error();
                                 ToastAndroid.show('Failed to delete file', ToastAndroid.SHORT);
                             }
                         } catch (error) {
+                            Haptics.error();
                             ToastAndroid.show('Error deleting file', ToastAndroid.SHORT);
                         }
                         setShowFileModal(false);
@@ -737,18 +765,13 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = false 
 
                         {/* Empty State */}
                         {isEmpty && (
-                            <View style={styles.emptyState}>
-                                <View style={styles.emptyIconContainer}>
-                                    <View style={styles.emptyIconGlow} />
-                                    <View style={styles.emptyIconRing}>
-                                        <FolderIcon size={36} color={Colors.textMuted} />
-                                    </View>
-                                </View>
-                                <Text style={styles.emptyTitle}>No Downloads Yet</Text>
-                                <Text style={styles.emptySubtitle}>
-                                    Downloaded videos and music will appear here for easy access.
-                                </Text>
-                            </View>
+                            <EmptyState
+                                title="No Downloads Yet"
+                                subtitle="Downloaded videos and music from any platform will appear here for easy access and offline playback."
+                                support="MP4 • MP3 • FLAC • WEBM • JPG"
+                                features={['🎬 Watch Offline', '🎵 Lossless Audio', '📂 Organized', '🚀 Fast Access']}
+                                icon={<FolderIcon size={44} color={Colors.primary} />}
+                            />
                         )}
 
                         {/* Platform Folders */}
@@ -801,91 +824,97 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
+        paddingHorizontal: Spacing.md,
     },
     headerTitle: {
-        fontSize: 28,
-        fontWeight: '800',
+        fontSize: Typography.sizes['3xl'],
+        fontWeight: Typography.weights.black,
         color: Colors.textPrimary,
-        letterSpacing: -0.5,
+        letterSpacing: Typography.letterSpacing.tight,
+    },
+    headerSubtitle: {
+        fontSize: Typography.sizes.xs,
+        color: Colors.textMuted,
+        fontWeight: Typography.weights.medium,
+        letterSpacing: 1,
+        textTransform: 'uppercase',
+        marginTop: 2,
     },
     refreshButton: {
-        width: 40,
-        height: 40,
+        width: 44,
+        height: 44,
         borderRadius: 12,
-        backgroundColor: Colors.surface,
+        backgroundColor: Colors.surfaceMedium,
         justifyContent: 'center',
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: Colors.border,
-    },
-    headerSubtitle: {
-        fontSize: 13,
-        color: Colors.textMuted,
-        marginTop: 4,
+        borderColor: Colors.innerBorder,
     },
     listContent: {
-        paddingHorizontal: Spacing.md,
         paddingBottom: 120,
     },
     // Storage Card
     storageCard: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: Colors.surface,
-        borderRadius: 18,
-        padding: 16,
-        marginBottom: Spacing.lg,
+        backgroundColor: Colors.surfaceMedium,
+        marginHorizontal: Spacing.md,
+        borderRadius: 16,
+        padding: 14,
+        marginBottom: Spacing.md,
         borderWidth: 1,
-        borderColor: Colors.border,
+        borderColor: Colors.innerBorder,
     },
     storageIconContainer: {
-        width: 44,
-        height: 44,
-        borderRadius: 14,
-        backgroundColor: `${Colors.primary}12`,
+        width: 40,
+        height: 40,
+        borderRadius: 10,
+        backgroundColor: `${Colors.primary}10`,
         justifyContent: 'center',
         alignItems: 'center',
         position: 'relative',
     },
     storageIconGlow: {
         position: 'absolute',
-        width: 44,
-        height: 44,
-        borderRadius: 14,
-        backgroundColor: Colors.primary,
-        opacity: 0.06,
+        width: '100%',
+        height: '100%',
+        borderRadius: 10,
+        opacity: 0.1,
     },
     storageInfo: {
         flex: 1,
         marginLeft: Spacing.md,
     },
     storageTitle: {
-        fontSize: Typography.sizes.base,
-        fontWeight: Typography.weights.semibold,
-        color: Colors.textPrimary,
+        fontSize: 10,
+        fontWeight: Typography.weights.bold,
+        color: Colors.textMuted,
+        letterSpacing: 1,
     },
     storagePath: {
-        fontSize: Typography.sizes.xs,
-        color: Colors.textMuted,
+        fontSize: Typography.sizes.sm,
+        color: Colors.textPrimary,
+        fontWeight: Typography.weights.medium,
         marginTop: 2,
     },
     storageAction: {
-        padding: Spacing.sm,
+        padding: Spacing.xs,
     },
     // Platform Storage Usage Card
     platformStorageCard: {
-        backgroundColor: Colors.surface,
-        borderRadius: 18,
+        backgroundColor: Colors.surfaceMedium,
+        marginHorizontal: Spacing.md,
+        borderRadius: 16,
         padding: 16,
         marginBottom: Spacing.lg,
         borderWidth: 1,
-        borderColor: Colors.border,
+        borderColor: Colors.innerBorder,
     },
     platformStorageHeader: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: Spacing.md,
+        marginBottom: 16,
     },
     platformStorageHeaderLeft: {
         flexDirection: 'row',
@@ -893,9 +922,10 @@ const styles = StyleSheet.create({
         gap: Spacing.sm,
     },
     platformStorageTitle: {
-        fontSize: Typography.sizes.base,
-        fontWeight: Typography.weights.semibold,
-        color: Colors.textPrimary,
+        fontSize: 10,
+        fontWeight: Typography.weights.bold,
+        color: Colors.textMuted,
+        letterSpacing: 1,
     },
     platformStorageTotal: {
         fontSize: Typography.sizes.sm,
@@ -903,10 +933,10 @@ const styles = StyleSheet.create({
         color: Colors.primary,
     },
     platformStorageList: {
-        gap: Spacing.md,
+        gap: 14,
     },
     platformStorageItem: {
-        gap: 6,
+        gap: 8,
     },
     platformStorageItemHeader: {
         flexDirection: 'row',
@@ -919,52 +949,47 @@ const styles = StyleSheet.create({
         gap: Spacing.sm,
     },
     platformDot: {
-        width: 10,
-        height: 10,
-        borderRadius: 5,
+        width: 8,
+        height: 8,
+        borderRadius: 2,
     },
     platformStorageItemName: {
-        fontSize: Typography.sizes.sm,
+        fontSize: Typography.sizes.xs,
         color: Colors.textSecondary,
-        fontWeight: Typography.weights.medium,
+        fontWeight: Typography.weights.semibold,
+        textTransform: 'uppercase',
     },
     platformStorageItemSize: {
-        fontSize: Typography.sizes.xs,
+        fontSize: Typography.sizes.xxs,
         color: Colors.textMuted,
         fontWeight: Typography.weights.medium,
     },
     platformStorageBar: {
-        height: 6,
-        backgroundColor: Colors.border,
-        borderRadius: 3,
+        height: 4,
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        borderRadius: 2,
         overflow: 'hidden',
     },
     platformStorageBarFill: {
         height: '100%',
-        borderRadius: 3,
-    },
-    platformStorageMore: {
-        fontSize: Typography.sizes.xs,
-        color: Colors.textMuted,
-        textAlign: 'center',
-        marginTop: Spacing.md,
+        borderRadius: 2,
     },
     // Folder Card
     folderCard: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: Colors.surface,
-        borderRadius: BorderRadius.lg,
-        padding: Spacing.md,
-        marginBottom: Spacing.sm,
-        borderLeftWidth: 3,
+        backgroundColor: Colors.surfaceMedium,
+        padding: 16,
+        marginHorizontal: Spacing.md,
+        marginBottom: 2,
+        borderRadius: 16,
         borderWidth: 1,
-        borderColor: Colors.border,
+        borderColor: Colors.innerBorder,
     },
     folderIconBg: {
-        width: 44,
-        height: 44,
-        borderRadius: BorderRadius.md,
+        width: 40,
+        height: 40,
+        borderRadius: 10,
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -974,60 +999,69 @@ const styles = StyleSheet.create({
     },
     folderName: {
         fontSize: Typography.sizes.base,
-        fontWeight: Typography.weights.semibold,
+        fontWeight: Typography.weights.bold,
         color: Colors.textPrimary,
+        letterSpacing: Typography.letterSpacing.normal,
     },
     folderMeta: {
-        fontSize: Typography.sizes.xs,
+        fontSize: 10,
         color: Colors.textMuted,
+        fontWeight: Typography.weights.medium,
         marginTop: 2,
+        letterSpacing: 0.5,
     },
     // Expanded Content
     expandedContent: {
         marginBottom: Spacing.md,
-        marginTop: Spacing.xs,
+        marginTop: 4,
+        marginHorizontal: Spacing.md,
+        backgroundColor: 'rgba(255, 255, 255, 0.02)',
+        borderBottomLeftRadius: 16,
+        borderBottomRightRadius: 16,
+        borderWidth: 1,
+        borderColor: Colors.innerBorder,
+        borderTopWidth: 0,
+        paddingBottom: Spacing.md,
     },
     // Content Type
     contentTypeContainer: {
-        marginBottom: Spacing.md,
+        marginTop: Spacing.md,
     },
     contentTypeHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: Spacing.sm,
-        paddingHorizontal: Spacing.sm,
+        marginBottom: 12,
+        paddingHorizontal: Spacing.md,
     },
-    contentTypeBadge: {
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: 4,
-        borderRadius: BorderRadius.round,
+    contentTypeLine: {
+        flex: 1,
+        height: 1,
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
     },
     contentTypeText: {
-        fontSize: Typography.sizes.xs,
-        fontWeight: Typography.weights.semibold,
-    },
-    contentTypeCount: {
-        fontSize: Typography.sizes.xs,
-        color: Colors.textMuted,
+        fontSize: 9,
+        fontWeight: Typography.weights.black,
+        marginHorizontal: Spacing.sm,
+        letterSpacing: 1.5,
     },
     horizontalFileList: {
-        paddingLeft: Spacing.sm,
+        paddingLeft: Spacing.md,
     },
     // File Card
     fileCard: {
-        width: 130,
+        width: 140,
         marginRight: Spacing.sm,
-        backgroundColor: Colors.surfaceElevated,
-        borderRadius: BorderRadius.md,
+        backgroundColor: Colors.surfaceHigh,
+        borderRadius: 12,
         overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: Colors.innerBorder,
     },
     fileThumbnail: {
         width: '100%',
-        height: 90,
-        backgroundColor: Colors.surface,
-        justifyContent: 'center',
-        alignItems: 'center',
+        height: 85,
+        backgroundColor: Colors.surfaceLow,
+        position: 'relative',
     },
     thumbnailImage: {
         width: '100%',
@@ -1039,91 +1073,61 @@ const styles = StyleSheet.create({
         height: '100%',
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: Colors.surface,
+        backgroundColor: Colors.surfaceLow,
     },
-    playOverlay: {
+    fileCardOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.1)',
+    },
+    playOverlaySmall: {
         position: 'absolute',
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: 'rgba(0,0,0,0.6)',
+        top: '50%',
+        left: '50%',
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: 'rgba(0,0,0,0.5)',
         justifyContent: 'center',
         alignItems: 'center',
+        marginTop: -14,
+        marginLeft: -14,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
+    },
+    fileCardInfo: {
+        padding: 8,
     },
     fileName: {
-        fontSize: Typography.sizes.xs,
+        fontSize: Typography.sizes.xxs,
+        fontWeight: Typography.weights.semibold,
         color: Colors.textPrimary,
-        padding: Spacing.sm,
-        paddingBottom: 4,
+        marginBottom: 2,
     },
     fileSize: {
-        fontSize: Typography.sizes.xxs,
+        fontSize: 9,
         color: Colors.textMuted,
-        paddingHorizontal: Spacing.sm,
-        paddingBottom: Spacing.sm,
-    },
-    // Empty State
-    emptyState: {
-        alignItems: 'center',
-        paddingVertical: 48,
-        paddingHorizontal: 28,
-    },
-    emptyIconContainer: {
-        marginBottom: 24,
-        position: 'relative',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    emptyIconGlow: {
-        position: 'absolute',
-        width: 100,
-        height: 100,
-        borderRadius: 50,
-        backgroundColor: Colors.textMuted,
-        opacity: 0.08,
-    },
-    emptyIconRing: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        backgroundColor: `${Colors.textMuted}08`,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 2,
-        borderColor: `${Colors.textMuted}15`,
-    },
-    emptyTitle: {
-        fontSize: 22,
-        fontWeight: '800',
-        color: Colors.textPrimary,
-        marginBottom: 10,
-        letterSpacing: -0.3,
-    },
-    emptySubtitle: {
-        fontSize: 14,
-        color: Colors.textMuted,
-        textAlign: 'center',
-        lineHeight: 22,
-        maxWidth: 300,
+        fontWeight: Typography.weights.medium,
     },
     // Modal
     modalOverlay: {
         flex: 1,
-        backgroundColor: Colors.overlay,
+        backgroundColor: 'rgba(0,0,0,0.85)',
         justifyContent: 'flex-end',
     },
     modalContent: {
-        backgroundColor: Colors.surface,
+        backgroundColor: Colors.surfaceHigh,
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         padding: Spacing.lg,
-        maxHeight: '85%',
+        paddingBottom: 40,
+        borderWidth: 1,
+        borderColor: Colors.innerBorderLight,
     },
     modalHeader: {
         flexDirection: 'row',
         alignItems: 'flex-start',
         justifyContent: 'space-between',
-        marginBottom: Spacing.md,
+        marginBottom: Spacing.lg,
     },
     modalTitle: {
         flex: 1,
@@ -1131,18 +1135,25 @@ const styles = StyleSheet.create({
         fontWeight: Typography.weights.bold,
         color: Colors.textPrimary,
         marginRight: Spacing.md,
+        letterSpacing: Typography.letterSpacing.normal,
     },
     closeButton: {
-        padding: Spacing.xs,
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: 'rgba(255,255,255,0.05)',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     modalPreview: {
         width: '100%',
-        height: 180,
-        borderRadius: BorderRadius.lg,
+        height: 200,
+        borderRadius: 16,
         overflow: 'hidden',
-        backgroundColor: Colors.surfaceElevated,
+        backgroundColor: Colors.surfaceLow,
         marginBottom: Spacing.lg,
-        borderWidth: 2,
+        borderWidth: 1,
+        borderColor: Colors.innerBorder,
     },
     modalThumbnail: {
         width: '100%',
@@ -1157,92 +1168,112 @@ const styles = StyleSheet.create({
     },
     // File Info Section
     fileInfoSection: {
-        marginBottom: Spacing.lg,
+        marginBottom: Spacing.xl,
+        backgroundColor: 'rgba(255,255,255,0.02)',
+        borderRadius: 12,
+        padding: 4,
     },
     infoRow: {
         flexDirection: 'row',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         justifyContent: 'space-between',
-        paddingVertical: Spacing.sm,
+        paddingVertical: 12,
+        paddingHorizontal: 12,
         borderBottomWidth: 1,
-        borderBottomColor: Colors.border,
+        borderBottomColor: 'rgba(255,255,255,0.03)',
     },
     infoLabel: {
-        fontSize: Typography.sizes.sm,
+        fontSize: 10,
+        fontWeight: Typography.weights.bold,
         color: Colors.textMuted,
-        width: 80,
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
     },
     infoValue: {
         flex: 1,
         fontSize: Typography.sizes.sm,
         color: Colors.textPrimary,
         textAlign: 'right',
+        fontWeight: Typography.weights.medium,
     },
     pathText: {
-        fontSize: Typography.sizes.xs,
+        fontSize: 10,
+        opacity: 0.7,
     },
     platformBadge: {
-        paddingHorizontal: Spacing.sm,
+        paddingHorizontal: 10,
         paddingVertical: 4,
-        borderRadius: BorderRadius.round,
+        borderRadius: 6,
     },
     platformBadgeText: {
-        fontSize: Typography.sizes.xs,
-        fontWeight: Typography.weights.semibold,
+        fontSize: 10,
+        fontWeight: Typography.weights.bold,
+        textTransform: 'uppercase',
     },
     // Modal Actions
     modalActions: {
         flexDirection: 'row',
-        gap: Spacing.sm,
+        gap: 12,
     },
     actionButton: {
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: Spacing.xs,
-        paddingVertical: Spacing.md,
-        borderRadius: BorderRadius.md,
+        gap: 8,
+        paddingVertical: 16,
+        borderRadius: 12,
     },
     actionButtonText: {
         fontSize: Typography.sizes.sm,
-        fontWeight: Typography.weights.semibold,
+        fontWeight: Typography.weights.bold,
         color: Colors.textPrimary,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
     },
     shareButton: {
-        backgroundColor: Colors.info,
+        backgroundColor: Colors.surfaceMedium,
+        borderWidth: 1,
+        borderColor: Colors.innerBorder,
     },
     deleteButton: {
-        backgroundColor: Colors.error,
+        backgroundColor: 'rgba(239, 68, 68, 0.15)',
+        borderWidth: 1,
+        borderColor: 'rgba(239, 68, 68, 0.2)',
     },
     // Info Modal
     infoModalContent: {
-        backgroundColor: Colors.surface,
-        marginHorizontal: Spacing.md,
-        borderRadius: BorderRadius.xl,
-        padding: Spacing.lg,
+        backgroundColor: Colors.surfaceHigh,
+        marginHorizontal: Spacing.lg,
+        borderRadius: 20,
+        padding: Spacing.xl,
         maxWidth: 400,
         alignSelf: 'center',
+        borderWidth: 1,
+        borderColor: Colors.innerBorderLight,
     },
     infoModalHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.sm,
-        marginBottom: Spacing.lg,
+        gap: 12,
+        marginBottom: 20,
     },
     infoModalTitle: {
         fontSize: Typography.sizes.lg,
-        fontWeight: Typography.weights.bold,
+        fontWeight: Typography.weights.black,
         color: Colors.textPrimary,
+        letterSpacing: Typography.letterSpacing.tight,
     },
     infoSection: {
-        marginBottom: Spacing.lg,
+        marginBottom: 20,
     },
     infoSectionTitle: {
-        fontSize: Typography.sizes.sm,
-        fontWeight: Typography.weights.semibold,
-        color: Colors.textPrimary,
-        marginBottom: Spacing.xs,
+        fontSize: 11,
+        fontWeight: Typography.weights.bold,
+        color: Colors.primary,
+        marginBottom: 6,
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
     },
     infoSectionText: {
         fontSize: Typography.sizes.sm,
@@ -1250,38 +1281,79 @@ const styles = StyleSheet.create({
         lineHeight: 20,
     },
     pathBox: {
-        backgroundColor: Colors.surfaceElevated,
-        padding: Spacing.sm,
-        borderRadius: BorderRadius.sm,
-        marginTop: Spacing.sm,
+        backgroundColor: Colors.surfaceLow,
+        padding: 12,
+        borderRadius: 8,
+        marginTop: 8,
+        borderWidth: 1,
+        borderColor: Colors.innerBorder,
     },
     pathBoxText: {
-        fontSize: Typography.sizes.xs,
+        fontSize: 10,
         color: Colors.textMuted,
-        fontFamily: 'monospace',
+        fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     },
     folderStructure: {
-        backgroundColor: Colors.surfaceElevated,
-        padding: Spacing.md,
-        borderRadius: BorderRadius.sm,
-        marginTop: Spacing.sm,
+        backgroundColor: Colors.surfaceLow,
+        padding: 12,
+        borderRadius: 8,
+        marginTop: 8,
+        borderWidth: 1,
+        borderColor: Colors.innerBorder,
     },
     structureItem: {
-        fontSize: Typography.sizes.xs,
+        fontSize: 10,
         color: Colors.textSecondary,
-        fontFamily: 'monospace',
+        fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
         lineHeight: 18,
     },
     gotItButton: {
         backgroundColor: Colors.primary,
-        paddingVertical: Spacing.md,
-        borderRadius: BorderRadius.md,
+        paddingVertical: 14,
+        borderRadius: 10,
         alignItems: 'center',
+        marginTop: 10,
     },
     gotItText: {
         fontSize: Typography.sizes.base,
-        fontWeight: Typography.weights.semibold,
+        fontWeight: Typography.weights.bold,
         color: Colors.textPrimary,
+        letterSpacing: 0.5,
+    },
+    fileCardOverlaySmall: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.1)',
+    },
+    losslessBadgeSmall: {
+        position: 'absolute',
+        top: 6,
+        right: 6,
+        backgroundColor: Colors.lossless,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 4,
+    },
+    losslessBadgeTextSmall: {
+        color: '#000',
+        fontSize: 8,
+        fontWeight: Typography.weights.black,
+        letterSpacing: 0.5,
+    },
+    losslessBadgeLarge: {
+        position: 'absolute',
+        bottom: 12,
+        backgroundColor: Colors.lossless,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.1)',
+    },
+    losslessBadgeTextLarge: {
+        color: '#000',
+        fontSize: 10,
+        fontWeight: Typography.weights.black,
+        letterSpacing: 1,
     },
 });
 

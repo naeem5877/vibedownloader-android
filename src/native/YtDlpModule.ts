@@ -79,7 +79,7 @@ export interface SharedData {
 // Native Module Interface
 export interface YtDlpNativeModule {
     fetchInfo(url: string): Promise<VideoInfo>;
-    download(url: string, formatId: string | null, processId: string): Promise<DownloadResult>;
+    download(url: string, formatId: string | null, processId: string, options?: { title?: string; artist?: string; platform?: string }): Promise<DownloadResult>;
     downloadSpotifyTrack(searchQuery: string, title: string, artist: string, thumbnail: string | null, processId: string): Promise<DownloadResult>;
     cancelDownload(processId: string): Promise<boolean>;
     updateYtDlp(): Promise<{ status: string }>;

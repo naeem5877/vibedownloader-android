@@ -31,23 +31,32 @@ import {
     DownloadProgress,
     OfflineBanner,
     UpdateModal,
+    EmptyState,
 } from '../components';
 // FormatToggle removed - automatic mode detection
 import { PlaylistSelectionModal } from '../components/PlaylistSelectionModal';
 import { SkeletonCard } from '../components/SkeletonCard';
 import { DiscordButton } from '../components/DiscordButton';
+import { LosslessCard } from '../components/LosslessCard';
+import { BatchDownloadProgress, BatchDownloadItem } from '../components/BatchDownloadProgress';
 import { useYtDlp } from '../hooks/useYtDlp';
 import { VideoFormat, ytDlpEventEmitter, YtDlpNative } from '../native/YtDlpModule';
-import { DownloadIcon, SparkleIcon, ShareIcon, GitHubIcon, DesktopIcon, StarIcon, WaveformIcon } from '../components/Icons';
+import { DownloadIcon, SparkleIcon, ShareIcon, GitHubIcon, DesktopIcon, StarIcon, WaveformIcon, LibraryIcon } from '../components/Icons';
 import { checkForUpdates, UpdateInfo } from '../services/GitHubUpdateService';
 import { getSpotifyPlaylist, extractSpotifyId, getTrackInfo, buildYouTubeSearchQuery, formatTrackMetadata } from '../services/SpotifyService';
+import { checkLosslessAvailability, getLosslessDownloadUrl, LosslessAvailability } from '../services/LosslessService';
 import { detectPlatform } from '../utils/platform';
+import { Haptics } from '../utils/haptics';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-export const HomeScreen: React.FC = () => {
+interface HomeScreenProps {
+    onNavigateToLibrary?: () => void;
+}
+
+export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) => {
     const [url, setUrl] = useState('');
-    const [detectedPlatform, setDetectedPlatform] = useState<string | null>('youtube');
+    const [detectedPlatform, setDetectedPlatform] = useState<string | null>(null);
     const [userSelectedPlatform, setUserSelectedPlatform] = useState(false);
     // Removed downloadMode toggle - auto-detect based on platform (Spotify/SoundCloud = audio)
 
@@ -58,20 +67,45 @@ export const HomeScreen: React.FC = () => {
     const [playlistImage, setPlaylistImage] = useState<string | undefined>(undefined);
     const [isPlaylistLoading, setIsPlaylistLoading] = useState(false);
 
+    // Network State
+    const [isOffline, setIsOffline] = useState(false);
+
+    useEffect(() => {
+        let NetInfo: any;
+        try {
+            NetInfo = require('@react-native-community/netinfo').default;
+        } catch (e) {
+            NetInfo = null;
+        }
+
+        if (NetInfo) {
+            const unsubscribe = NetInfo.addEventListener((state: any) => {
+                setIsOffline(state.isConnected === false);
+            });
+            return () => unsubscribe();
+        }
+    }, []);
+
     // Update Modal State
     const [updateModalVisible, setUpdateModalVisible] = useState(false);
     const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+
+    // Lossless State
+    const [losslessAvailability, setLosslessAvailability] = useState<LosslessAvailability | null>(null);
+    const [isCheckingLossless, setIsCheckingLossless] = useState(false);
+    const [isLosslessDownloading, setIsLosslessDownloading] = useState(false);
+
+    // Batch Download Progress State
+    const [batchItems, setBatchItems] = useState<BatchDownloadItem[]>([]);
+    const [isBatchDownloading, setIsBatchDownloading] = useState(false);
+    const [batchCurrentTitle, setBatchCurrentTitle] = useState<string>('');
 
     const [state, actions] = useYtDlp();
 
     // Animation refs
     const headerFadeAnim = useRef(new Animated.Value(0)).current;
     const headerSlideAnim = useRef(new Animated.Value(-20)).current;
-    const emptyFadeAnim = useRef(new Animated.Value(0)).current;
-    const emptySlideAnim = useRef(new Animated.Value(30)).current;
-    const pillAnims = useRef([0, 1, 2, 3, 4].map(() => new Animated.Value(0))).current;
-    const orbAnim1 = useRef(new Animated.Value(0)).current;
-    const orbAnim2 = useRef(new Animated.Value(0)).current;
+    const batchActiveRef = useRef(false);
 
     const handleFetch = useCallback(async (text: string = url) => {
         if (!text.trim()) {
@@ -123,8 +157,6 @@ export const HomeScreen: React.FC = () => {
                 const track = await getTrackInfo(spotifyData.id);
                 const metadata = formatTrackMetadata(track);
 
-
-
                 // Create synthetic VideoInfo for UI to display
                 const syntheticInfo: any = {
                     id: track.id,
@@ -145,10 +177,27 @@ export const HomeScreen: React.FC = () => {
                     ],
                     // Extra data for downloader
                     searchQuery: buildYouTubeSearchQuery(track),
-                    rawMetadata: metadata
+                    rawMetadata: metadata,
+                    spotifyId: spotifyData.id,
                 };
 
                 actions.setVideoInfo(syntheticInfo);
+
+                // Check lossless availability in background
+                setIsCheckingLossless(true);
+                setLosslessAvailability(null);
+                checkLosslessAvailability(spotifyData.id)
+                    .then((result) => {
+                        setLosslessAvailability(result);
+                        if (result.available) {
+                            ToastAndroid.show('🎵 Lossless FLAC available!', ToastAndroid.SHORT);
+                        }
+                    })
+                    .catch((err) => {
+                        console.warn('Lossless check failed:', err);
+                        setLosslessAvailability({ available: false, source: 'none' });
+                    })
+                    .finally(() => setIsCheckingLossless(false));
 
             } catch (error: any) {
                 console.error('Spotify Track Error', error);
@@ -192,6 +241,7 @@ export const HomeScreen: React.FC = () => {
         // 3. Normal Single Fetch
         try {
             await actions.fetchInfo(text);
+            Haptics.success();
         } catch (error: any) {
             console.error('Fetch error:', error);
             ToastAndroid.show(
@@ -308,6 +358,7 @@ export const HomeScreen: React.FC = () => {
         try {
             const text = await actions.getClipboardText();
             if (text) {
+                Haptics.selection();
                 setUrl(text);
                 // Optional: Auto-fetch on paste if it looks like a URL
                 if (text.startsWith('http')) {
@@ -342,48 +393,6 @@ export const HomeScreen: React.FC = () => {
             }),
         ]).start();
 
-        // Empty state entrance
-        Animated.parallel([
-            Animated.timing(emptyFadeAnim, {
-                toValue: 1,
-                duration: 800,
-                delay: 300,
-                easing: Easing.out(Easing.cubic),
-                useNativeDriver: true,
-            }),
-            Animated.spring(emptySlideAnim, {
-                toValue: 0,
-                tension: 40,
-                friction: 8,
-                delay: 300,
-                useNativeDriver: true,
-            }),
-        ]).start();
-
-        // Staggered pill animations
-        pillAnims.forEach((anim, index) => {
-            Animated.spring(anim, {
-                toValue: 1,
-                tension: 50,
-                friction: 8,
-                delay: 600 + index * 100,
-                useNativeDriver: true,
-            }).start();
-        });
-
-        // Floating orb animations
-        Animated.loop(
-            Animated.sequence([
-                Animated.timing(orbAnim1, { toValue: -15, duration: 3000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-                Animated.timing(orbAnim1, { toValue: 15, duration: 3000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-            ])
-        ).start();
-        Animated.loop(
-            Animated.sequence([
-                Animated.timing(orbAnim2, { toValue: 12, duration: 2500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-                Animated.timing(orbAnim2, { toValue: -12, duration: 2500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-            ])
-        ).start();
 
         // Check for updates on mount
         setTimeout(async () => {
@@ -397,8 +406,15 @@ export const HomeScreen: React.FC = () => {
 
     // Dynamic Theme State
     const currentTheme = useMemo(() => {
-        if (detectedPlatform && PlatformThemes[detectedPlatform]) {
-            return PlatformThemes[detectedPlatform];
+        if (detectedPlatform) {
+            // Find matching theme case-insensitively
+            const themeKey = Object.keys(PlatformThemes).find(
+                key => key.toLowerCase() === detectedPlatform.toLowerCase()
+            );
+
+            if (themeKey && PlatformThemes[themeKey]) {
+                return PlatformThemes[themeKey];
+            }
         }
         return PlatformThemes.default;
     }, [detectedPlatform]);
@@ -470,37 +486,122 @@ export const HomeScreen: React.FC = () => {
         };
     }, [handleFetch, checkShareIntent]);
 
-    const handleBatchDownload = async (selectedItems: any[], mode: 'video' | 'audio') => {
+    // ── Lossless Download Handler ──
+    const handleLosslessDownload = useCallback(async () => {
+        if (!state.videoInfo || !losslessAvailability?.downloadUrl) return;
+
+        const info = state.videoInfo as any;
+        const spotifyId = info.spotifyId;
+        if (!spotifyId) {
+            ToastAndroid.show('No Spotify ID found', ToastAndroid.SHORT);
+            return;
+        }
+
+        setIsLosslessDownloading(true);
+        ToastAndroid.show('Downloading lossless FLAC...', ToastAndroid.SHORT);
+
+        try {
+            const downloadUrl = losslessAvailability.downloadUrl;
+
+            // Use standard download action with specific format ID for lossless
+            // This triggers the native module to use the correct User-Agent and skip conversion
+            const result = await actions.download(downloadUrl, 'lossless_flac', {
+                title: info.title,
+                artist: info.uploader,
+                platform: 'Spotify' // Force Spotify for better categorization
+            });
+
+            if (result && (result.exitCode === 0 || !result.hasOwnProperty('exitCode'))) {
+                ToastAndroid.show(`✓ Lossless FLAC saved!`, ToastAndroid.SHORT);
+            } else if (result !== null) {
+                throw new Error(`Download failed (exit code: ${result?.exitCode})`);
+            }
+        } catch (error: any) {
+            console.error('Lossless download error:', error);
+            ToastAndroid.show(`Lossless download failed: ${error.message}`, ToastAndroid.LONG);
+        } finally {
+            setIsLosslessDownloading(false);
+        }
+    }, [state.videoInfo, losslessAvailability, actions]);
+
+    const handleBatchDownload = useCallback(async (selectedItems: any[], mode: 'video' | 'audio') => {
         setPlaylistModalVisible(false);
         ToastAndroid.show(`Starting ${selectedItems.length} downloads...`, ToastAndroid.SHORT);
 
-        const formatId = mode === 'audio' ? 'audio_mp3' : null; // null = bestvideo+bestaudio
+        const formatId = mode === 'audio' ? 'audio_mp3' : null;
 
-        // Fire and forget (native module handles queue)
-        selectedItems.forEach(async (item, index) => {
+        const initialBatchItems = selectedItems.map((item) => ({
+            id: item.id,
+            title: item.title,
+            artist: item.author,
+            status: 'queued' as const,
+        }));
+        setBatchItems(initialBatchItems);
+        setIsBatchDownloading(true);
+        batchActiveRef.current = true;
+
+        for (let index = 0; index < selectedItems.length; index++) {
+            if (!batchActiveRef.current) break;
+
+            const item = selectedItems[index];
+            setBatchItems((prev) =>
+                prev.map((bi) =>
+                    bi.id === item.id ? { ...bi, status: 'downloading' } : bi
+                )
+            );
+            setBatchCurrentTitle(item.title);
+
             try {
-                // Add small delay to prevent freezing UI?
-                setTimeout(async () => {
-                    if (item.type === 'spotify' && item.searchQuery) {
-                        try {
-                            await actions.downloadSpotifyTrack(
-                                item.searchQuery,
-                                item.title,
-                                item.author,
-                                item.thumbnail
-                            );
-                        } catch (e) {
-                            console.error(`Failed to download Spotify track ${item.title}`, e);
-                        }
-                    } else {
-                        await YtDlpNative.download(item.url, formatId, Math.random().toString(36).substring(7));
-                    }
-                }, index * 1000);
-            } catch (e) {
-                console.error(`Failed to start download for ${item.title}`, e);
+                let result;
+                if (item.type === 'spotify' && item.searchQuery) {
+                    result = await actions.downloadSpotifyTrack(
+                        item.searchQuery,
+                        item.title,
+                        item.author,
+                        item.thumbnail
+                    );
+                } else {
+                    result = await actions.download(item.url, formatId);
+                }
+
+                if (result === null) {
+                    // Cancelled by user
+                    setBatchItems((prev) =>
+                        prev.map((bi) =>
+                            bi.id === item.id ? { ...bi, status: 'failed', error: 'Cancelled' } : bi
+                        )
+                    );
+                    batchActiveRef.current = false;
+                    setIsBatchDownloading(false);
+                    break;
+                }
+
+                // Mark completed
+                setBatchItems((prev) =>
+                    prev.map((bi) =>
+                        bi.id === item.id ? { ...bi, status: 'completed' } : bi
+                    )
+                );
+            } catch (e: any) {
+                console.error(`Failed to download ${item.title}`, e);
+                setBatchItems((prev) =>
+                    prev.map((bi) =>
+                        bi.id === item.id
+                            ? { ...bi, status: 'failed', error: e?.message || 'Download failed' }
+                            : bi
+                    )
+                );
             }
-        });
-    };
+
+            // Small delay between downloads
+            if (index < selectedItems.length - 1 && batchActiveRef.current) {
+                await new Promise<void>((resolve) => setTimeout(resolve, 500));
+            }
+        }
+
+        setBatchCurrentTitle('');
+        batchActiveRef.current = false;
+    }, [actions]);
 
     const handleDownload = useCallback(async (format: VideoFormat | string) => {
         if (!state.videoInfo) return;
@@ -529,7 +630,7 @@ export const HomeScreen: React.FC = () => {
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: currentTheme.background }]} edges={['top']}>
-            <OfflineBanner />
+            <OfflineBanner onActionPress={onNavigateToLibrary} />
             <StatusBar barStyle="light-content" backgroundColor={currentTheme.background} animated />
             <ScrollView
                 style={styles.scrollView}
@@ -546,9 +647,8 @@ export const HomeScreen: React.FC = () => {
                 >
                     <View style={styles.headerTop}>
                         <View style={styles.headerBrand}>
-                            <View style={styles.logoGlow} />
                             <Text style={styles.logo}>Vibe</Text>
-                            <Text style={[styles.logo, styles.logoAccent]}>Downloader</Text>
+                            <Text style={[styles.logo, { color: Colors.primary }]}>Downloader</Text>
                         </View>
 
                         {/* Header Actions */}
@@ -590,26 +690,51 @@ export const HomeScreen: React.FC = () => {
                     disabled={state.isLoading || state.isDownloading}
                 />
 
-                {/* URL Input */}
-                <View style={styles.inputSection}>
-                    <View style={styles.inputRow}>
-                        <URLInput
-                            value={url}
-                            onChangeText={(text) => {
-                                setUrl(text);
-                                if (text.trim().length === 0) {
-                                    setUserSelectedPlatform(false);
-                                    setDetectedPlatform('YouTube');
-                                    actions.reset();
-                                }
-                            }}
-                            onSubmit={() => handleFetch(url)}
-                            isLoading={state.isLoading}
-                            onPaste={handlePaste} // Assuming handlePaste is defined
-                            platformColor={platformColor}
-                        />
+                {/* Offline Mode Indicator */}
+                {isOffline && (
+                    <View style={styles.offlineContainer}>
+                        <View style={styles.offlineHero}>
+                            <View style={styles.offlineGlow} />
+                            <Text style={styles.offlineIcon}>🌩️</Text>
+                            <Text style={styles.offlineTitle}>Network Interrupted</Text>
+                            <Text style={styles.offlineSubtitle}>
+                                You are currently offline. Premium downloads are paused, but your Library remains fully accessible.
+                            </Text>
+                            {onNavigateToLibrary && (
+                                <TouchableOpacity
+                                    style={[styles.offlineBtn, { backgroundColor: Colors.primary }]}
+                                    onPress={onNavigateToLibrary}
+                                >
+                                    <LibraryIcon size={18} color="#FFF" />
+                                    <Text style={styles.offlineBtnText}>OPEN LIBRARY</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
                     </View>
-                </View>
+                )}
+
+                {/* URL Input */}
+                {!isOffline && (
+                    <View style={styles.inputSection}>
+                        <View style={styles.inputRow}>
+                            <URLInput
+                                value={url}
+                                onChangeText={(text) => {
+                                    setUrl(text);
+                                    if (text.trim().length === 0) {
+                                        setUserSelectedPlatform(false);
+                                        setDetectedPlatform(null);
+                                        actions.reset();
+                                    }
+                                }}
+                                onSubmit={() => handleFetch(url)}
+                                isLoading={state.isLoading}
+                                onPaste={handlePaste} // Assuming handlePaste is defined
+                                platformColor={platformColor}
+                            />
+                        </View>
+                    </View>
+                )}
 
                 {/* Error Message */}
                 {state.fetchError && (
@@ -620,16 +745,41 @@ export const HomeScreen: React.FC = () => {
                 )}
 
                 {/* Download Progress */}
-                {state.isDownloading && (
+                {(state.isDownloading || isLosslessDownloading) && (
                     <View style={styles.progressSection}>
                         <DownloadProgress
                             progress={state.downloadProgress}
                             eta={state.downloadEta}
                             onCancel={handleCancelDownload}
-                            title={state.videoInfo?.title}
-                            platformColor={platformColor}
+                            title={isLosslessDownloading ? `🎵 ${state.videoInfo?.title || 'Lossless FLAC'}` : state.videoInfo?.title}
+                            platformColor={isLosslessDownloading ? Colors.lossless : platformColor}
+                            statusLine={state.downloadLine}
                         />
                     </View>
+                )}
+
+                {/* Batch Download Progress */}
+                {isBatchDownloading && batchItems.length > 0 && (
+                    <BatchDownloadProgress
+                        items={batchItems}
+                        totalItems={batchItems.length}
+                        completedCount={batchItems.filter((i) => i.status === 'completed').length}
+                        failedCount={batchItems.filter((i) => i.status === 'failed').length}
+                        currentTitle={batchCurrentTitle}
+                        onCancel={() => {
+                            batchActiveRef.current = false;
+                            actions.cancelDownload();
+                            setIsBatchDownloading(false);
+                            setBatchItems([]);
+                            ToastAndroid.show('Batch download cancelled', ToastAndroid.SHORT);
+                        }}
+                        onClose={() => {
+                            batchActiveRef.current = false;
+                            setIsBatchDownloading(false);
+                            setBatchItems([]);
+                        }}
+                        platformColor={platformColor}
+                    />
                 )}
 
                 {/* Skeleton Loading */}
@@ -640,7 +790,7 @@ export const HomeScreen: React.FC = () => {
                 )}
 
                 {/* Video Info & Downloads */}
-                {state.videoInfo && !state.isLoading && !state.isDownloading && (
+                {state.videoInfo && !state.isLoading && !state.isDownloading && !isLosslessDownloading && (
                     <>
                         {/* ... Info Card ... */}
                         <View style={styles.videoSection}>
@@ -649,6 +799,18 @@ export const HomeScreen: React.FC = () => {
                                 onSaveThumbnail={handleSaveThumbnail}
                             />
                         </View>
+
+                        {/* Lossless FLAC Card (Spotify only) */}
+                        {(isCheckingLossless || (losslessAvailability && losslessAvailability.available)) && (
+                            <LosslessCard
+                                availability={losslessAvailability || { available: false, source: 'none' }}
+                                isLoading={isCheckingLossless}
+                                onDownload={handleLosslessDownload}
+                                title={state.videoInfo.title}
+                                artist={state.videoInfo.uploader}
+                                platformColor={platformColor}
+                            />
+                        )}
 
                         {/* Quick Action - Platform Auto-Detect */}
                         <View style={styles.quickActionContainer}>
@@ -682,48 +844,7 @@ export const HomeScreen: React.FC = () => {
 
                 {/* Animated Empty State */}
                 {!state.videoInfo && !state.isLoading && !state.fetchError && !url && (
-                    <Animated.View style={[
-                        styles.emptyState,
-                        { opacity: emptyFadeAnim, transform: [{ translateY: emptySlideAnim }] }
-                    ]}>
-                        {/* Floating Orbs */}
-                        <Animated.View style={[styles.emptyOrb, styles.emptyOrbPrimary, { transform: [{ translateY: orbAnim1 }] }]} />
-                        <Animated.View style={[styles.emptyOrb, styles.emptyOrbSecondary, { transform: [{ translateY: orbAnim2 }] }]} />
-
-                        <View style={styles.emptyIconContainer}>
-                            <View style={styles.emptyIconGlow} />
-                            <View style={styles.emptyIconRing}>
-                                <SparkleIcon size={44} color={Colors.primary} />
-                            </View>
-                        </View>
-                        <Text style={styles.emptyTitle}>Universal Downloader</Text>
-                        <Text style={styles.emptySubtitle}>
-                            Paste a link from YouTube, Instagram, TikTok, Spotify, and more
-                        </Text>
-
-                        {/* Animated Feature Pills */}
-                        <View style={styles.featurePills}>
-                            {['🎬 4K Video', '🎵 MP3 Audio', '📸 Photos', '🔗 8+ Platforms', '⚡ Fast'].map((label, i) => (
-                                <Animated.View
-                                    key={label}
-                                    style={[
-                                        styles.featurePill,
-                                        {
-                                            opacity: pillAnims[i],
-                                            transform: [{
-                                                scale: pillAnims[i].interpolate({
-                                                    inputRange: [0, 1],
-                                                    outputRange: [0.7, 1],
-                                                }),
-                                            }],
-                                        },
-                                    ]}
-                                >
-                                    <Text style={styles.featurePillText}>{label}</Text>
-                                </Animated.View>
-                            ))}
-                        </View>
-                    </Animated.View>
+                    <EmptyState platform={detectedPlatform} isOffline={isOffline} />
                 )}
 
                 {/* Playlist Modal */}
@@ -783,24 +904,13 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         position: 'relative',
     },
-    logoGlow: {
-        position: 'absolute',
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-        backgroundColor: Colors.primary,
-        opacity: 0.08,
-        left: -10,
-        top: -12,
-    },
+
+
     logo: {
-        fontSize: 24,
-        fontWeight: '800',
+        fontSize: 26,
+        fontWeight: '900',
         color: Colors.textPrimary,
-        letterSpacing: -0.5,
-    },
-    logoAccent: {
-        color: Colors.primary,
+        letterSpacing: -1,
     },
     headerActions: {
         flexDirection: 'row',
@@ -900,92 +1010,73 @@ const styles = StyleSheet.create({
         fontWeight: '800',
         letterSpacing: 1.5,
     },
-    // ── Animated Empty State ──
-    emptyState: {
+    // ── Offline ──
+    offlineContainer: {
+        marginHorizontal: Spacing.md,
+        marginTop: Spacing.xl,
+        backgroundColor: `${Colors.surfaceElevated}`,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.border,
+        padding: Spacing.xl,
         alignItems: 'center',
-        marginTop: 48,
-        paddingHorizontal: 28,
-        position: 'relative',
-        minHeight: 360,
+        ...Shadows.lg,
     },
-    emptyOrb: {
-        position: 'absolute',
-        borderRadius: 100,
-        opacity: 0.1,
-    },
-    emptyOrbPrimary: {
-        width: 150,
-        height: 150,
-        backgroundColor: Colors.primary,
-        top: -20,
-        left: -10,
-    },
-    emptyOrbSecondary: {
-        width: 100,
-        height: 100,
-        backgroundColor: Colors.secondary,
-        bottom: 40,
-        right: 0,
-    },
-    emptyIconContainer: {
-        marginBottom: 24,
-        position: 'relative',
+    offlineHero: {
         alignItems: 'center',
-        justifyContent: 'center',
+        gap: Spacing.md,
     },
-    emptyIconGlow: {
-        position: 'absolute',
-        width: 120,
-        height: 120,
-        borderRadius: 60,
-        backgroundColor: Colors.primary,
-        opacity: 0.12,
+    offlineIcon: {
+        fontSize: 48,
+        marginBottom: Spacing.sm,
     },
-    emptyIconRing: {
-        width: 88,
-        height: 88,
-        borderRadius: 44,
-        backgroundColor: `${Colors.primary}0A`,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 2,
-        borderColor: `${Colors.primary}20`,
-    },
-    emptyTitle: {
+    offlineTitle: {
         color: Colors.textPrimary,
-        fontSize: 26,
+        fontSize: 22,
         fontWeight: '800',
-        marginBottom: 10,
         textAlign: 'center',
-        letterSpacing: -0.5,
     },
-    emptySubtitle: {
+    offlineSubtitle: {
         color: Colors.textMuted,
         fontSize: 14,
         textAlign: 'center',
         lineHeight: 22,
-        marginBottom: 24,
-        maxWidth: 300,
+        maxWidth: 280,
     },
-    featurePills: {
+    offlineWarning: {
+        color: Colors.error,
+        fontSize: 10,
+        fontWeight: '900',
+        letterSpacing: 2,
+        marginTop: 20,
+    },
+    offlineActionRow: {
+        marginTop: 24,
+    },
+    offlineGlow: {
+        position: 'absolute',
+        width: 200,
+        height: 200,
+        borderRadius: 100,
+        backgroundColor: Colors.error,
+        opacity: 0.05,
+    },
+    offlineBtn: {
         flexDirection: 'row',
-        flexWrap: 'wrap',
-        justifyContent: 'center',
-        gap: 10,
+        alignItems: 'center',
+        paddingHorizontal: 24,
+        paddingVertical: 12,
+        borderRadius: 12,
+        marginTop: 12,
+        gap: 8,
+        ...Shadows.md,
     },
-    featurePill: {
-        backgroundColor: Colors.surface,
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-        borderRadius: 20,
-        borderWidth: 1,
-        borderColor: Colors.border,
-    },
-    featurePillText: {
-        color: Colors.textSecondary,
-        fontSize: 13,
-        fontWeight: '600',
-    },
+    offlineBtnText: {
+        color: '#FFF',
+        fontSize: 14,
+        fontWeight: '800',
+        letterSpacing: 0.5,
+    }
 });
 
 export default HomeScreen;

@@ -54,6 +54,15 @@ export const Colors = {
     gradientIndigo: '#4F46E5',
     gradientOrange: '#F97316',
 
+    // Premium Depth System
+    surfaceLow: '#0A0A0B',      // Base background layer
+    surfaceMedium: '#141417',   // Secondary cards
+    surfaceHigh: '#1E1E22',     // Modals and popups
+    surfaceAccent: 'rgba(99, 102, 241, 0.1)', // Subtle primary tint for areas
+
+    innerBorder: 'rgba(255, 255, 255, 0.05)', // The "Premium" 1px highlight
+    innerBorderLight: 'rgba(255, 255, 255, 0.08)',
+
     // Platforms - Dynamic Theming
     youtube: '#FF0000', // RED for YouTube
     instagram: '#E1306C',
@@ -63,6 +72,7 @@ export const Colors = {
     x: '#FFFFFF',
     pinterest: '#BD081C',
     soundcloud: '#FF5500',
+    lossless: '#00D4AA', // Added for FLAC lossless feature
 };
 
 export const PlatformThemes: Record<string, {
@@ -127,15 +137,33 @@ export const PlatformThemes: Record<string, {
     }
 };
 
+export const SUPPORTED_PLATFORMS = [
+    { id: 'YouTube', color: Colors.youtube, label: 'YouTube' },
+    { id: 'Instagram', color: Colors.instagram, label: 'Instagram' },
+    { id: 'Facebook', color: Colors.facebook, label: 'Facebook' },
+    { id: 'TikTok', color: Colors.tiktok, label: 'TikTok' },
+    { id: 'Spotify', color: Colors.spotify, label: 'Spotify' },
+    { id: 'X', color: Colors.x, label: 'X' },
+    { id: 'Pinterest', color: Colors.pinterest, label: 'Pinterest' },
+    { id: 'SoundCloud', color: Colors.soundcloud, label: 'SoundCloud' },
+];
+
+export const getPlatformColor = (platform: string | null | undefined): string => {
+    if (!platform) return Colors.primary;
+    const found = SUPPORTED_PLATFORMS.find(
+        p => p.id.toLowerCase() === platform.toLowerCase()
+    );
+    return found?.color || Colors.primary;
+};
+
 export const Spacing = {
     xxs: 2,
     xs: 4,
     sm: 8,
-    md: 16,
-    lg: 24,
-    xl: 32,
-    xxl: 48,
-    xxxl: 64,
+    md: 12, // Adjusted for tighter industrial feel
+    lg: 20,
+    xl: 28,
+    xxl: 40,
 };
 
 export const BorderRadius = {
@@ -152,14 +180,12 @@ export const Typography = {
     sizes: {
         xxs: 10,
         xs: 12,
-        sm: 14,
-        base: 16,
-        lg: 18,
-        xl: 20,
-        '2xl': 24,
-        '3xl': 30,
-        '4xl': 36,
-        '5xl': 48,
+        sm: 13, // Refined
+        base: 15, // Refined
+        lg: 17,
+        xl: 19,
+        '2xl': 22,
+        '3xl': 28,
     },
     weights: {
         light: '300',
@@ -167,14 +193,31 @@ export const Typography = {
         medium: '500',
         semibold: '600',
         bold: '700',
-        extrabold: '800',
+        black: '900',
     } as const,
     letterSpacing: {
-        tight: -0.5,
-        normal: 0,
+        tight: -0.8,
+        normal: -0.2, // Slightly tighter for premium look
         wide: 0.5,
         wider: 1,
-        widest: 2,
+    }
+};
+
+export const Glass = {
+    subtle: {
+        backgroundColor: 'rgba(18, 18, 20, 0.7)',
+        borderColor: 'rgba(255, 255, 255, 0.06)',
+        borderWidth: 1,
+    },
+    medium: {
+        backgroundColor: 'rgba(30, 30, 35, 0.8)',
+        borderColor: 'rgba(255, 255, 255, 0.1)',
+        borderWidth: 1,
+    },
+    heavy: {
+        backgroundColor: 'rgba(10, 10, 12, 0.9)',
+        borderColor: 'rgba(255, 255, 255, 0.03)',
+        borderWidth: 1,
     }
 };
 
@@ -222,25 +265,6 @@ export const Shadows = {
         shadowRadius: 8,
         elevation: 4,
     }),
-};
-
-export const SUPPORTED_PLATFORMS = [
-    { id: 'YouTube', color: Colors.youtube, label: 'YouTube' },
-    { id: 'Instagram', color: Colors.instagram, label: 'Instagram' },
-    { id: 'Facebook', color: Colors.facebook, label: 'Facebook' },
-    { id: 'TikTok', color: Colors.tiktok, label: 'TikTok' },
-    { id: 'Spotify', color: Colors.spotify, label: 'Spotify' },
-    { id: 'X', color: Colors.x, label: 'X' },
-    { id: 'Pinterest', color: Colors.pinterest, label: 'Pinterest' },
-    { id: 'SoundCloud', color: Colors.soundcloud, label: 'SoundCloud' },
-];
-
-export const getPlatformColor = (platform: string | null | undefined): string => {
-    if (!platform) return Colors.primary;
-    const found = SUPPORTED_PLATFORMS.find(
-        p => p.id.toLowerCase() === platform.toLowerCase()
-    );
-    return found?.color || Colors.primary;
 };
 
 export const Animations = {

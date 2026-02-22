@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { NativeEventEmitter } from 'react-native';
 import {
     YtDlpNative,
@@ -22,7 +22,7 @@ interface UseYtDlpState {
 
 interface UseYtDlpActions {
     fetchInfo: (url: string) => Promise<void>;
-    download: (url: string, formatId: string | null) => Promise<DownloadResult | null>;
+    download: (url: string, formatId: string | null, options?: { title?: string; artist?: string; platform?: string }) => Promise<DownloadResult | null>;
     downloadSpotifyTrack: (searchQuery: string, title: string, artist: string, thumbnail: string | null) => Promise<DownloadResult | null>;
     cancelDownload: () => Promise<void>;
     validateUrl: (url: string) => Promise<ValidationResult>;
@@ -32,6 +32,7 @@ interface UseYtDlpActions {
     getClipboardText: () => Promise<string>;
     saveThumbnail: (url: string, title: string) => Promise<string>;
     setVideoInfo: (info: VideoInfo) => void;
+    setDownloadProgress: (progress: number, eta: number, line: string) => void;
 }
 
 const initialState: UseYtDlpState = {
@@ -47,7 +48,7 @@ const initialState: UseYtDlpState = {
 
 export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
     const [state, setState] = useState<UseYtDlpState>(initialState);
-    const [currentProcessId, setCurrentProcessId] = useState<string | null>(null);
+    const processIdRef = useRef<string | null>(null);
 
     // Listen for progress events with error handling
     useEffect(() => {
@@ -60,7 +61,7 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
             subscription = ytDlpEventEmitter.addListener(
                 'onDownloadProgress',
                 (event) => {
-                    if (event.processId === currentProcessId) {
+                    if (event.processId === processIdRef.current) {
                         // Clamp progress between 0 and 100 to prevent -1% display
                         const clampedProgress = Math.max(0, Math.min(event.progress || 0, 100));
 
@@ -95,8 +96,8 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                             if (timeSinceLastChange > 120000) {
                                 console.warn('Download appears stale - no progress for 2 minutes');
                                 // Auto-cancel stale download
-                                if (currentProcessId && YtDlpNative?.cancelDownload) {
-                                    YtDlpNative.cancelDownload(currentProcessId).catch(() => { });
+                                if (processIdRef.current && YtDlpNative?.cancelDownload) {
+                                    YtDlpNative.cancelDownload(processIdRef.current).catch(() => { });
                                 }
                                 setState((prev) => ({
                                     ...prev,
@@ -120,7 +121,7 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 // Ignore cleanup errors
             }
         };
-    }, [currentProcessId]);
+    }, []);
 
     const generateProcessId = () => Math.random().toString(36).substring(7);
 
@@ -163,9 +164,9 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
     }, []);
 
     const download = useCallback(
-        async (url: string, formatId: string | null) => {
+        async (url: string, formatId: string | null, options?: { title?: string; artist?: string; platform?: string }) => {
             const processId = generateProcessId();
-            setCurrentProcessId(processId);
+            processIdRef.current = processId;
 
             setState((prev) => ({
                 ...prev,
@@ -194,7 +195,7 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                     throw new Error('Native module not available');
                 }
 
-                const result = await YtDlpNative.download(url, formatId, processId);
+                const result = await YtDlpNative.download(url, formatId, processId, options);
                 clearTimeout(downloadTimeout);
                 setState((prev) => ({ ...prev, isDownloading: false, downloadProgress: 100 }));
                 return result;
@@ -215,7 +216,7 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 }));
                 return null;
             } finally {
-                setCurrentProcessId(null);
+                processIdRef.current = null;
             }
         },
         []
@@ -224,7 +225,7 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
     const downloadSpotifyTrack = useCallback(
         async (searchQuery: string, title: string, artist: string, thumbnail: string | null) => {
             const processId = generateProcessId();
-            setCurrentProcessId(processId);
+            processIdRef.current = processId;
 
             setState((prev) => ({
                 ...prev,
@@ -274,7 +275,7 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 }));
                 return null;
             } finally {
-                setCurrentProcessId(null);
+                processIdRef.current = null;
             }
         },
         []
@@ -282,8 +283,8 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
 
     const cancelDownload = useCallback(async () => {
         try {
-            if (currentProcessId && YtDlpNative?.cancelDownload) {
-                await YtDlpNative.cancelDownload(currentProcessId);
+            if (processIdRef.current && YtDlpNative?.cancelDownload) {
+                await YtDlpNative.cancelDownload(processIdRef.current);
             }
             setState((prev) => ({ ...prev, isDownloading: false }));
         } catch (error) {
@@ -291,7 +292,7 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
             // Still update state even if cancel fails
             setState((prev) => ({ ...prev, isDownloading: false }));
         }
-    }, [currentProcessId]);
+    }, []);
 
     const validateUrl = useCallback(async (url: string): Promise<ValidationResult> => {
         try {
@@ -373,6 +374,16 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
         }));
     }, []);
 
+    const setDownloadProgress = useCallback((progress: number, eta: number, line: string) => {
+        setState((prev) => ({
+            ...prev,
+            isDownloading: true,
+            downloadProgress: Math.max(0, Math.min(100, progress)),
+            downloadEta: eta,
+            downloadLine: line,
+        }));
+    }, []);
+
     return [
         state,
         {
@@ -386,7 +397,8 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
             getSharedData,
             getClipboardText,
             saveThumbnail,
-            setVideoInfo
+            setVideoInfo,
+            setDownloadProgress,
         },
     ];
 };

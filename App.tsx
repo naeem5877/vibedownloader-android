@@ -23,6 +23,7 @@ import { HomeScreen, LibraryScreen, SplashScreen, OnboardingScreen } from './src
 import { Colors, BorderRadius, Spacing, Typography, Shadows } from './src/theme';
 import { HomeIcon, LibraryIcon, DownloadIcon } from './src/components/Icons';
 import { UpdateLog } from './src/components/UpdateLog';
+import { Haptics } from './src/utils/haptics';
 
 // Storage key constant
 const ONBOARDING_COMPLETE_KEY = 'hasLaunched';
@@ -42,20 +43,19 @@ interface TabButtonProps {
 
 const TabButton: React.FC<TabButtonProps> = ({ id, label, icon, activeIcon, isActive, onPress }) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
-  const dotAnim = useRef(new Animated.Value(isActive ? 1 : 0)).current;
+  const indicatorAnim = useRef(new Animated.Value(isActive ? 1 : 0)).current;
 
   useEffect(() => {
     Animated.parallel([
       Animated.spring(scaleAnim, {
-        toValue: isActive ? 1.05 : 1,
-        tension: 200,
-        friction: 12,
+        toValue: isActive ? 1.1 : 1,
+        tension: 300,
+        friction: 15,
         useNativeDriver: true,
       }),
-      Animated.spring(dotAnim, {
+      Animated.timing(indicatorAnim, {
         toValue: isActive ? 1 : 0,
-        tension: 100,
-        friction: 8,
+        duration: 200,
         useNativeDriver: true,
       }),
     ]).start();
@@ -64,18 +64,29 @@ const TabButton: React.FC<TabButtonProps> = ({ id, label, icon, activeIcon, isAc
   return (
     <TouchableOpacity
       style={styles.tabButton}
-      onPress={onPress}
-      activeOpacity={0.7}
+      onPress={() => {
+        Haptics.selection();
+        onPress();
+      }}
+      activeOpacity={1} // Physical buttons don't fade, they react
     >
+      {/* Top indicator bar */}
+      <Animated.View
+        style={[
+          styles.indicator,
+          {
+            opacity: indicatorAnim,
+            backgroundColor: Colors.primary,
+            transform: [{ scaleX: indicatorAnim }]
+          }
+        ]}
+      />
+
       <Animated.View
         style={[
           styles.tabIconContainer,
           {
             transform: [{ scale: scaleAnim }],
-            backgroundColor: isActive ? `${Colors.primary}20` : 'transparent', // 20% opacity primary
-            borderRadius: 20,
-            paddingHorizontal: 20,
-            paddingVertical: 6,
           }
         ]}
       >
@@ -206,7 +217,7 @@ function App(): React.JSX.Element {
               ]}
             >
               <View style={styles.screen}>
-                <HomeScreen />
+                <HomeScreen onNavigateToLibrary={() => setActiveTab('library')} />
               </View>
 
               <View style={styles.screen}>
@@ -266,32 +277,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   bottomNavSafeArea: {
-    backgroundColor: Colors.surface,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 24,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    backgroundColor: Colors.surfaceHigh,
   },
   bottomNav: {
-    backgroundColor: Colors.surface, // Or make it slightly transparent if desired
-    height: 70,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    backgroundColor: Colors.surfaceHigh,
+    height: 65,
     flexDirection: 'row',
     alignItems: 'center',
-    borderTopWidth: 0, // Remove border for cleaner look
-    // Shadow for depth
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: -4,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 20,
+    borderTopWidth: 1,
+    borderTopColor: Colors.innerBorder,
   },
   navContent: {
     flex: 1,
@@ -303,23 +297,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flex: 1,
-    paddingVertical: 8,
+    height: '100%',
+  },
+  indicator: {
+    position: 'absolute',
+    top: 0,
+    width: 40,
+    height: 3,
+    borderBottomLeftRadius: 3,
+    borderBottomRightRadius: 3,
   },
   tabIconContainer: {
     marginBottom: 4,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // removed activeIconBg as it's inline now
   tabLabel: {
-    fontSize: 11,
+    fontSize: 10,
     color: Colors.textMuted,
-    fontWeight: '500',
-    letterSpacing: 0.2,
+    fontWeight: Typography.weights.medium,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   tabLabelActive: {
     color: Colors.primary,
-    fontWeight: '700',
+    fontWeight: Typography.weights.bold,
   },
   // removed activeDot styles
 });

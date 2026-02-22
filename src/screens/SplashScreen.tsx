@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Dimensions, Image, Easing } from 'react-native';
-import { Colors, Typography, Spacing, Shadows } from '../theme';
+import { View, Text, StyleSheet, Animated, Dimensions, Image, Easing, StatusBar } from 'react-native';
+import { Colors, Typography, Spacing } from '../theme';
 import Svg, { Circle } from 'react-native-svg';
 
 const { width, height } = Dimensions.get('window');
@@ -56,119 +56,154 @@ const CircularLoader = () => {
 
 const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
     const fadeAnim = useRef(new Animated.Value(0)).current;
-    const scaleAnim = useRef(new Animated.Value(0.8)).current;
-    const translateYAnim = useRef(new Animated.Value(20)).current;
-    const bgScaleAnim = useRef(new Animated.Value(1)).current;
+    const logoScale = useRef(new Animated.Value(0.85)).current;
+    const logoTranslateY = useRef(new Animated.Value(30)).current;
+    const bgOpacity = useRef(new Animated.Value(0)).current;
+    const scanlineAnim = useRef(new Animated.Value(0)).current;
+    const textFade = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
-        // Background breathing effect
-        Animated.loop(
-            Animated.sequence([
-                Animated.timing(bgScaleAnim, {
-                    toValue: 1.1,
-                    duration: 4000,
+        // Entrance sequence
+        Animated.stagger(200, [
+            // Stage 1: Ambient Background
+            Animated.timing(bgOpacity, {
+                toValue: 0.15,
+                duration: 1200,
+                useNativeDriver: true,
+            }),
+            // Stage 2: Logo Entrance
+            Animated.parallel([
+                Animated.timing(fadeAnim, {
+                    toValue: 1,
+                    duration: 1000,
+                    easing: Easing.out(Easing.cubic),
                     useNativeDriver: true,
                 }),
-                Animated.timing(bgScaleAnim, {
+                Animated.spring(logoScale, {
+                    toValue: 1,
+                    friction: 8,
+                    tension: 40,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(logoTranslateY, {
+                    toValue: 0,
+                    duration: 1000,
+                    easing: Easing.out(Easing.back(1.5)),
+                    useNativeDriver: true,
+                }),
+            ]),
+            // Stage 3: Text Fade
+            Animated.timing(textFade, {
+                toValue: 1,
+                duration: 800,
+                useNativeDriver: true,
+            }),
+        ]).start();
+
+        // Scanline loop
+        Animated.loop(
+            Animated.sequence([
+                Animated.timing(scanlineAnim, {
                     toValue: 1,
                     duration: 4000,
+                    easing: Easing.linear,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(scanlineAnim, {
+                    toValue: 0,
+                    duration: 0,
                     useNativeDriver: true,
                 }),
             ])
         ).start();
 
-        // Entrance Sequence
-        Animated.sequence([
-            Animated.parallel([
-                Animated.timing(fadeAnim, {
-                    toValue: 1,
-                    duration: 800,
-                    useNativeDriver: true,
-                }),
-                Animated.spring(scaleAnim, {
-                    toValue: 1,
-                    friction: 7,
-                    tension: 40,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(translateYAnim, {
-                    toValue: 0,
-                    duration: 800,
-                    easing: Easing.out(Easing.cubic),
-                    useNativeDriver: true,
-                }),
-            ]),
-        ]).start();
-
-        // Exit Sequence
+        // Exit sequence
         const timer = setTimeout(() => {
             Animated.parallel([
                 Animated.timing(fadeAnim, {
                     toValue: 0,
-                    duration: 400,
+                    duration: 500,
                     useNativeDriver: true,
                 }),
-                Animated.timing(scaleAnim, {
-                    toValue: 1.2,
-                    duration: 400,
+                Animated.timing(logoScale, {
+                    toValue: 1.1,
+                    duration: 500,
                     useNativeDriver: true,
                 }),
             ]).start(() => onFinish());
-        }, 3000);
+        }, 3200);
 
         return () => clearTimeout(timer);
     }, []);
 
+    const scanlineTranslateY = scanlineAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [-height, height],
+    });
+
     return (
         <View style={styles.container}>
-            {/* Ambient Background Glow */}
+            <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+
+            {/* Atmospheric Background Layers */}
+            <Animated.View style={[styles.bgPulse, { opacity: bgOpacity }]} />
+            <View style={styles.vignette} />
+
+            {/* Industrial Scanline Effect */}
             <Animated.View
                 style={[
-                    styles.bgGlow,
-                    {
-                        transform: [{ scale: bgScaleAnim }],
-                    },
+                    styles.scanline,
+                    { transform: [{ translateY: scanlineTranslateY }] }
                 ]}
             />
 
             <View style={styles.contentContainer}>
-                {/* Logo & Branding */}
+                {/* Logo with Glow */}
                 <Animated.View
-                    style={{
-                        opacity: fadeAnim,
-                        transform: [
-                            { scale: scaleAnim },
-                            { translateY: translateYAnim }
-                        ],
-                        alignItems: 'center',
-                    }}
+                    style={[
+                        styles.logoContainer,
+                        {
+                            opacity: fadeAnim,
+                            transform: [
+                                { scale: logoScale },
+                                { translateY: logoTranslateY }
+                            ]
+                        }
+                    ]}
                 >
-                    <View style={styles.logoWrapper}>
+                    <View style={styles.logoShield}>
                         <Image
                             source={require('../../transparent_logo.png')}
                             style={styles.logoImage}
                             resizeMode="contain"
                         />
                     </View>
-
-                    <Text style={styles.appName}>VibeDownloader</Text>
-                    <Text style={styles.tagline}>Premium Media Downloader</Text>
+                    <View style={styles.logoGlowRing} />
                 </Animated.View>
 
-                {/* Animated Loader */}
-                <Animated.View
-                    style={[
-                        styles.loaderContainer,
-                        { opacity: fadeAnim }
-                    ]}
-                >
+                {/* Branding Text */}
+                <Animated.View style={[styles.textContainer, { opacity: textFade }]}>
+                    <View style={styles.brandRow}>
+                        <Text style={styles.logoTextMain}>VIBE</Text>
+                        <Text style={styles.logoTextAccent}>DOWNLOADER</Text>
+                    </View>
+                    <View style={styles.taglineWrapper}>
+                        <View style={styles.taglineLine} />
+                        <Text style={styles.taglineText}>PREMIUM ASSET CAPTURE</Text>
+                        <View style={styles.taglineLine} />
+                    </View>
+                </Animated.View>
+
+                {/* Technical Status Loader */}
+                <Animated.View style={[styles.loaderWrapper, { opacity: textFade }]}>
                     <CircularLoader />
+                    <Text style={styles.statusText}>INITIALIZING SYSTEM...</Text>
                 </Animated.View>
             </View>
 
-            {/* Version or Footer */}
+            {/* Bottom Version Indicator */}
             <View style={styles.footer}>
-                <Text style={styles.versionText}>v{require('../../package.json').version}</Text>
+                <Text style={styles.versionLabel}>BUILD v1.1.0 • ARM64</Text>
             </View>
         </View>
     );
@@ -177,71 +212,120 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: Colors.background,
+        backgroundColor: '#0A0A0C', // Deeper than standard background for splash
         justifyContent: 'center',
         alignItems: 'center',
-        overflow: 'hidden',
     },
-    bgGlow: {
+    bgPulse: {
         position: 'absolute',
         width: width * 1.5,
         height: width * 1.5,
         borderRadius: width,
         backgroundColor: Colors.primary,
-        opacity: 0.05,
-        top: -width * 0.5,
+    },
+    vignette: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'transparent',
+        borderWidth: 100,
+        borderColor: 'rgba(0,0,0,0.4)',
+        borderRadius: 1,
+    },
+    scanline: {
+        position: 'absolute',
+        width: '100%',
+        height: 200,
+        backgroundColor: 'rgba(255, 255, 255, 0.01)',
+        borderTopWidth: 1,
+        borderBottomWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.02)',
     },
     contentContainer: {
-        flex: 1,
-        justifyContent: 'center',
         alignItems: 'center',
-        width: '100%',
+        justifyContent: 'center',
     },
-    logoWrapper: {
-        width: 140, // Slightly improved sizing
-        height: 140,
-        marginBottom: Spacing.xl,
-        shadowColor: Colors.primary,
-        shadowOffset: { width: 0, height: 10 },
-        shadowOpacity: 0.3, // Added glow shadow to logo
-        shadowRadius: 20,
-        elevation: 10,
+    logoContainer: {
+        width: 150,
+        height: 150,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 40,
+    },
+    logoShield: {
+        width: 120,
+        height: 120,
+        zIndex: 2,
     },
     logoImage: {
         width: '100%',
         height: '100%',
     },
-    appName: {
-        fontSize: 32,
-        fontWeight: '800',
-        color: Colors.textPrimary,
-        letterSpacing: 0.5,
-        marginBottom: Spacing.xs,
-        textShadowColor: 'rgba(0,0,0,0.5)',
-        textShadowOffset: { width: 0, height: 2 },
-        textShadowRadius: 4,
+    logoGlowRing: {
+        position: 'absolute',
+        width: 160,
+        height: 160,
+        borderRadius: 80,
+        backgroundColor: Colors.primary,
+        opacity: 0.08,
+        zIndex: 1,
     },
-    tagline: {
-        fontSize: Typography.sizes.sm,
+    textContainer: {
+        alignItems: 'center',
+    },
+    brandRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    logoTextMain: {
+        fontSize: 34,
+        fontWeight: Typography.weights.black,
+        color: Colors.textPrimary,
+        letterSpacing: Typography.letterSpacing.tight,
+    },
+    logoTextAccent: {
+        fontSize: 34,
+        fontWeight: Typography.weights.light,
+        color: Colors.textSecondary,
+        letterSpacing: Typography.letterSpacing.tight,
+    },
+    taglineWrapper: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 4,
+        gap: 12,
+    },
+    taglineLine: {
+        width: 20,
+        height: 1,
+        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    },
+    taglineText: {
+        fontSize: 10,
+        fontWeight: Typography.weights.bold,
         color: Colors.textMuted,
         letterSpacing: 2,
-        fontWeight: '500',
-        textTransform: 'uppercase',
     },
-    loaderContainer: {
-        marginTop: Spacing.xxxl,
+    loaderWrapper: {
+        marginTop: 60,
         alignItems: 'center',
+        gap: 16,
+    },
+    statusText: {
+        fontSize: 9,
+        fontWeight: Typography.weights.semibold,
+        color: Colors.textMuted,
+        letterSpacing: 1.5,
     },
     footer: {
         position: 'absolute',
-        bottom: Spacing.xl,
-        opacity: 0.5,
+        bottom: 50,
     },
-    versionText: {
-        color: Colors.textMuted,
-        fontSize: Typography.sizes.xs,
-        letterSpacing: 1,
-    }
+    versionLabel: {
+        fontSize: 10,
+        fontWeight: Typography.weights.medium,
+        color: 'rgba(255, 255, 255, 0.2)',
+        letterSpacing: 1.5,
+    },
 });
 
 export default SplashScreen;

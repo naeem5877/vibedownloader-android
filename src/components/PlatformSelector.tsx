@@ -13,7 +13,8 @@ import {
     UIManager,
 } from 'react-native';
 import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
-import { Colors, Spacing } from '../theme';
+import { Colors, Spacing, Typography, BorderRadius } from '../theme';
+import { Haptics } from '../utils/haptics';
 import {
     YouTubeIcon,
     InstagramIcon,
@@ -142,11 +143,38 @@ export const PlatformSelector: React.FC<PlatformSelectorProps> = ({
     onSelectPlatform,
     disabled = false,
 }) => {
+    // Local state for immediate feedback
+    const [localSelected, setLocalSelected] = React.useState(selectedPlatform);
+
+    // Sync local state with prop when prop changes (e.g. auto-detection)
+    useEffect(() => {
+        setLocalSelected(selectedPlatform);
+    }, [selectedPlatform]);
 
     const handleSelect = (id: string) => {
-        if (disabled) return;
-        // Trigger LayoutAnimation for the width/height/margin changes
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        if (disabled || localSelected === id) return;
+
+        // Immediate visual feedback
+        setLocalSelected(id);
+        Haptics.impact();
+
+        // Configure smooth layout animation
+        LayoutAnimation.configureNext({
+            duration: 300,
+            create: {
+                type: LayoutAnimation.Types.easeInEaseOut,
+                property: LayoutAnimation.Properties.opacity,
+            },
+            update: {
+                type: LayoutAnimation.Types.easeInEaseOut, // Smoother than spring for layout
+            },
+            delete: {
+                type: LayoutAnimation.Types.easeInEaseOut,
+                property: LayoutAnimation.Properties.opacity,
+            },
+        });
+
+        // Propagate to parent
         onSelectPlatform?.(id);
     };
 
@@ -160,8 +188,9 @@ export const PlatformSelector: React.FC<PlatformSelectorProps> = ({
                 keyboardShouldPersistTaps="handled"
             >
                 {PLATFORMS.map((platform) => {
-                    const isSelected = selectedPlatform?.toLowerCase() === platform.id ||
-                        (selectedPlatform?.toLowerCase() === 'twitter' && platform.id === 'x');
+                    // Match against local state for instant response
+                    const isSelected = localSelected?.toLowerCase() === platform.id ||
+                        (localSelected?.toLowerCase() === 'twitter' && platform.id === 'x');
 
                     return (
                         <PlatformItem
@@ -198,30 +227,28 @@ const styles = StyleSheet.create({
         overflow: 'hidden', // IMPORTANT: keeps rounded corners clean
     },
     itemInactive: {
-        width: 52,
-        height: 52,
-        borderRadius: 16,
+        width: 50, // Slightly more compact
+        height: 50,
+        borderRadius: 14,
     },
     itemActive: {
-        width: 64,
-        height: 64,
-        borderRadius: 20,
-        // Elevation/Shadow managed by parent view or surrounding context usually, 
-        // but explicit margin helps vertical alignment during anim
+        width: 60,
+        height: 60,
+        borderRadius: 18,
     },
     inactiveBackground: {
-        backgroundColor: '#1A1A1A',
-        borderRadius: 16,
+        backgroundColor: Colors.surfaceMedium,
+        borderRadius: 14,
     },
     inactiveBorder: {
         ...StyleSheet.absoluteFillObject,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
-        borderRadius: 16,
+        borderColor: Colors.innerBorder,
+        borderRadius: 14,
     },
     glow: {
         ...StyleSheet.absoluteFillObject,
-        opacity: 0.4,
+        opacity: 0.25, // More subtle industrial glow
         zIndex: -1,
     },
     iconCenter: {

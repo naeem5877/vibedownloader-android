@@ -9,4 +9,5 @@ export { UpdateModal } from './UpdateModal';
 export { EmptyState } from './EmptyState';
 export { DiscordButton } from './DiscordButton';
 export { UpdateLog } from './UpdateLog';
+export { ShinyText } from './ShinyText';
 export * from './Icons';

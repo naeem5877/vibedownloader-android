@@ -10,9 +10,10 @@ import {
     Animated,
     Easing,
 } from 'react-native';
-import Svg, { Circle } from 'react-native-svg';
+import Svg, { Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { Colors, BorderRadius, Spacing, Typography, Shadows } from '../theme';
 import { CloseIcon } from './Icons';
+import { ShinyText } from './ShinyText';
 
 interface DownloadProgressProps {
     progress: number; // 0-100
@@ -20,6 +21,7 @@ interface DownloadProgressProps {
     onCancel: () => void;
     title?: string;
     platformColor?: string;
+    statusLine?: string;
 }
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -30,12 +32,15 @@ export const DownloadProgress: React.FC<DownloadProgressProps> = ({
     onCancel,
     title,
     platformColor = Colors.primary,
+    statusLine,
 }) => {
     const progressAnim = useRef(new Animated.Value(0)).current;
     const pulseAnim = useRef(new Animated.Value(1)).current;
     const glowAnim = useRef(new Animated.Value(0)).current;
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const slideAnim = useRef(new Animated.Value(30)).current;
+
+    const shimmerAnim = useRef(new Animated.Value(0)).current;
 
     // Entry animation
     useEffect(() => {
@@ -101,13 +106,55 @@ export const DownloadProgress: React.FC<DownloadProgressProps> = ({
                 }),
             ])
         ).start();
+        // Shimmer effect
+        Animated.loop(
+            Animated.timing(shimmerAnim, {
+                toValue: 1,
+                duration: 2000,
+                useNativeDriver: true,
+                easing: Easing.linear,
+            })
+        ).start();
     }, []);
 
-    const formatEta = (seconds: number): string => {
-        if (seconds <= 0) return 'Calculating...';
-        if (seconds < 60) return `${Math.round(seconds)}s remaining`;
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.round(seconds % 60);
+    const formatStatus = (): string => {
+        // If we have a specific status line from the engine, use it
+        if (statusLine) {
+            if (statusLine.toLowerCase().includes('merging') || statusLine.toLowerCase().includes('ffmpeg')) {
+                return 'Merging tracks...';
+            }
+            if (statusLine.toLowerCase().includes('embed') || statusLine.toLowerCase().includes('metadata')) {
+                return 'Embedding assets...';
+            }
+            if (statusLine.toLowerCase().includes('saving')) {
+                return 'Finalizing file...';
+            }
+            return statusLine;
+        }
+
+        // Default behavior based on ETA and progress
+        if (progress >= 99 && eta <= 0) {
+            return 'Merging sequences...';
+        }
+
+        if (eta <= 0 || progress <= 0) {
+            // Randomize "Calculating" messages for industrial feel
+            const messages = [
+                'System initializing...',
+                'Finding sequences...',
+                'Exploring assets...',
+                'Parsing metadata...',
+                'Mapping stream...',
+                'Fetching segments...'
+            ];
+            // Use progress as a pseudo-random seed to keep it stable per stage
+            const index = Math.floor((Math.abs(progress) || (title ? title.length : 0)) % messages.length);
+            return messages[index];
+        }
+
+        if (eta < 60) return `${Math.round(eta)}s remaining`;
+        const mins = Math.floor(eta / 60);
+        const secs = Math.round(eta % 60);
         return `${mins}m ${secs}s remaining`;
     };
 
@@ -142,6 +189,13 @@ export const DownloadProgress: React.FC<DownloadProgressProps> = ({
                 {/* Circular Progress Ring */}
                 <View style={styles.circularProgressContainer}>
                     <Svg width={size} height={size}>
+                        <Defs>
+                            <LinearGradient id="shimmer" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <Stop offset="0%" stopColor={platformColor} />
+                                <Stop offset="50%" stopColor="#FFFFFF" stopOpacity={0.8} />
+                                <Stop offset="100%" stopColor={platformColor} />
+                            </LinearGradient>
+                        </Defs>
                         {/* Background Circle */}
                         <Circle
                             cx={size / 2}
@@ -165,6 +219,23 @@ export const DownloadProgress: React.FC<DownloadProgressProps> = ({
                             strokeLinecap="round"
                             transform={`rotate(-90 ${size / 2} ${size / 2})`}
                         />
+                        {/* Shiny Overlay */}
+                        <AnimatedCircle
+                            cx={size / 2}
+                            cy={size / 2}
+                            r={radius}
+                            stroke="url(#shimmer)"
+                            strokeWidth={strokeWidth}
+                            fill="none"
+                            strokeDasharray={[15, circumference]}
+                            strokeDashoffset={shimmerAnim.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: [circumference, -circumference],
+                            })}
+                            strokeLinecap="round"
+                            opacity={0.6}
+                            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+                        />
                     </Svg>
                     <View style={styles.progressTextContainer}>
                         <Text style={[styles.progressPercent, { color: platformColor }]}>
@@ -175,11 +246,24 @@ export const DownloadProgress: React.FC<DownloadProgressProps> = ({
 
                 {/* Title and Info */}
                 <View style={styles.infoContainer}>
-                    <Text style={styles.statusText}>DOWNLOADING...</Text>
+                    <ShinyText
+                        text={progress >= 99 ? 'PROCESSING...' : 'DOWNLOADING...'}
+                        fontSize={Typography.sizes.xxs}
+                        color={Colors.textMuted}
+                        fontWeight={Typography.weights.bold}
+                        letterSpacing={1.5}
+                    />
                     <Text style={styles.title} numberOfLines={2}>
                         {title || 'Media file'}
                     </Text>
-                    <Text style={styles.etaText}>{formatEta(eta)}</Text>
+                    <ShinyText
+                        text={formatStatus()}
+                        fontSize={Typography.sizes.sm}
+                        color={Colors.textSecondary}
+                        shineColor="#FFF"
+                        fontWeight={Typography.weights.medium}
+                        speed={3}
+                    />
                 </View>
 
                 <TouchableOpacity
@@ -223,7 +307,7 @@ const styles = StyleSheet.create({
     },
     progressPercent: {
         fontSize: Typography.sizes['2xl'],
-        fontWeight: Typography.weights.extrabold,
+        fontWeight: Typography.weights.black,
         letterSpacing: -1,
     },
     infoContainer: {

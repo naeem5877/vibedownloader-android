@@ -397,6 +397,18 @@ export const GlobeIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textP
     </Svg>
 );
 
+export const LinkIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPrimary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+            d="M15 7h2a5 5 0 010 10h-2m-6 0H7a5 5 0 010-10h2m-3 5h8"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+    </Svg>
+);
+
 export default {
     YouTubeIcon,
     InstagramIcon,
@@ -433,4 +445,5 @@ export default {
     DiscordIcon,
     WaveformIcon,
     GlobeIcon,
+    LinkIcon,
 };

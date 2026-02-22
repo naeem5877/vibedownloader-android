@@ -17,7 +17,7 @@ import { SparkleIcon, CloseIcon } from './Icons';
 
 const { width } = Dimensions.get('window');
 
-const CURRENT_VERSION = '1.0.7';
+const CURRENT_VERSION = '1.1.0';
 const VERSION_KEY = 'last_seen_version';
 
 interface ChangeItem {
@@ -27,31 +27,31 @@ interface ChangeItem {
 }
 
 const CHANGES: ChangeItem[] = [
-    { emoji: '✨', title: 'New Visuals', description: 'Complete modern UI redesign with glassmorphism and animations.' },
-    { emoji: '🚀', title: 'Smoother', description: 'Better animations, transitions, and micro-interactions.' },
-    { emoji: '🎨', title: 'Discord', description: 'Join our community directly from the app header.' },
-    { emoji: '🎵', title: 'Audio Fix', description: 'Improved audio download stability with album art embedding.' },
-    { emoji: '🐛', title: 'Bug Fixes', description: 'Enhanced download reliability across all platforms.' },
+    { emoji: '💎', title: 'Industrial Overhaul', description: 'Complete premium redesign with atmospheric surfaces and depth.' },
+    { emoji: '📊', title: 'Asset Manager', description: 'Advanced library with segmented storage and platform folders.' },
+    { emoji: '⚡', title: 'Haptic Engine', description: 'Mechanical tactile feedback for a more responsive physical feel.' },
+    { emoji: '🎬', title: 'Signature Splash', description: 'Cinematic entry experience with atmospheric industrial motion.' },
+    { emoji: '🛠️', title: 'Optimization', description: 'Refined typography and industrial layout across all components.' },
 ];
 
 const ChangeRow: React.FC<{ item: ChangeItem; index: number }> = ({ item, index }) => {
     const fadeAnim = useRef(new Animated.Value(0)).current;
-    const slideAnim = useRef(new Animated.Value(20)).current;
+    const slideAnim = useRef(new Animated.Value(15)).current;
 
     useEffect(() => {
         Animated.parallel([
             Animated.timing(fadeAnim, {
                 toValue: 1,
-                duration: 400,
-                delay: index * 80,
+                duration: 500,
+                delay: 400 + index * 100,
                 easing: Easing.out(Easing.cubic),
                 useNativeDriver: true,
             }),
             Animated.timing(slideAnim, {
                 toValue: 0,
-                duration: 400,
-                delay: index * 80,
-                easing: Easing.out(Easing.cubic),
+                duration: 500,
+                delay: 400 + index * 100,
+                easing: Easing.out(Easing.back(1.5)),
                 useNativeDriver: true,
             }),
         ]).start();
@@ -80,7 +80,7 @@ const ChangeRow: React.FC<{ item: ChangeItem; index: number }> = ({ item, index 
 
 export const UpdateLog = () => {
     const [visible, setVisible] = useState(false);
-    const scaleAnim = useRef(new Animated.Value(0.85)).current;
+    const scaleAnim = useRef(new Animated.Value(0.9)).current;
     const fadeAnim = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
@@ -92,13 +92,13 @@ export const UpdateLog = () => {
             Animated.parallel([
                 Animated.spring(scaleAnim, {
                     toValue: 1,
-                    tension: 50,
-                    friction: 9,
+                    tension: 60,
+                    friction: 10,
                     useNativeDriver: true,
                 }),
                 Animated.timing(fadeAnim, {
                     toValue: 1,
-                    duration: 250,
+                    duration: 350,
                     useNativeDriver: true,
                 }),
             ]).start();
@@ -119,13 +119,13 @@ export const UpdateLog = () => {
     const handleClose = async () => {
         Animated.parallel([
             Animated.timing(scaleAnim, {
-                toValue: 0.85,
-                duration: 200,
+                toValue: 0.9,
+                duration: 250,
                 useNativeDriver: true,
             }),
             Animated.timing(fadeAnim, {
                 toValue: 0,
-                duration: 200,
+                duration: 250,
                 useNativeDriver: true,
             }),
         ]).start(async () => {
@@ -150,25 +150,27 @@ export const UpdateLog = () => {
                     <View style={styles.header}>
                         <View style={styles.headerIconContainer}>
                             <View style={styles.headerIconGlow} />
-                            <SparkleIcon size={28} color={Colors.primary} />
+                            <SparkleIcon size={24} color={Colors.primary} />
                         </View>
                         <View style={styles.headerText}>
-                            <Text style={styles.headerTitle}>What's New</Text>
-                            <Text style={styles.headerVersion}>v{CURRENT_VERSION}</Text>
+                            <Text style={styles.headerSubtitle}>SYSTEM UPDATE</Text>
+                            <Text style={styles.headerTitle}>VibeDownloader v{CURRENT_VERSION}</Text>
                         </View>
                         <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
-                            <CloseIcon size={20} color={Colors.textMuted} />
+                            <CloseIcon size={18} color={Colors.textMuted} />
                         </TouchableOpacity>
                     </View>
 
-                    {/* Divider */}
-                    <View style={styles.divider} />
+                    {/* Technical Info */}
+                    <View style={styles.techInfo}>
+                        <Text style={styles.techText}>STABLE BUILD • AESTHETIC OVERHAUL</Text>
+                    </View>
 
                     {/* Changes List */}
                     <ScrollView
                         style={styles.changesList}
                         showsVerticalScrollIndicator={false}
-                        bounces={false}
+                        contentContainerStyle={styles.changesContent}
                     >
                         {CHANGES.map((item, index) => (
                             <ChangeRow key={index} item={item} index={index} />
@@ -176,8 +178,8 @@ export const UpdateLog = () => {
                     </ScrollView>
 
                     {/* Action Button */}
-                    <TouchableOpacity onPress={handleClose} style={styles.actionBtn} activeOpacity={0.85}>
-                        <Text style={styles.actionBtnText}>Awesome! 🎉</Text>
+                    <TouchableOpacity onPress={handleClose} style={styles.actionBtn} activeOpacity={0.8}>
+                        <Text style={styles.actionBtnText}>ACCESS UPDATED SYSTEM</Text>
                     </TouchableOpacity>
                 </Animated.View>
             </Animated.View>
@@ -188,43 +190,40 @@ export const UpdateLog = () => {
 const styles = StyleSheet.create({
     overlay: {
         flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.85)',
+        backgroundColor: 'rgba(0, 0, 0, 0.9)',
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 24,
+        padding: 20,
     },
     container: {
-        width: width - 48,
-        maxWidth: 380,
-        backgroundColor: Colors.surface,
+        width: '100%',
+        maxWidth: 360,
+        backgroundColor: Colors.surfaceHigh,
         borderRadius: 24,
         padding: 24,
         borderWidth: 1,
-        borderColor: Colors.border,
-        shadowColor: Colors.primary,
-        shadowOffset: { width: 0, height: 16 },
-        shadowOpacity: 0.15,
-        shadowRadius: 32,
-        elevation: 24,
+        borderColor: Colors.innerBorder,
+        overflow: 'hidden',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
+        marginBottom: 20,
     },
     headerIconContainer: {
-        width: 48,
-        height: 48,
-        borderRadius: 14,
-        backgroundColor: `${Colors.primary}15`,
+        width: 44,
+        height: 44,
+        borderRadius: 12,
+        backgroundColor: `${Colors.primary}10`,
         justifyContent: 'center',
         alignItems: 'center',
         position: 'relative',
     },
     headerIconGlow: {
         position: 'absolute',
-        width: 48,
-        height: 48,
-        borderRadius: 14,
+        width: '100%',
+        height: '100%',
+        borderRadius: 12,
         backgroundColor: Colors.primary,
         opacity: 0.1,
     },
@@ -232,81 +231,100 @@ const styles = StyleSheet.create({
         flex: 1,
         marginLeft: 14,
     },
-    headerTitle: {
-        fontSize: 20,
-        fontWeight: '800',
-        color: Colors.textPrimary,
-        letterSpacing: -0.3,
-    },
-    headerVersion: {
-        fontSize: 13,
-        fontWeight: '600',
+    headerSubtitle: {
+        fontSize: 9,
+        fontWeight: Typography.weights.black,
         color: Colors.primary,
-        marginTop: 2,
+        letterSpacing: 1.5,
+        marginBottom: 2,
+    },
+    headerTitle: {
+        fontSize: 18,
+        fontWeight: Typography.weights.black,
+        color: Colors.textPrimary,
+        letterSpacing: Typography.letterSpacing.tight,
     },
     closeBtn: {
-        width: 36,
-        height: 36,
-        borderRadius: 12,
-        backgroundColor: Colors.surfaceHover,
+        width: 32,
+        height: 32,
+        borderRadius: 10,
+        backgroundColor: 'rgba(255, 255, 255, 0.03)',
         justifyContent: 'center',
         alignItems: 'center',
     },
-    divider: {
-        height: 1,
-        backgroundColor: Colors.border,
-        marginVertical: 18,
+    techInfo: {
+        backgroundColor: 'rgba(255, 255, 255, 0.02)',
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderRadius: 8,
+        marginBottom: 20,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.03)',
+    },
+    techText: {
+        fontSize: 9,
+        color: Colors.textMuted,
+        fontWeight: Typography.weights.bold,
+        letterSpacing: 1,
+        textAlign: 'center',
     },
     changesList: {
-        maxHeight: 300,
+        maxHeight: 340,
+    },
+    changesContent: {
+        paddingVertical: 4,
     },
     changeRow: {
         flexDirection: 'row',
-        alignItems: 'flex-start',
-        marginBottom: 16,
+        alignItems: 'center',
+        marginBottom: 20,
+        backgroundColor: 'rgba(255, 255, 255, 0.01)',
+        padding: 12,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.02)',
     },
     changeEmoji: {
-        width: 40,
-        height: 40,
+        width: 44,
+        height: 44,
         borderRadius: 12,
-        backgroundColor: `${Colors.primary}10`,
+        backgroundColor: Colors.surfaceMedium,
         justifyContent: 'center',
         alignItems: 'center',
         marginRight: 14,
+        borderWidth: 1,
+        borderColor: Colors.innerBorder,
     },
     emojiText: {
-        fontSize: 18,
+        fontSize: 20,
     },
     changeContent: {
         flex: 1,
     },
     changeTitle: {
-        fontSize: 15,
-        fontWeight: '700',
+        fontSize: Typography.sizes.sm,
+        fontWeight: Typography.weights.black,
         color: Colors.textPrimary,
-        marginBottom: 3,
+        marginBottom: 2,
+        letterSpacing: Typography.letterSpacing.normal,
     },
     changeDescription: {
-        fontSize: 13,
+        fontSize: 11,
         color: Colors.textMuted,
-        lineHeight: 18,
+        lineHeight: 16,
+        fontWeight: Typography.weights.medium,
     },
     actionBtn: {
-        marginTop: 8,
+        marginTop: 24,
         backgroundColor: Colors.primary,
-        paddingVertical: 15,
+        paddingVertical: 16,
         borderRadius: 14,
         alignItems: 'center',
-        shadowColor: Colors.primary,
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.35,
-        shadowRadius: 12,
-        elevation: 8,
     },
     actionBtnText: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#FFF',
-        letterSpacing: 0.3,
+        fontSize: Typography.sizes.sm,
+        fontWeight: Typography.weights.black,
+        color: Colors.textPrimary,
+        letterSpacing: 1,
     },
 });

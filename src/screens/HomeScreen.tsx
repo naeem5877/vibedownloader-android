@@ -38,10 +38,12 @@ import { PlaylistSelectionModal } from '../components/PlaylistSelectionModal';
 import { SkeletonCard } from '../components/SkeletonCard';
 import { DiscordButton } from '../components/DiscordButton';
 import { LosslessCard } from '../components/LosslessCard';
-import { BatchDownloadProgress, BatchDownloadItem } from '../components/BatchDownloadProgress';
+// BatchDownloadProgress removed in favor of useDownloadQueue
 import { useYtDlp } from '../hooks/useYtDlp';
 import { VideoFormat, ytDlpEventEmitter, YtDlpNative } from '../native/YtDlpModule';
-import { DownloadIcon, SparkleIcon, ShareIcon, GitHubIcon, DesktopIcon, StarIcon, WaveformIcon, LibraryIcon } from '../components/Icons';
+import { DownloadIcon, SparkleIcon, ShareIcon, GitHubIcon, DesktopIcon, StarIcon, WaveformIcon, LibraryIcon, CloseIcon } from '../components/Icons';
+import { useDownloadQueue } from '../hooks/useDownloadQueue';
+import { DownloadQueuePanel } from '../components/DownloadQueuePanel';
 import { checkForUpdates, UpdateInfo } from '../services/GitHubUpdateService';
 import { getSpotifyPlaylist, extractSpotifyId, getTrackInfo, buildYouTubeSearchQuery, formatTrackMetadata } from '../services/SpotifyService';
 import { checkLosslessAvailability, getLosslessDownloadUrl, LosslessAvailability } from '../services/LosslessService';
@@ -95,12 +97,20 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
     const [isCheckingLossless, setIsCheckingLossless] = useState(false);
     const [isLosslessDownloading, setIsLosslessDownloading] = useState(false);
 
-    // Batch Download Progress State
-    const [batchItems, setBatchItems] = useState<BatchDownloadItem[]>([]);
-    const [isBatchDownloading, setIsBatchDownloading] = useState(false);
-    const [batchCurrentTitle, setBatchCurrentTitle] = useState<string>('');
-
     const [state, actions] = useYtDlp();
+
+    const [queuePanelVisible, setQueuePanelVisible] = useState(false);
+    const {
+        queue,
+        isQueueRunning,
+        totalDone,
+        totalFailed,
+        addToQueue,
+        cancelItem,
+        cancelAll,
+        clearQueue,
+        retryFailed,
+    } = useDownloadQueue();
 
     // Animation refs
     const headerFadeAnim = useRef(new Animated.Value(0)).current;
@@ -524,84 +534,24 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
         }
     }, [state.videoInfo, losslessAvailability, actions]);
 
-    const handleBatchDownload = useCallback(async (selectedItems: any[], mode: 'video' | 'audio') => {
+    const handleBatchDownload = useCallback((selectedItems: any[], formatId: string) => {
         setPlaylistModalVisible(false);
-        ToastAndroid.show(`Starting ${selectedItems.length} downloads...`, ToastAndroid.SHORT);
 
-        const formatId = mode === 'audio' ? 'audio_mp3' : null;
-
-        const initialBatchItems = selectedItems.map((item) => ({
-            id: item.id,
+        const items = selectedItems.map(item => ({
             title: item.title,
-            artist: item.author,
-            status: 'queued' as const,
+            author: item.author,
+            thumbnail: item.thumbnail,
+            url: item.url,
+            type: item.type || 'youtube',
+            searchQuery: item.searchQuery,
+            formatId,
         }));
-        setBatchItems(initialBatchItems);
-        setIsBatchDownloading(true);
-        batchActiveRef.current = true;
 
-        for (let index = 0; index < selectedItems.length; index++) {
-            if (!batchActiveRef.current) break;
+        addToQueue(items, formatId);
 
-            const item = selectedItems[index];
-            setBatchItems((prev) =>
-                prev.map((bi) =>
-                    bi.id === item.id ? { ...bi, status: 'downloading' } : bi
-                )
-            );
-            setBatchCurrentTitle(item.title);
-
-            try {
-                let result;
-                if (item.type === 'spotify' && item.searchQuery) {
-                    result = await actions.downloadSpotifyTrack(
-                        item.searchQuery,
-                        item.title,
-                        item.author,
-                        item.thumbnail
-                    );
-                } else {
-                    result = await actions.download(item.url, formatId);
-                }
-
-                if (result === null) {
-                    // Cancelled by user
-                    setBatchItems((prev) =>
-                        prev.map((bi) =>
-                            bi.id === item.id ? { ...bi, status: 'failed', error: 'Cancelled' } : bi
-                        )
-                    );
-                    batchActiveRef.current = false;
-                    setIsBatchDownloading(false);
-                    break;
-                }
-
-                // Mark completed
-                setBatchItems((prev) =>
-                    prev.map((bi) =>
-                        bi.id === item.id ? { ...bi, status: 'completed' } : bi
-                    )
-                );
-            } catch (e: any) {
-                console.error(`Failed to download ${item.title}`, e);
-                setBatchItems((prev) =>
-                    prev.map((bi) =>
-                        bi.id === item.id
-                            ? { ...bi, status: 'failed', error: e?.message || 'Download failed' }
-                            : bi
-                    )
-                );
-            }
-
-            // Small delay between downloads
-            if (index < selectedItems.length - 1 && batchActiveRef.current) {
-                await new Promise<void>((resolve) => setTimeout(resolve, 500));
-            }
-        }
-
-        setBatchCurrentTitle('');
-        batchActiveRef.current = false;
-    }, [actions]);
+        // Show the queue panel automatically
+        setQueuePanelVisible(true);
+    }, [addToQueue]);
 
     const handleDownload = useCallback(async (format: VideoFormat | string) => {
         if (!state.videoInfo) return;
@@ -672,6 +622,24 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                             >
                                 <DesktopIcon size={18} color={Colors.textSecondary} />
                             </TouchableOpacity>
+
+                            {queue.length > 0 && (
+                                <TouchableOpacity
+                                    onPress={() => setQueuePanelVisible(true)}
+                                    style={[styles.headerBtn, { borderColor: isQueueRunning ? platformColor : Colors.border }]}
+                                >
+                                    <View>
+                                        <DownloadIcon size={18} color={isQueueRunning ? platformColor : Colors.textSecondary} />
+                                        {queue.length > 0 && (
+                                            <View style={[styles.queueBadge, { backgroundColor: isQueueRunning ? platformColor : Colors.textMuted }]}>
+                                                <Text style={styles.queueBadgeText}>
+                                                    {queue.length > 9 ? '9+' : queue.length}
+                                                </Text>
+                                            </View>
+                                        )}
+                                    </View>
+                                </TouchableOpacity>
+                            )}
                         </View>
                     </View>
                     <Text style={styles.tagline}>
@@ -758,29 +726,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                     </View>
                 )}
 
-                {/* Batch Download Progress */}
-                {isBatchDownloading && batchItems.length > 0 && (
-                    <BatchDownloadProgress
-                        items={batchItems}
-                        totalItems={batchItems.length}
-                        completedCount={batchItems.filter((i) => i.status === 'completed').length}
-                        failedCount={batchItems.filter((i) => i.status === 'failed').length}
-                        currentTitle={batchCurrentTitle}
-                        onCancel={() => {
-                            batchActiveRef.current = false;
-                            actions.cancelDownload();
-                            setIsBatchDownloading(false);
-                            setBatchItems([]);
-                            ToastAndroid.show('Batch download cancelled', ToastAndroid.SHORT);
-                        }}
-                        onClose={() => {
-                            batchActiveRef.current = false;
-                            setIsBatchDownloading(false);
-                            setBatchItems([]);
-                        }}
-                        platformColor={platformColor}
-                    />
-                )}
+                {/* New Queue-based Batch Download is handled via handleBatchDownload -> addToQueue */}
 
                 {/* Skeleton Loading */}
                 {state.isLoading && (
@@ -873,6 +819,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
 
                 <View style={{ height: 100 }} />
             </ScrollView>
+            <DownloadQueuePanel
+                visible={queuePanelVisible}
+                onClose={() => setQueuePanelVisible(false)}
+                queue={queue}
+                isRunning={isQueueRunning}
+                totalDone={totalDone}
+                totalFailed={totalFailed}
+                platformColor={platformColor}
+                onCancelItem={cancelItem}
+                onCancelAll={cancelAll}
+                onClearQueue={clearQueue}
+                onRetryFailed={retryFailed}
+            />
         </SafeAreaView>
     );
 };
@@ -1076,7 +1035,22 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '800',
         letterSpacing: 0.5,
-    }
+    },
+    queueBadge: {
+        position: 'absolute',
+        top: -6,
+        right: -6,
+        width: 16,
+        height: 16,
+        borderRadius: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    queueBadgeText: {
+        color: '#FFF',
+        fontSize: 9,
+        fontWeight: '800',
+    },
 });
 
 export default HomeScreen;

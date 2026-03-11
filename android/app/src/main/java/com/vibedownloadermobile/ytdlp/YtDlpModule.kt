@@ -485,6 +485,10 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 request.addOption("--no-check-certificate")
                 request.addOption("--socket-timeout", "30")
                 
+                // Use a standard Desktop User-Agent to bypass simple bot protections for TikTok, Instagram, etc.
+                // Note: Do not use --impersonate as it requires curl-cffi which isn't available on Android
+                request.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                
                 if (platform == "YouTube") {
                     request.addOption("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best")
                 }
@@ -742,7 +746,6 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 request.addOption("-o", outputTemplate)
                 request.addOption("--no-playlist")
                 request.addOption("--restrict-filenames")
-                request.addOption("--add-metadata") // Force adding metadata post-processor
                 
                 // --- Format and Codec Selection ---
                 val isAudioDownload = formatId?.startsWith("audio") == true || formatId == "audio_best" || formatId == "audio_mp3" || formatId == "lossless_flac"
@@ -791,11 +794,20 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 
                 // Metadata and Thumbnail embedding
                 request.addOption("--embed-metadata")
-                request.addOption("--embed-thumbnail")
-                if (!isAudioDownload) {
+                if (isAudioDownload) {
+                    // Embed thumbnail directly into MP3/M4A ID3 tags so music players show cover art
+                    request.addOption("--embed-thumbnail")
+                    request.addOption("--convert-thumbnails", "jpg")
+                } else {
+                    // For video, write thumbnail as sidecar (embedding into video is slow)
                     request.addOption("--write-thumbnail")
                     request.addOption("--convert-thumbnails", "jpg")
                 }
+                request.addOption("--no-post-overwrites")
+                
+                // Use a standard Desktop User-Agent to bypass simple bot protections for TikTok, Instagram, etc.
+                // Note: Do not use --impersonate as it requires curl-cffi which isn't available on Android
+                request.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
                 
                 request.addOption("--force-ipv4")
                 request.addOption("--no-check-certificate")
@@ -938,9 +950,10 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 request.addOption("--audio-format", "mp3")
                 request.addOption("--audio-quality", "0")
                 
-                // Metadata & Thumbnails
+                // Metadata & Thumbnails - embed cover art from YouTube into the MP3 ID3 tags
                 request.addOption("--embed-metadata")
-                request.addOption("--add-metadata")
+                request.addOption("--embed-thumbnail")
+                request.addOption("--convert-thumbnails", "jpg")
                 
                 // Network options
                 request.addOption("--force-ipv4")
@@ -1083,9 +1096,31 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                                 else -> "Downloads"
                             }
                             
-                            // Check for thumbnail in private dir
+                            // Resolve thumbnail: prefer sidecar file, but for audio files also
+                            // try the MediaStore album art URI (populated when --embed-thumbnail is used)
                             val thumbPath = File(thumbDir, "${file.nameWithoutExtension}.jpg")
-                            val thumbnail = if (thumbPath.exists()) "file://${thumbPath.absolutePath}" else null
+                            val thumbnail: String? = when {
+                                thumbPath.exists() -> "file://${thumbPath.absolutePath}"
+                                listOf("mp3", "m4a", "flac", "aac", "wav").contains(file.extension.lowercase()) -> {
+                                    // Look up album art from MediaStore for embedded-thumbnail audio
+                                    val resolver = reactApplicationContext.contentResolver
+                                    val selection = "${android.provider.MediaStore.Audio.Media.DATA} = ?"
+                                    val selectionArgs = arrayOf(file.absolutePath)
+                                    var artUri: String? = null
+                                    resolver.query(
+                                        android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                                        arrayOf(android.provider.MediaStore.Audio.Media._ID),
+                                        selection, selectionArgs, null
+                                    )?.use { cursor ->
+                                        if (cursor.moveToFirst()) {
+                                            val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media._ID))
+                                            artUri = "content://media/external/audio/albumart/$id"
+                                        }
+                                    }
+                                    artUri
+                                }
+                                else -> null
+                            }
                             
                             val fileMap = WritableNativeMap().apply {
                                 putString("name", file.name)

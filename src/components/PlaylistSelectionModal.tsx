@@ -16,7 +16,7 @@ interface PlaylistItem {
 interface PlaylistSelectionModalProps {
     visible: boolean;
     onClose: () => void;
-    onDownload: (selectedItems: PlaylistItem[], mode: 'video' | 'audio') => void;
+    onDownload: (selectedItems: PlaylistItem[], formatId: string) => void;
     playlistTitle: string;
     playlistImage?: string;
     items: PlaylistItem[];
@@ -35,7 +35,6 @@ export const PlaylistSelectionModal: React.FC<PlaylistSelectionModalProps> = ({
     isLoading,
 }) => {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-    const [mode, setMode] = useState<'video' | 'audio'>('audio'); // Default to Audio for playlists (usually music)
 
     // Auto-select all on load
     useEffect(() => {
@@ -64,9 +63,9 @@ export const PlaylistSelectionModal: React.FC<PlaylistSelectionModalProps> = ({
         setSelectedIds(new Set());
     };
 
-    const handleDownload = () => {
+    const handleDownload = (formatId: string) => {
         const selectedItems = items.filter(i => selectedIds.has(i.id));
-        onDownload(selectedItems, mode);
+        onDownload(selectedItems, formatId);
     };
 
     const renderItem = ({ item }: { item: PlaylistItem }) => {
@@ -121,21 +120,7 @@ export const PlaylistSelectionModal: React.FC<PlaylistSelectionModalProps> = ({
                             </TouchableOpacity>
                         </View>
 
-                        {/* Mode Toggle */}
-                        <View style={styles.modeToggle}>
-                            <TouchableOpacity
-                                style={[styles.modeBtn, mode === 'video' && { backgroundColor: `${platformColor}20` }]}
-                                onPress={() => setMode('video')}
-                            >
-                                <VideoIcon size={16} color={mode === 'video' ? platformColor : Colors.textMuted} />
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[styles.modeBtn, mode === 'audio' && { backgroundColor: `${platformColor}20` }]}
-                                onPress={() => setMode('audio')}
-                            >
-                                <MusicIcon size={16} color={mode === 'audio' ? platformColor : Colors.textMuted} />
-                            </TouchableOpacity>
-                        </View>
+                        {/* Mode Toggle removed in favor of explicit buttons */}
                     </View>
 
                     {/* List */}
@@ -156,19 +141,50 @@ export const PlaylistSelectionModal: React.FC<PlaylistSelectionModalProps> = ({
 
                     {/* Footer Action */}
                     <View style={styles.footer}>
-                        <TouchableOpacity
-                            style={[
-                                styles.downloadButton,
-                                { backgroundColor: selectedIds.size > 0 ? platformColor : Colors.surfaceElevated }
-                            ]}
-                            disabled={selectedIds.size === 0}
-                            onPress={handleDownload}
-                        >
-                            <DownloadIcon size={20} color={selectedIds.size > 0 ? '#FFF' : Colors.textMuted} />
-                            <Text style={[styles.downloadText, selectedIds.size === 0 && { color: Colors.textMuted }]}>
-                                Download {selectedIds.size > 0 ? `(${selectedIds.size})` : ''}
-                            </Text>
-                        </TouchableOpacity>
+                        <View style={styles.footerRow}>
+                            <TouchableOpacity
+                                style={[styles.batchBtn, { backgroundColor: `${platformColor}15`, borderColor: `${platformColor}30` }]}
+                                disabled={selectedIds.size === 0}
+                                onPress={() => handleDownload('audio_best')}
+                            >
+                                <MusicIcon size={16} color={platformColor} />
+                                <Text style={[styles.batchBtnText, { color: platformColor }]}>Best</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[styles.batchBtn, { backgroundColor: `${platformColor}15`, borderColor: `${platformColor}30` }]}
+                                disabled={selectedIds.size === 0}
+                                onPress={() => handleDownload('audio_standard')}
+                            >
+                                <MusicIcon size={16} color={platformColor} />
+                                <Text style={[styles.batchBtnText, { color: platformColor }]}>Std</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[styles.batchBtn, { backgroundColor: `${platformColor}15`, borderColor: `${platformColor}30` }]}
+                                disabled={selectedIds.size === 0}
+                                onPress={() => handleDownload('audio_low')}
+                            >
+                                <MusicIcon size={16} color={platformColor} />
+                                <Text style={[styles.batchBtnText, { color: platformColor }]}>Low</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        {platformColor !== '#1DB954' && ( // Don't show video for Spotify (Green color used here as proxy)
+                            <TouchableOpacity
+                                style={[
+                                    styles.videoBatchBtn,
+                                    { backgroundColor: selectedIds.size > 0 ? platformColor : Colors.surfaceElevated }
+                                ]}
+                                disabled={selectedIds.size === 0}
+                                onPress={() => handleDownload('best')}
+                            >
+                                <VideoIcon size={18} color="#FFF" />
+                                <Text style={styles.videoBatchBtnText}>
+                                    Download Video {selectedIds.size > 0 ? `(${selectedIds.size})` : ''}
+                                </Text>
+                            </TouchableOpacity>
+                        )}
                     </View>
                 </View>
             </View>
@@ -308,25 +324,41 @@ const styles = StyleSheet.create({
         marginLeft: Spacing.sm,
     },
     footer: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
         backgroundColor: Colors.surface,
         padding: Spacing.lg,
         borderTopWidth: 1,
         borderTopColor: Colors.border,
         ...Shadows.lg,
+        gap: Spacing.sm,
     },
-    downloadButton: {
+    footerRow: {
+        flexDirection: 'row',
+        gap: Spacing.sm,
+    },
+    batchBtn: {
+        flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: Spacing.md,
+        paddingVertical: 10,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        gap: 6,
+    },
+    batchBtnText: {
+        fontSize: 12,
+        fontWeight: Typography.weights.bold,
+    },
+    videoBatchBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 12,
         borderRadius: BorderRadius.lg,
         gap: Spacing.sm,
+        marginTop: 4,
     },
-    downloadText: {
+    videoBatchBtnText: {
         fontSize: Typography.sizes.base,
         fontWeight: Typography.weights.bold,
         color: '#FFF',

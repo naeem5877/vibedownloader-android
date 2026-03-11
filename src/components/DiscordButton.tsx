@@ -3,7 +3,7 @@ import { TouchableOpacity, Linking, StyleSheet, Animated, Easing, View, Text } f
 import { Colors, BorderRadius } from '../theme';
 import { DiscordIcon } from './Icons';
 
-const DISCORD_INVITE_URL = 'https://discord.gg/vibedownloader';
+const DISCORD_INVITE_URL = 'https://discord.com/invite/xev4Jgqz5t';
 
 interface DiscordButtonProps {
     compact?: boolean;

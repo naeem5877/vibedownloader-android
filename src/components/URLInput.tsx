@@ -71,7 +71,7 @@ export const URLInput: React.FC<URLInputProps> = ({
 
     return (
         <View style={styles.container}>
-            {/* Search Icon */}\n            <Animated.View
+            <Animated.View
                 style={[
                     styles.inputWrapper,
                     {

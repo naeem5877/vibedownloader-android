@@ -11,6 +11,7 @@ interface PlaylistItem {
     thumbnail?: string;
     url: string; // Actual URL to download (e.g. YouTube video URL or search query)
     originalUrl?: string; // Original Spotify/YT URL
+    type?: string; // platform type like 'instagram', 'facebook', 'youtube'
 }
 
 interface PlaylistSelectionModalProps {
@@ -90,6 +91,36 @@ export const PlaylistSelectionModal: React.FC<PlaylistSelectionModalProps> = ({
         );
     };
 
+    const renderStoryItem = ({ item }: { item: PlaylistItem }) => {
+        const isSelected = selectedIds.has(item.id);
+        return (
+            <TouchableOpacity
+                style={[styles.storyGridItem, isSelected && { borderColor: platformColor, borderWidth: 2 }]}
+                onPress={() => toggleSelection(item.id)}
+                activeOpacity={0.8}
+            >
+                {item.thumbnail ? (
+                    <Image source={{ uri: item.thumbnail }} style={styles.storyThumbnail} />
+                ) : (
+                    <View style={[styles.storyThumbnail, { backgroundColor: Colors.surfaceElevated }]} />
+                )}
+                <View style={styles.storyGradient} />
+                
+                <View style={[styles.storyCheckbox, isSelected ? { backgroundColor: platformColor, borderColor: platformColor } : { backgroundColor: 'rgba(0,0,0,0.5)', borderColor: '#FFF' }]}>
+                    {isSelected && <CheckIcon size={12} color="#FFF" />}
+                </View>
+
+                {item.duration && (
+                    <View style={styles.storyDurationContainer}>
+                        <Text style={styles.storyDurationText}>{item.duration}</Text>
+                    </View>
+                )}
+            </TouchableOpacity>
+        );
+    };
+
+    const isStoryMode = items.length > 0 && ['instagram', 'facebook'].includes(items[0].type || '');
+
     return (
         <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
             <View style={styles.overlay}>
@@ -131,60 +162,88 @@ export const PlaylistSelectionModal: React.FC<PlaylistSelectionModalProps> = ({
                         </View>
                     ) : (
                         <FlatList
+                            key={isStoryMode ? 'grid-3' : 'list-1'}
                             data={items}
-                            renderItem={renderItem}
+                            renderItem={isStoryMode ? renderStoryItem : renderItem}
                             keyExtractor={item => item.id}
-                            contentContainerStyle={styles.listContent}
+                            contentContainerStyle={[styles.listContent, isStoryMode && styles.gridContent]}
                             showsVerticalScrollIndicator={false}
+                            numColumns={isStoryMode ? 3 : 1}
+                            columnWrapperStyle={isStoryMode ? styles.gridRow : undefined}
                         />
                     )}
 
                     {/* Footer Action */}
                     <View style={styles.footer}>
-                        <View style={styles.footerRow}>
-                            <TouchableOpacity
-                                style={[styles.batchBtn, { backgroundColor: `${platformColor}15`, borderColor: `${platformColor}30` }]}
-                                disabled={selectedIds.size === 0}
-                                onPress={() => handleDownload('audio_best')}
-                            >
-                                <MusicIcon size={16} color={platformColor} />
-                                <Text style={[styles.batchBtnText, { color: platformColor }]}>Best</Text>
-                            </TouchableOpacity>
+                        {(() => {
+                            const isStoryMode = items.length > 0 && ['instagram', 'facebook'].includes(items[0].type || '');
+                            if (isStoryMode) {
+                                return (
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.videoBatchBtn,
+                                            { backgroundColor: selectedIds.size > 0 ? platformColor : Colors.surfaceElevated }
+                                        ]}
+                                        disabled={selectedIds.size === 0}
+                                        onPress={() => handleDownload('best')}
+                                    >
+                                        <DownloadIcon size={18} color="#FFF" />
+                                        <Text style={styles.videoBatchBtnText}>
+                                            Download Stories {selectedIds.size > 0 ? `(${selectedIds.size})` : ''}
+                                        </Text>
+                                    </TouchableOpacity>
+                                );
+                            }
 
-                            <TouchableOpacity
-                                style={[styles.batchBtn, { backgroundColor: `${platformColor}15`, borderColor: `${platformColor}30` }]}
-                                disabled={selectedIds.size === 0}
-                                onPress={() => handleDownload('audio_standard')}
-                            >
-                                <MusicIcon size={16} color={platformColor} />
-                                <Text style={[styles.batchBtnText, { color: platformColor }]}>Std</Text>
-                            </TouchableOpacity>
+                            return (
+                                <>
+                                    <View style={styles.footerRow}>
+                                        <TouchableOpacity
+                                            style={[styles.batchBtn, { backgroundColor: `${platformColor}15`, borderColor: `${platformColor}30` }]}
+                                            disabled={selectedIds.size === 0}
+                                            onPress={() => handleDownload('audio_best')}
+                                        >
+                                            <MusicIcon size={16} color={platformColor} />
+                                            <Text style={[styles.batchBtnText, { color: platformColor }]}>Best</Text>
+                                        </TouchableOpacity>
 
-                            <TouchableOpacity
-                                style={[styles.batchBtn, { backgroundColor: `${platformColor}15`, borderColor: `${platformColor}30` }]}
-                                disabled={selectedIds.size === 0}
-                                onPress={() => handleDownload('audio_low')}
-                            >
-                                <MusicIcon size={16} color={platformColor} />
-                                <Text style={[styles.batchBtnText, { color: platformColor }]}>Low</Text>
-                            </TouchableOpacity>
-                        </View>
+                                        <TouchableOpacity
+                                            style={[styles.batchBtn, { backgroundColor: `${platformColor}15`, borderColor: `${platformColor}30` }]}
+                                            disabled={selectedIds.size === 0}
+                                            onPress={() => handleDownload('audio_standard')}
+                                        >
+                                            <MusicIcon size={16} color={platformColor} />
+                                            <Text style={[styles.batchBtnText, { color: platformColor }]}>Std</Text>
+                                        </TouchableOpacity>
 
-                        {platformColor !== '#1DB954' && ( // Don't show video for Spotify (Green color used here as proxy)
-                            <TouchableOpacity
-                                style={[
-                                    styles.videoBatchBtn,
-                                    { backgroundColor: selectedIds.size > 0 ? platformColor : Colors.surfaceElevated }
-                                ]}
-                                disabled={selectedIds.size === 0}
-                                onPress={() => handleDownload('best')}
-                            >
-                                <VideoIcon size={18} color="#FFF" />
-                                <Text style={styles.videoBatchBtnText}>
-                                    Download Video {selectedIds.size > 0 ? `(${selectedIds.size})` : ''}
-                                </Text>
-                            </TouchableOpacity>
-                        )}
+                                        <TouchableOpacity
+                                            style={[styles.batchBtn, { backgroundColor: `${platformColor}15`, borderColor: `${platformColor}30` }]}
+                                            disabled={selectedIds.size === 0}
+                                            onPress={() => handleDownload('audio_low')}
+                                        >
+                                            <MusicIcon size={16} color={platformColor} />
+                                            <Text style={[styles.batchBtnText, { color: platformColor }]}>Low</Text>
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    {platformColor !== '#1DB954' && ( // Don't show video for Spotify (Green color used here as proxy)
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.videoBatchBtn,
+                                                { backgroundColor: selectedIds.size > 0 ? platformColor : Colors.surfaceElevated }
+                                            ]}
+                                            disabled={selectedIds.size === 0}
+                                            onPress={() => handleDownload('best')}
+                                        >
+                                            <VideoIcon size={18} color="#FFF" />
+                                            <Text style={styles.videoBatchBtnText}>
+                                                Download Video {selectedIds.size > 0 ? `(${selectedIds.size})` : ''}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </>
+                            );
+                        })()}
                     </View>
                 </View>
             </View>
@@ -363,4 +422,61 @@ const styles = StyleSheet.create({
         fontWeight: Typography.weights.bold,
         color: '#FFF',
     },
+    gridContent: {
+        paddingHorizontal: Spacing.md,
+        paddingBottom: 100,
+    },
+    gridRow: {
+        justifyContent: 'flex-start',
+        gap: 8,
+        marginBottom: 8,
+    },
+    storyGridItem: {
+        width: '32%', // Approximate 1/3 of the width minus gap
+        aspectRatio: 9 / 16,
+        borderRadius: BorderRadius.md,
+        overflow: 'hidden',
+        borderWidth: 2,
+        borderColor: 'transparent',
+        position: 'relative',
+        backgroundColor: Colors.surfaceElevated,
+    },
+    storyThumbnail: {
+        width: '100%',
+        height: '100%',
+        resizeMode: 'cover',
+    },
+    storyGradient: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: '40%',
+        backgroundColor: 'rgba(0,0,0,0.3)',
+    },
+    storyCheckbox: {
+        position: 'absolute',
+        top: 6,
+        right: 6,
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        borderWidth: 1.5,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    storyDurationContainer: {
+        position: 'absolute',
+        bottom: 6,
+        left: 6,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 4,
+    },
+    storyDurationText: {
+        color: '#FFF',
+        fontSize: Typography.sizes.xs,
+        fontWeight: Typography.weights.bold,
+    }
 });

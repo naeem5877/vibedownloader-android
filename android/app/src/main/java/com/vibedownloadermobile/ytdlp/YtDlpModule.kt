@@ -419,6 +419,21 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     }
 
     @ReactMethod
+    fun saveCookiesToFile(cookiesText: String, platform: String, promise: Promise) {
+        try {
+            val cacheDir = reactApplicationContext.cacheDir
+            if (!cacheDir.exists()) cacheDir.mkdirs()
+            
+            val cookiesFile = File(cacheDir, "cookies_1$platform.txt")
+            cookiesFile.writeText(cookiesText)
+            
+            promise.resolve(cookiesFile.absolutePath)
+        } catch (e: Exception) {
+            promise.reject("COOKIE_SAVE_ERROR", "Failed to save cookies file", e)
+        }
+    }
+
+    @ReactMethod
     fun saveThumbnail(url: String, title: String, promise: Promise) {
         scope.launch {
             try {
@@ -467,7 +482,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     }
 
     @ReactMethod
-    fun fetchInfo(url: String, promise: Promise) {
+    fun fetchInfo(url: String, options: ReadableMap?, promise: Promise) {
         if (!isInitialized) initializeYtDlp()
         
         if (!isValidPlatform(url)) {
@@ -488,6 +503,11 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 // Use a standard Desktop User-Agent to bypass simple bot protections for TikTok, Instagram, etc.
                 // Note: Do not use --impersonate as it requires curl-cffi which isn't available on Android
                 request.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                
+                if (options?.hasKey("cookies") == true) {
+                    val cookiesPath = options.getString("cookies")
+                    if (!cookiesPath.isNullOrEmpty()) request.addOption("--cookies", cookiesPath)
+                }
                 
                 if (platform == "YouTube") {
                     request.addOption("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best")
@@ -679,15 +699,34 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     }
 
     @ReactMethod
-    fun getPlaylistInfo(url: String, promise: Promise) {
+    fun getPlaylistInfo(url: String, options: ReadableMap?, promise: Promise) {
         scope.launch {
             try {
                 if (!isInitialized) initializeYtDlp()
 
                 val request = YoutubeDLRequest(url)
                 request.addOption("--dump-single-json")
-                request.addOption("--flat-playlist")
-                
+
+                // For Instagram/Facebook story URLs, do NOT use --flat-playlist:
+                // flat-playlist returns incomplete/relative URLs for story entries.
+                // We need full info (real video URL + thumbnail) per story item.
+                val isStoryUrl = url.contains("/stories/") ||
+                    url.contains("facebook.com") && url.contains("/stories")
+                if (!isStoryUrl) {
+                    request.addOption("--flat-playlist")
+                }
+
+                request.addOption("--force-ipv4")
+                request.addOption("--no-check-certificate")
+                // Longer timeout for stories (multiple entries to resolve)
+                request.addOption("--socket-timeout", if (isStoryUrl) "45" else "30")
+                request.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
+                if (options?.hasKey("cookies") == true) {
+                    val cookiesPath = options.getString("cookies")
+                    if (!cookiesPath.isNullOrEmpty()) request.addOption("--cookies", cookiesPath)
+                }
+
                 val response = YoutubeDL.getInstance().execute(request)
                 promise.resolve(response.out)
             } catch (e: Exception) {
@@ -726,6 +765,11 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
 
                 val request = YoutubeDLRequest(url)
                 
+                if (options?.hasKey("cookies") == true) {
+                    val cookiesPath = options.getString("cookies")
+                    if (!cookiesPath.isNullOrEmpty()) request.addOption("--cookies", cookiesPath)
+                }
+                
                 // --- Output Filename Template ---
                 // If title is provided, use it to avoid placeholder "0 [0]" for direct CDN links
                 val outputTemplate = if (!forcedTitle.isNullOrEmpty()) {
@@ -747,15 +791,18 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 request.addOption("--no-playlist")
                 request.addOption("--restrict-filenames")
                 
+                request.addOption("--force-ipv4")
+                request.addOption("--no-check-certificate")
+                request.addOption("--socket-timeout", "30")
+                request.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                
                 // --- Format and Codec Selection ---
                 val isAudioDownload = formatId?.startsWith("audio") == true || formatId == "audio_best" || formatId == "audio_mp3" || formatId == "lossless_flac"
                 
                 if (!formatId.isNullOrEmpty()) {
                      when {
-                        formatId == "lossless_flac" -> {
+                         formatId == "lossless_flac" -> {
                             // Direct FLAC/Lossless download
-                            // Use a modern desktop UA to bypass some simple bot checks
-                            request.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                             request.addOption("-f", "best") // Get original quality without re-encoding
                         }
                         formatId == "audio_best" || formatId == "audio_mp3" -> {

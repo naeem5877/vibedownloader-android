@@ -78,7 +78,7 @@ export interface SharedData {
 
 // Native Module Interface
 export interface YtDlpNativeModule {
-    fetchInfo(url: string): Promise<VideoInfo>;
+    fetchInfo(url: string, options?: { cookies?: string }): Promise<VideoInfo>;
     download(url: string, formatId: string | null, processId: string, options?: { title?: string; artist?: string; platform?: string }): Promise<DownloadResult>;
     downloadSpotifyTrack(searchQuery: string, title: string, artist: string, thumbnail: string | null, processId: string): Promise<DownloadResult>;
     cancelDownload(processId: string): Promise<boolean>;
@@ -86,7 +86,7 @@ export interface YtDlpNativeModule {
     getSupportedPlatforms(): Promise<string[]>;
     validateUrl(url: string): Promise<ValidationResult>;
     getOutputDirectory(): Promise<string>;
-    getPlaylistInfo(url: string): Promise<string>;
+    getPlaylistInfo(url: string, options?: { cookies?: string }): Promise<string>;
     listDownloadedFiles(): Promise<DownloadedFile[]>;
     deleteFile(filePath: string): Promise<boolean>;
     openFile(filePath: string): Promise<boolean>;
@@ -96,6 +96,7 @@ export interface YtDlpNativeModule {
     getSharedData(): Promise<SharedData | null>;
     saveThumbnail(url: string, title: string): Promise<string>;
     getClipboardText(): Promise<string>;
+    saveCookiesToFile(cookiesText: string, platform: string): Promise<string>;
 }
 
 const { YtDlpModule } = NativeModules;

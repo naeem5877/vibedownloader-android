@@ -20,9 +20,9 @@ interface UseYtDlpState {
     downloadError: string | null;
 }
 
-interface UseYtDlpActions {
-    fetchInfo: (url: string) => Promise<void>;
-    download: (url: string, formatId: string | null, options?: { title?: string; artist?: string; platform?: string }) => Promise<DownloadResult | null>;
+export interface UseYtDlpActions {
+    fetchInfo: (url: string, options?: { cookies?: string }) => Promise<void>;
+    download: (url: string, formatId: string | null, options?: { title?: string; artist?: string; platform?: string; cookies?: string }) => Promise<DownloadResult | null>;
     downloadSpotifyTrack: (searchQuery: string, title: string, artist: string, thumbnail: string | null) => Promise<DownloadResult | null>;
     cancelDownload: () => Promise<void>;
     validateUrl: (url: string) => Promise<ValidationResult>;
@@ -125,7 +125,7 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
 
     const generateProcessId = () => Math.random().toString(36).substring(7);
 
-    const fetchInfo = useCallback(async (url: string) => {
+    const fetchInfo = useCallback(async (url: string, options?: { cookies?: string }) => {
         setState((prev) => ({
             ...prev,
             isLoading: true,
@@ -140,7 +140,7 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 throw new Error('Native module not available. Please restart the app.');
             }
 
-            const info = await YtDlpNative.fetchInfo(url);
+            const info = await YtDlpNative.fetchInfo(url, options);
 
             if (!info) {
                 throw new Error('No video information found');
@@ -153,7 +153,7 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
             }));
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to fetch video info. Please check the URL and try again.';
-            console.error('fetchInfo error:', error);
+            console.warn('fetchInfo error:', error);
 
             setState((prev) => ({
                 ...prev,
@@ -207,7 +207,7 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 }
 
                 const errorMessage = error?.message || 'Download failed. Please try again.';
-                console.error('download error:', error);
+                console.warn('download error:', error);
 
                 setState((prev) => ({
                     ...prev,
@@ -266,7 +266,7 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 }
 
                 const errorMessage = error?.message || 'Download failed. Please try again.';
-                console.error('downloadSpotifyTrack error:', error);
+                console.warn('downloadSpotifyTrack error:', error);
 
                 setState((prev) => ({
                     ...prev,

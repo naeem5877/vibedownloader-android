@@ -108,6 +108,7 @@ function App(): React.JSX.Element {
   const [appState, setAppState] = useState<'splash' | 'onboarding' | 'main'>('splash');
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [isFirstLaunch, setIsFirstLaunch] = useState<boolean | null>(null);
+  const isFirstLaunchRef = useRef<boolean | null>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const storageChecked = useRef(false);
 
@@ -121,10 +122,12 @@ function App(): React.JSX.Element {
       AsyncStorage.getItem(ONBOARDING_COMPLETE_KEY)
         .then((value: string | null) => {
           setIsFirstLaunch(value === null);
+          isFirstLaunchRef.current = value === null;
         })
         .catch(() => {
           // If storage fails, assume not first launch to avoid annoying users
           setIsFirstLaunch(false);
+          isFirstLaunchRef.current = false;
         });
     }
   }, []);
@@ -165,33 +168,35 @@ function App(): React.JSX.Element {
 
   const handleSplashFinish = () => {
     // If storage hasn't been checked yet, wait a bit more
-    if (isFirstLaunch === null) {
+    if (isFirstLaunchRef.current === null) {
       // Retry after a short delay
       const retryTimer = setInterval(() => {
-        if (isFirstLaunch !== null) {
+        if (isFirstLaunchRef.current !== null) {
           clearInterval(retryTimer);
-          setAppState(isFirstLaunch ? 'onboarding' : 'main');
+          setAppState(isFirstLaunchRef.current ? 'onboarding' : 'main');
         }
       }, 100);
       // Fallback after 2 seconds
       setTimeout(() => {
         clearInterval(retryTimer);
-        if (isFirstLaunch === null) {
+        if (isFirstLaunchRef.current === null) {
           setAppState('main'); // Default to main if storage check fails
         }
       }, 2000);
       return;
     }
-    setAppState(isFirstLaunch ? 'onboarding' : 'main');
+    setAppState(isFirstLaunchRef.current ? 'onboarding' : 'main');
   };
 
   const handleOnboardingDone = async () => {
     try {
       await AsyncStorage.setItem(ONBOARDING_COMPLETE_KEY, 'true');
+      await AsyncStorage.setItem('last_seen_version', '1.2.0');
     } catch (e) {
       console.warn('Failed to save launch state:', e);
     }
     setIsFirstLaunch(false);
+    isFirstLaunchRef.current = false;
     setAppState('main');
   };
 

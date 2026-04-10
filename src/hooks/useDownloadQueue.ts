@@ -16,6 +16,7 @@ export interface QueueItem {
     progress: number;
     eta: number;
     errorMessage?: string;
+    cookies?: string;
 }
 
 interface UseDownloadQueueReturn {
@@ -100,7 +101,13 @@ export const useDownloadQueue = (): UseDownloadQueueReturn => {
                             processId
                         );
                     } else {
-                        await YtDlpNative.download(nextItem.url, nextItem.formatId, processId);
+                        const options = {
+                            title: nextItem.title,
+                            artist: nextItem.author,
+                            platform: nextItem.type,
+                            cookies: nextItem.cookies || undefined
+                        };
+                        await YtDlpNative.download(nextItem.url, nextItem.formatId, processId, options);
                     }
 
                     updateItem(nextItem.id, { status: 'done', progress: 100 });

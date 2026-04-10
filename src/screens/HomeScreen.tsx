@@ -33,7 +33,8 @@ import {
     UpdateModal,
     EmptyState,
 } from '../components';
-// FormatToggle removed - automatic mode detection
+import { LoginWebViewModal } from '../components/LoginWebViewModal';
+import { CookieManagerService } from '../services/CookieManagerService';
 import { PlaylistSelectionModal } from '../components/PlaylistSelectionModal';
 import { SkeletonCard } from '../components/SkeletonCard';
 import { DiscordButton } from '../components/DiscordButton';
@@ -113,6 +114,24 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
     } = useDownloadQueue();
 
     // Animation refs
+    const playlistCheckTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const [loginModalVisible, setLoginModalVisible] = useState(false);
+    const [loggedInPlatforms, setLoggedInPlatforms] = useState<Record<string, boolean>>({});
+
+    // Check login state periodically or on change
+    useEffect(() => {
+        const checkLogins = async () => {
+            const ig = await CookieManagerService.getCookiesForPlatform('instagram');
+            const fb = await CookieManagerService.getCookiesForPlatform('facebook');
+            setLoggedInPlatforms({
+                instagram: !!ig,
+                facebook: !!fb
+            });
+        };
+        checkLogins();
+    }, [loginModalVisible, detectedPlatform]);
+
     const headerFadeAnim = useRef(new Animated.Value(0)).current;
     const headerSlideAnim = useRef(new Animated.Value(-20)).current;
     const batchActiveRef = useRef(false);
@@ -216,6 +235,113 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
             return;
         }
 
+        // 1.5 Check Instagram / Facebook Profile for Stories
+        const igRegex = /(?:https?:\/\/)?(?:www\.)?instagram\.com\/([a-zA-Z0-9._]+)\/?$/;
+        const fbRegex = /(?:https?:\/\/)?(?:www\.)?facebook\.com\/([a-zA-Z0-9._-]+)\/?$/;
+        
+        let isStoryFetch = false;
+        let storyUrl = '';
+        let platformName = '';
+        
+        const inputStr = text.trim();
+        let match = inputStr.match(igRegex);
+        if (match && match[1] && !['stories', 'p', 'reel', 'tv'].includes(match[1].toLowerCase())) {
+            isStoryFetch = true;
+            storyUrl = `https://instagram.com/stories/${match[1]}/`;
+            platformName = 'instagram';
+        } else {
+            match = inputStr.match(fbRegex);
+            if (match && match[1] && !['stories', 'watch', 'groups', 'events'].includes(match[1].toLowerCase())) {
+                isStoryFetch = true;
+                storyUrl = `https://www.facebook.com/${match[1]}/stories/`;
+                platformName = 'facebook';
+            } else if (inputStr.startsWith('@')) {
+                isStoryFetch = true;
+                const username = inputStr.substring(1);
+                platformName = detectedPlatform?.toLowerCase() === 'facebook' ? 'facebook' : 'instagram';
+                storyUrl = platformName === 'facebook' 
+                    ? `https://www.facebook.com/${username}/stories/`
+                    : `https://instagram.com/stories/${username}/`;
+            } else if (!inputStr.includes('://') && !inputStr.includes(' ') && (detectedPlatform?.toLowerCase() === 'instagram' || detectedPlatform?.toLowerCase() === 'facebook')) {
+                isStoryFetch = true;
+                platformName = detectedPlatform.toLowerCase();
+                const username = inputStr;
+                storyUrl = platformName === 'facebook' 
+                    ? `https://www.facebook.com/${username}/stories/`
+                    : `https://instagram.com/stories/${username}/`;
+            }
+        }
+
+        if (isStoryFetch) {
+            ToastAndroid.show(`Fetching ${platformName} stories...`, ToastAndroid.SHORT);
+            setIsPlaylistLoading(true);
+            setPlaylistModalVisible(true);
+            try {
+                // Fetch using Playlist extractor natively
+                if (YtDlpNative && YtDlpNative.getPlaylistInfo) {
+                     const cookiesPath = await CookieManagerService.getCookiesForPlatform(platformName);
+                     const playlistJson = await YtDlpNative.getPlaylistInfo(storyUrl, { cookies: cookiesPath || undefined });
+                     const data = JSON.parse(playlistJson);
+                     setPlaylistTitle(data.title || `${platformName.charAt(0).toUpperCase() + platformName.slice(1)} Stories`);
+                     setPlaylistImage(data.thumbnails?.[0]?.url || data.thumbnail);
+                     
+                     const storyUsername = match?.[1] || data.uploader_id || data.title || '';
+                     const items = (data.entries || []).map((entry: any, index: number) => {
+                         // yt-dlp flat-playlist may return partial/relative URLs — reconstruct absolute URLs
+                         let entryUrl = entry.url || entry.webpage_url || '';
+                         if (!entryUrl.startsWith('http')) {
+                             // Build absolute URL from the known username + entry ID
+                             const entryId = entry.id || '';
+                             if (platformName === 'facebook') {
+                                 entryUrl = entryId
+                                     ? `https://www.facebook.com/stories/${entryId}/`
+                                     : storyUrl;
+                             } else {
+                                 // Instagram
+                                 entryUrl = (storyUsername && entryId)
+                                     ? `https://www.instagram.com/stories/${storyUsername}/${entryId}/`
+                                     : storyUrl;
+                             }
+                         }
+                         return {
+                             id: entry.id || `story-${index}`,
+                             title: entry.title || `Story ${index + 1}`,
+                             author: entry.uploader || data.title || storyUsername || 'Unknown',
+                             duration: entry.duration ? `${Math.floor(entry.duration / 60)}:${(entry.duration % 60).toString().padStart(2, '0')}` : undefined,
+                             url: entryUrl,
+                             thumbnail: entry.thumbnail || entry.thumbnails?.[0]?.url,
+                             type: platformName,
+                         };
+                     });
+
+                     if (items.length === 0) {
+                          ToastAndroid.show('No stories found or account is private.', ToastAndroid.SHORT);
+                          setPlaylistModalVisible(false);
+                     } else {
+                          setPlaylistItems(items);
+                     }
+                }
+            } catch (error: any) {
+                console.warn('Story fetch error:', error);
+                let msg = error?.message || 'Unknown error';
+                
+                // Clean up raw python/yt-dlp scraping errors
+                if (msg.includes('SSL') || msg.includes('Unable to download webpage') || msg.toLowerCase().includes('login') || msg.includes('401') || msg.includes('403')) {
+                     const platformLabel = platformName.charAt(0).toUpperCase() + platformName.slice(1);
+                     msg = `${platformLabel} requires login. Tap the ${platformLabel} icon and log in first.`;
+                } else if (msg.length > 50) {
+                     // Truncate other extremely long ugly python logs
+                     msg = msg.substring(0, 50) + '...';
+                }
+
+                ToastAndroid.show(`Failed to fetch stories: ${msg}`, ToastAndroid.LONG);
+                setPlaylistModalVisible(false); 
+            } finally {
+                setIsPlaylistLoading(false);
+            }
+            return;
+        }
+
         // 2. Check YouTube Playlist
         if (text.includes('list=') || text.includes('playlist')) {
             setIsPlaylistLoading(true);
@@ -250,7 +376,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
 
         // 3. Normal Single Fetch
         try {
-            await actions.fetchInfo(text);
+            const cookiesPath = detectedPlatform ? await CookieManagerService.getCookiesForPlatform(detectedPlatform) : null;
+            await actions.fetchInfo(text, { cookies: cookiesPath || undefined });
             Haptics.success();
         } catch (error: any) {
             console.error('Fetch error:', error);
@@ -259,7 +386,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 ToastAndroid.LONG
             );
         }
-    }, [url, actions]);
+    }, [url, actions, detectedPlatform]);
 
     const checkShareIntent = useCallback(async () => {
         try {
@@ -534,26 +661,29 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
         }
     }, [state.videoInfo, losslessAvailability, actions]);
 
-    const handleBatchDownload = useCallback((selectedItems: any[], formatId: string) => {
+    const handleBatchDownload = useCallback(async (selectedItems: any[], formatId: string) => {
         setPlaylistModalVisible(false);
 
-        const items = selectedItems.map(item => ({
-            title: item.title,
-            author: item.author,
-            thumbnail: item.thumbnail,
-            url: item.url,
-            type: item.type || 'youtube',
-            searchQuery: item.searchQuery,
-            formatId,
+        const items = await Promise.all(selectedItems.map(async (item) => {
+            const cookiesPath = item.type ? await CookieManagerService.getCookiesForPlatform(item.type) : null;
+            return {
+                title: item.title,
+                author: item.author,
+                thumbnail: item.thumbnail,
+                url: item.url,
+                type: item.type || 'youtube',
+                searchQuery: item.searchQuery,
+                formatId,
+                cookies: cookiesPath || undefined
+            };
         }));
-
         addToQueue(items, formatId);
 
         // Show the queue panel automatically
         setQueuePanelVisible(true);
     }, [addToQueue]);
 
-    const handleDownload = useCallback(async (format: VideoFormat | string) => {
+    const handleDownload = useCallback(async (format: VideoFormat | string, forceTitle?: string, platform?: string) => {
         if (!state.videoInfo) return;
 
         ToastAndroid.show('Starting download...', ToastAndroid.SHORT);
@@ -569,8 +699,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                     info.thumbnail
                 );
             } else {
-                let formatId = typeof format === 'string' ? format : format.formatId;
-                await actions.download(state.videoInfo.url, formatId);
+                const cookiesPath = platform ? await CookieManagerService.getCookiesForPlatform(platform) : null;
+                
+                const result = await actions.download(state.videoInfo.url, typeof format === 'string' ? format : format.formatId, {
+                    title: forceTitle || state.videoInfo.title,
+                    artist: state.videoInfo.uploader || 'Unknown',
+                    platform: platform || 'Unknown',
+                    cookies: cookiesPath || undefined
+                });
             }
         } catch (error: any) {
             console.error('Download error:', error);
@@ -684,6 +820,28 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 {/* URL Input */}
                 {!isOffline && (
                     <View style={styles.inputSection}>
+                        {detectedPlatform && ['instagram', 'facebook', 'youtube', 'tiktok', 'twitter', 'twitch', 'rumble'].includes(detectedPlatform) && (
+                            <TouchableOpacity 
+                                style={[
+                                    styles.authBadge, 
+                                    { backgroundColor: loggedInPlatforms[detectedPlatform] ? 'rgba(76, 175, 80, 0.15)' : 'rgba(255, 255, 255, 0.05)' }
+                                ]}
+                                onPress={() => setLoginModalVisible(true)}
+                            >
+                                <View style={[
+                                    styles.authDot, 
+                                    { backgroundColor: loggedInPlatforms[detectedPlatform] ? '#4CAF50' : Colors.textMuted }
+                                ]} />
+                                <Text style={[
+                                    styles.authText,
+                                    { color: loggedInPlatforms[detectedPlatform] ? '#4CAF50' : Colors.textMuted }
+                                ]}>
+                                    {loggedInPlatforms[detectedPlatform] 
+                                        ? `${detectedPlatform.charAt(0).toUpperCase() + detectedPlatform.slice(1)} Logged In (Private Access)` 
+                                        : `Login to ${detectedPlatform.charAt(0).toUpperCase() + detectedPlatform.slice(1)} for Private Stories/Videos`}
+                                </Text>
+                            </TouchableOpacity>
+                        )}
                         <View style={styles.inputRow}>
                             <URLInput
                                 value={url}
@@ -814,6 +972,18 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                         releaseUrl={updateInfo.releaseUrl}
                         downloadUrl={updateInfo.downloadUrl}
                         features={updateInfo.features}
+                    />
+                )}
+
+                {/* Login Webview Modal */}
+                {detectedPlatform && ['instagram', 'facebook', 'youtube', 'tiktok', 'twitter', 'twitch', 'rumble'].includes(detectedPlatform) && (
+                    <LoginWebViewModal
+                        visible={loginModalVisible}
+                        platform={detectedPlatform as any}
+                        onClose={() => setLoginModalVisible(false)}
+                        onSuccess={() => {
+                            ToastAndroid.show(`Successfully authenticated with ${detectedPlatform}!`, ToastAndroid.SHORT);
+                        }}
                     />
                 )}
 
@@ -1051,6 +1221,27 @@ const styles = StyleSheet.create({
         fontSize: 9,
         fontWeight: '800',
     },
+    authBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        alignSelf: 'center',
+        paddingHorizontal: Spacing.md,
+        paddingVertical: 6,
+        borderRadius: BorderRadius.round,
+        marginBottom: Spacing.md,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
+    },
+    authDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        marginRight: Spacing.sm,
+    },
+    authText: {
+        fontSize: Typography.sizes.xs,
+        fontWeight: Typography.weights.bold,
+    }
 });
 
 export default HomeScreen;

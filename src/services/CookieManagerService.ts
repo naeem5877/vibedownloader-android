@@ -1,127 +1,189 @@
 import CookieManager from '@react-native-cookies/cookies';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import { YtDlpNative } from '../native/YtDlpModule';
 
 export class CookieManagerService {
-    /** Map of platform name -> canonical domain URL for CookieManager calls */
-    private static readonly PLATFORM_URLS: Record<string, string> = {
-        instagram: 'https://www.instagram.com',
-        facebook: 'https://www.facebook.com',
+    
+    // Aggressively map platforms to ALL potential domains where sessions might be stored
+    private static readonly PLATFORM_DOMAINS: Record<string, string[]> = {
+        instagram: ['https://instagram.com', 'https://www.instagram.com', 'https://i.instagram.com', 'https://m.instagram.com', 'https://login.instagram.com'],
+        facebook:  ['https://facebook.com', 'https://www.facebook.com', 'https://m.facebook.com', 'https://business.facebook.com', 'https://mtouch.facebook.com'],
+        youtube:   ['https://youtube.com', 'https://www.youtube.com', 'https://m.youtube.com', 'https://accounts.google.com', 'https://google.com', 'https://myaccount.google.com'],
+        tiktok:    ['https://tiktok.com', 'https://www.tiktok.com', 'https://m.tiktok.com'],
+        twitter:   ['https://twitter.com', 'https://x.com', 'https://www.twitter.com', 'https://mobile.twitter.com'],
+        twitch:    ['https://twitch.tv', 'https://www.twitch.tv', 'https://m.twitch.tv'],
     };
+
+    private static readonly SESSION_COOKIE_NAMES = new Set([
+        'sessionid', 'c_user', 'xs', 'datr', 'sb', 'wd', 'dpr', 'ig_did', // IG & FB
+        'SID', 'SSID', 'HSID', 'APISID', 'SAPISID', '__Secure-1PSID', '__Secure-3PSID', // Google
+        'auth_token', 'twid', 'ct0', // X
+        'sessionid_ss', 'ttwid', 'passport_csrf_token', // TikTok
+        'session', 'session_id', 'token', 'access_token',
+    ]);
 
     static async getCookiesForPlatform(platform: string): Promise<string | null> {
         try {
             const key = platform.toLowerCase();
-            const expiry = await AsyncStorage.getItem(`cookies_expiry_${key}`);
-            if (expiry && Date.now() > parseInt(expiry, 10)) {
-                // Cookies expired — remove only AsyncStorage keys (not WebView cookies)
-                // Avoid calling CookieManager with a non-URL string which throws an error
-                await AsyncStorage.removeItem(`cookies_path_${key}`);
-                await AsyncStorage.removeItem(`cookies_expiry_${key}`);
+
+            // Check expiry first
+            const expiryStr = await AsyncStorage.getItem(`cookies_expiry_${key}`);
+            if (expiryStr && Date.now() > parseInt(expiryStr, 10)) {
+                await CookieManagerService._clearAsyncStorageKeys(key);
                 return null;
             }
 
             const storedPath = await AsyncStorage.getItem(`cookies_path_${key}`);
-            if (storedPath) {
-                return storedPath;
-            }
-            return null;
+            if (!storedPath) return null;
+
+            try {
+                const exists = await YtDlpNative.fileExists(storedPath);
+                if (!exists) {
+                    await CookieManagerService._clearAsyncStorageKeys(key);
+                    return null;
+                }
+            } catch (err) {}
+
+            return storedPath;
         } catch (error) {
-            console.warn('Error reading cookie path for', platform, ':', error);
             return null;
         }
     }
 
-    static async extractAndSaveCookies(platform: string, url: string): Promise<boolean> {
+    static async extractAndSaveCookies(platform: string, currentUrl: string): Promise<boolean> {
         try {
-            // Get all cookies for the platform URL
-            const cookies = await CookieManager.get(url, true); // true for useWebKit
+            const key = platform.toLowerCase();
             
-            if (!cookies || Object.keys(cookies).length === 0) {
+            // 1. Prepare target URLs
+            const predefinedUrls = CookieManagerService.PLATFORM_DOMAINS[key] || [];
+            const urlsToCheck = Array.from(new Set(
+                [currentUrl, ...predefinedUrls].filter(u => !!u && u.startsWith('http'))
+            ));
+
+            // 2. Flush
+            if (Platform.OS === 'android') {
+                try { await CookieManager.flush(); } catch (err) {}
+                await new Promise<void>(resolve => setTimeout(resolve, 800)); // Increased delay for flush
+            }
+
+            // 3. Extract natively
+            const nativeMap = new Map<string, string>(); // name -> value
+            for (const checkUrl of urlsToCheck) {
+                try {
+                    const raw = await YtDlpNative.getWebViewCookies(checkUrl);
+                    if (raw && raw.trim()) {
+                        for (const pair of raw.split(/;\s*/)) {
+                            const eqIdx = pair.indexOf('=');
+                            if (eqIdx === -1) continue;
+                            const name = pair.substring(0, eqIdx).trim();
+                            const value = pair.substring(eqIdx + 1).trim();
+                            if (name) {
+                                nativeMap.set(name, value);
+                            }
+                        }
+                    }
+                } catch (e) {}
+            }
+
+            // 4. Extract metadata via library
+            let libMeta: Record<string, any> = {};
+            for (const checkUrl of urlsToCheck) {
+                try {
+                    const got = (await CookieManager.get(checkUrl)) || {};
+                    if (Object.keys(got).length > 0) {
+                        libMeta = { ...libMeta, ...got };
+                    }
+                } catch (e) {}
+            }
+
+            if (nativeMap.size === 0 && Object.keys(libMeta).length === 0) {
                 return false;
             }
 
-            // Convert to Netscape format required by yt-dlp
-            // Format: domain \t includeSubdomains \t path \t secure \t expiry \t name \t value
-            let netscapeTxt = `# Netscape HTTP Cookie File\n# This file is generated by VibeDownloader\n\n`;
-            
-            let domain = '';
-            try {
-                const urlObj = new URL(url) as any;
-                domain = '.' + urlObj.hostname.replace('www.', '');
-            } catch (e) {
-                // Natively fallback if URL is malformed
-                domain = platform.toLowerCase().includes('insta') ? '.instagram.com' : '.facebook.com';
+            // 5. Default domain logic
+            let defaultDomain = `.${key.replace(/[^a-z0-9]/g, '')}.com`;
+            if (key === 'facebook') defaultDomain = '.facebook.com';
+            else if (key === 'instagram') defaultDomain = '.instagram.com';
+            else if (key === 'youtube') defaultDomain = '.youtube.com';
+            else if (key === 'tiktok') defaultDomain = '.tiktok.com';
+            else if (key === 'twitter') defaultDomain = '.twitter.com';
+            else if (urlsToCheck.length > 0) {
+                const match = urlsToCheck[0].match(/^https?:\/\/([^/?#]+)/);
+                if (match && match[1]) {
+                    defaultDomain = '.' + match[1].replace(/^(www|m)\./i, '');
+                }
             }
-            
-            let hasSession = false;
-            let minExpiry = 1893456000; // 2030
 
-            Object.values(cookies).forEach((cookie) => {
-                const isSecure = true; // Most social media uses secure cookies
-                const includeSubdomains = true;
-                const path = cookie.path || '/';
+            // 6. Assemble Netscape Format
+            let netscapeTxt = '# Netscape HTTP Cookie File\n# Generated by VibeDownloader\n\n';
+
+            const allNames = new Set([
+                ...Array.from(nativeMap.keys()),
+                ...Object.keys(libMeta),
+            ]);
+
+            for (const name of allNames) {
+                const value = nativeMap.get(name) 
+                    ?? (typeof libMeta[name] === 'string' ? libMeta[name] : (libMeta[name] as any)?.value);
+                    
+                if (!name || value === undefined || value === null) continue;
+
+                const meta = libMeta[name] as any;
+                const isSecure = typeof meta?.secure === 'boolean' ? meta.secure : true;
+
+                let domain = meta?.domain || defaultDomain;
+                if (!domain.startsWith('.')) {
+                    domain = '.' + domain.replace(/^www\./i, '');
+                }
+
+                const path = meta?.path || '/';
+
+                let expiry = 1893456000; // 2030 by default
+                if (meta?.expires) {
+                    const ms = new Date(meta.expires).getTime();
+                    if (!isNaN(ms) && ms > 0) {
+                        expiry = Math.floor(ms / 1000);
+                    }
+                }
+
                 const secureStr = isSecure ? 'TRUE' : 'FALSE';
-                const subStr = includeSubdomains ? 'TRUE' : 'FALSE';
-                // Use year 2030 for expiry if none provided
-                const expiry = cookie.expires ? Math.floor(new Date(cookie.expires).getTime() / 1000) : 1893456000;
-                
-                if (cookie.expires) {
-                    const expiryMs = new Date(cookie.expires).getTime();
-                    if (expiryMs < minExpiry * 1000) minExpiry = expiryMs / 1000;
-                }
-
-                netscapeTxt += `${domain}\t${subStr}\t${path}\t${secureStr}\t${expiry}\t${cookie.name}\t${cookie.value}\n`;
-
-                if (cookie.name === 'sessionid' || cookie.name === 'c_user') {
-                    hasSession = true;
-                }
-            });
-
-            // If we didn't find the critical session cookie, don't save it.
-            // Some platforms don't strictly use sessionid, so we skip this strict check for non-meta platforms
-            if (!hasSession && ['instagram', 'facebook'].includes(platform.toLowerCase())) {
-                return false;
+                netscapeTxt += `${domain}\tTRUE\t${path}\t${secureStr}\t${expiry}\t${name}\t${value}\n`;
             }
 
-            // Save to file via native module to bypass need for react-native-fs
-            const filePath = await YtDlpNative.saveCookiesToFile(netscapeTxt, platform.toLowerCase());
+            // 7. Save file explicitly
+            const filePath = await YtDlpNative.saveCookiesToFile(netscapeTxt, key);
             
-            // Link path in AsyncStorage
-            await AsyncStorage.setItem(`cookies_path_${platform.toLowerCase()}`, filePath);
-            
-            // 7 days default fallback if not parsed
-            let finalExpiryMs = minExpiry === 1893456000 ? Date.now() + (7 * 24 * 60 * 60 * 1000) : (minExpiry * 1000);
-            await AsyncStorage.setItem(`cookies_expiry_${platform.toLowerCase()}`, finalExpiryMs.toString());
-            
+            // 8. Persist configuration
+            await AsyncStorage.setItem(`cookies_path_${key}`, filePath);
+            // Default valid period of 30 days. Let yt-dlp determine real expiry failure.
+            const finalExpiryMs = Date.now() + 30 * 24 * 60 * 60 * 1000;
+            await AsyncStorage.setItem(`cookies_expiry_${key}`, finalExpiryMs.toString());
+
             return true;
+
         } catch (error) {
-            console.error('Cookie extraction failed:', error);
             return false;
         }
     }
 
-    static async clearCookies(platform: string, url?: string) {
+    static async clearCookies(platform: string, url?: string): Promise<void> {
         const key = platform.toLowerCase();
-        // Resolve a proper URL to pass to CookieManager; fall back to stored map.
-        const resolvedUrl = url && url.startsWith('http')
-            ? url
-            : (this.PLATFORM_URLS[key] ?? null);
-
-        try {
-            if (resolvedUrl) {
-                await CookieManager.clearByName(resolvedUrl, 'sessionid');
-                await CookieManager.clearByName(resolvedUrl, 'c_user');
-            }
-        } catch (e) {
-            console.warn('CookieManager.clearByName failed (non-critical):', e);
+        const urls = CookieManagerService.PLATFORM_DOMAINS[key] || [];
+        
+        for (const checkUrl of urls) {
+            try {
+                await CookieManager.clearAll();
+            } catch (ignore) {}
         }
 
+        await CookieManagerService._clearAsyncStorageKeys(key);
+    }
+
+    private static async _clearAsyncStorageKeys(key: string): Promise<void> {
         try {
             await AsyncStorage.removeItem(`cookies_path_${key}`);
             await AsyncStorage.removeItem(`cookies_expiry_${key}`);
-        } catch (e) {
-            console.error('Failed to clear AsyncStorage cookie data:', e);
-        }
+        } catch (e) {}
     }
 }

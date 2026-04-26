@@ -19,6 +19,7 @@ interface URLInputProps {
     isLoading: boolean;
     onPaste?: () => void;
     platformColor?: string;
+    placeholder?: string;
 }
 
 export const URLInput: React.FC<URLInputProps> = ({
@@ -28,6 +29,7 @@ export const URLInput: React.FC<URLInputProps> = ({
     isLoading,
     onPaste,
     platformColor = Colors.primary,
+    placeholder = "Paste any video link...",
 }) => {
     const [isFocused, setIsFocused] = useState(false);
     const focusAnimation = useRef(new Animated.Value(0)).current;
@@ -91,7 +93,7 @@ export const URLInput: React.FC<URLInputProps> = ({
                     style={styles.input}
                     value={value}
                     onChangeText={onChangeText}
-                    placeholder="Paste any video link..."
+                    placeholder={placeholder}
                     placeholderTextColor={Colors.textMuted}
                     onFocus={() => setIsFocused(true)}
                     onBlur={() => setIsFocused(false)}
@@ -154,72 +156,69 @@ export const URLInput: React.FC<URLInputProps> = ({
 
 const styles = StyleSheet.create({
     container: {
-        paddingHorizontal: Spacing.md,
+        paddingHorizontal: 0, 
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.sm,
+        gap: 10,
     },
     inputWrapper: {
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: Colors.surfaceMedium,
-        borderRadius: BorderRadius.xl,
+        backgroundColor: '#121214', 
+        borderRadius: 20,
         borderWidth: 1.5,
-        borderColor: Colors.innerBorder,
-        height: 60,
-        overflow: 'hidden',
+        borderColor: '#222225',
+        height: 64, 
+        ...Shadows.sm,
     },
     iconContainer: {
-        paddingLeft: Spacing.md,
-        paddingRight: Spacing.xs,
+        paddingLeft: 16,
+        paddingRight: 10,
     },
     input: {
         flex: 1,
         color: Colors.textPrimary,
-        fontSize: Typography.sizes.base,
+        fontSize: 15,
         height: '100%',
         paddingVertical: 0,
-        fontWeight: Typography.weights.medium,
-        letterSpacing: Typography.letterSpacing.normal,
+        fontWeight: '600',
+        letterSpacing: 0.1,
     },
     rightActions: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingRight: Spacing.sm,
+        paddingRight: 12,
     },
     clearButton: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        backgroundColor: Colors.surfaceHigh,
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: Colors.surfaceElevated,
         justifyContent: 'center',
         alignItems: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.05)',
     },
     pasteButton: {
-        backgroundColor: Colors.surfaceAccent,
-        paddingHorizontal: Spacing.md,
+        backgroundColor: 'rgba(99, 102, 241, 0.12)', 
+        paddingHorizontal: 14,
         paddingVertical: 8,
-        borderRadius: BorderRadius.md,
+        borderRadius: 12,
         borderWidth: 1,
-        borderColor: Colors.innerBorder,
+        borderColor: 'rgba(99, 102, 241, 0.2)',
     },
     pasteText: {
-        color: Colors.primary,
-        fontSize: Typography.sizes.xs,
-        fontWeight: Typography.weights.bold,
-        letterSpacing: Typography.letterSpacing.wider,
+        color: '#818CF8', 
+        fontSize: 11,
+        fontWeight: '900',
+        letterSpacing: 1.2,
     },
     actionButton: {
-        width: 60,
-        height: 60,
-        borderRadius: 18, // Changed to match industrial square-round look
+        width: 64,
+        height: 64,
+        borderRadius: 20,
         overflow: 'hidden',
-        elevation: 8,
-        shadowColor: Colors.primary,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.25,
-        shadowRadius: 10,
     },
     actionButtonInner: {
         flex: 1,
@@ -228,7 +227,6 @@ const styles = StyleSheet.create({
     },
     actionButtonDisabled: {
         opacity: 0.4,
-        shadowOpacity: 0,
     },
 });
 

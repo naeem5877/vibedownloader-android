@@ -28,6 +28,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 interface EmptyStateProps {
     platform?: string | null;
     isOffline?: boolean;
+    isLoggedIn?: boolean;
     title?: string;
     subtitle?: string;
     support?: string;
@@ -38,6 +39,7 @@ interface EmptyStateProps {
 export const EmptyState: React.FC<EmptyStateProps> = ({
     platform,
     isOffline = false,
+    isLoggedIn = false,
     title,
     subtitle,
     support,
@@ -157,7 +159,10 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
             support: 'Supported Content',
             features: ['🎬 Videos', '🎞️ Shorts', '📋 Playlists', '🎵 Music'],
             icon: <YouTubeIcon size={44} color={PlatformThemes.YouTube.primary} />,
-            color: PlatformThemes.YouTube.primary
+            color: PlatformThemes.YouTube.primary,
+            loginMessage: isLoggedIn 
+                ? '✅ Private and age-restricted access enabled.' 
+                : '💡 Login to download private and age-restricted videos.'
         },
         Spotify: {
             title: 'Spotify Downloader',
@@ -181,7 +186,10 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
             support: 'Supported Content',
             features: ['🎬 Reels', '📷 Posts', '📖 Stories', '🖼️ Photos'],
             icon: <InstagramIcon size={44} color={PlatformThemes.Instagram.primary} />,
-            color: PlatformThemes.Instagram.primary
+            color: PlatformThemes.Instagram.primary,
+            loginMessage: isLoggedIn 
+                ? '✅ Stories and private posts ready to download.' 
+                : '💡 Login and paste username to download stories.'
         },
         TikTok: {
             title: 'TikTok Downloader',
@@ -189,7 +197,10 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
             support: 'Supported Content',
             features: ['🎬 Videos', '🎵 Sounds', '🎥 No Mark', '🚀 Clean'],
             icon: <TikTokIcon size={44} color={PlatformThemes.TikTok.primary} />,
-            color: PlatformThemes.TikTok.primary
+            color: PlatformThemes.TikTok.primary,
+            loginMessage: isLoggedIn 
+                ? '✅ Private TikTok access ready.' 
+                : '💡 Login to TikTok for private videos.'
         },
         Facebook: {
             title: 'Facebook Downloader',
@@ -197,7 +208,10 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
             support: 'Supported Content',
             features: ['📹 Reels', '📖 Stories', '🔒 Private', '⚡ HD'],
             icon: <FacebookIcon size={44} color={PlatformThemes.Facebook.primary} />,
-            color: PlatformThemes.Facebook.primary
+            color: PlatformThemes.Facebook.primary,
+            loginMessage: isLoggedIn 
+                ? '✅ Now you can download private videos and stories.' 
+                : '💡 Login to access private videos and stories.'
         },
         X: {
             title: 'X Downloader',
@@ -205,7 +219,10 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
             support: 'Supported Content',
             features: ['🎬 4K Video', '🖼️ HD Photos', '🏃 Fast Sync', '📂 GIFs'],
             icon: <XIcon size={44} color={PlatformThemes.X.primary} />,
-            color: PlatformThemes.X.primary
+            color: PlatformThemes.X.primary,
+            loginMessage: isLoggedIn 
+                ? '✅ Private X content access ready.' 
+                : '💡 Login to X (Twitter) for private content.'
         },
         Pinterest: {
             title: 'Pinterest Downloader',
@@ -215,7 +232,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
             icon: <PinterestIcon size={44} color={PlatformThemes.Pinterest.primary} />,
             color: PlatformThemes.Pinterest.primary
         }
-    }), []);
+    }), [isLoggedIn]);
 
     const data = useMemo(() => {
         // Find matching platform data case-insensitively
@@ -240,6 +257,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
             features: baseData.features,
             icon: icon || baseData.icon,
             color: baseData.color,
+            loginMessage: baseData.loginMessage,
             displayName: baseData.displayName || (platformKey || currentPlatform)
         };
     }, [currentPlatform, platformData, title, subtitle, icon]);
@@ -294,6 +312,12 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
                 </Animated.View>
                 <Text style={styles.title}>{data.title}</Text>
                 <Text style={styles.subtitle}>{data.subtitle}</Text>
+                
+                {data.loginMessage && (
+                    <View style={[styles.loginHint, { borderColor: `${data.color}30` }]}>
+                        <Text style={styles.loginHintText}>{data.loginMessage}</Text>
+                    </View>
+                )}
             </View>
 
             {/* How to Download Section */}
@@ -524,5 +548,21 @@ const styles = StyleSheet.create({
         fontSize: 10,
         fontWeight: '900',
         letterSpacing: 1,
+    },
+    loginHint: {
+        marginTop: 15,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 12,
+        backgroundColor: '#FFFFFF08',
+        borderWidth: 1,
+        maxWidth: 280,
+    },
+    loginHintText: {
+        color: Colors.textSecondary,
+        fontSize: 12,
+        fontWeight: '600',
+        textAlign: 'center',
+        opacity: 0.9,
     }
 });

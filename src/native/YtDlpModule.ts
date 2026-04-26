@@ -79,7 +79,7 @@ export interface SharedData {
 // Native Module Interface
 export interface YtDlpNativeModule {
     fetchInfo(url: string, options?: { cookies?: string }): Promise<VideoInfo>;
-    download(url: string, formatId: string | null, processId: string, options?: { title?: string; artist?: string; platform?: string }): Promise<DownloadResult>;
+    download(url: string, formatId: string | null, processId: string, options?: { title?: string; artist?: string; platform?: string; cookies?: string; thumbnailPath?: string }): Promise<DownloadResult>;
     downloadSpotifyTrack(searchQuery: string, title: string, artist: string, thumbnail: string | null, processId: string): Promise<DownloadResult>;
     cancelDownload(processId: string): Promise<boolean>;
     updateYtDlp(): Promise<{ status: string }>;
@@ -97,6 +97,19 @@ export interface YtDlpNativeModule {
     saveThumbnail(url: string, title: string): Promise<string>;
     getClipboardText(): Promise<string>;
     saveCookiesToFile(cookiesText: string, platform: string): Promise<string>;
+    fileExists(path: string): Promise<boolean>;
+    /**
+     * Reads ALL cookies for [url] directly from Android's WebView CookieManager,
+     * including HttpOnly session cookies that JS / @react-native-cookies cannot see.
+     * Returns a flat string like "name1=value1; name2=value2" or "" if none found.
+     */
+    getWebViewCookies(url: string): Promise<string>;
+    /**
+     * Downloads [url] to the app's thumbnail cache directory and returns
+     * the absolute local path. Pass this path to download() as thumbnailPath
+     * so yt-dlp embeds the high-res album art instead of the video thumbnail.
+     */
+    downloadThumbnailToCache(url: string): Promise<string>;
 }
 
 const { YtDlpModule } = NativeModules;

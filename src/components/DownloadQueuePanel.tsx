@@ -220,11 +220,13 @@ export const DownloadQueuePanel: React.FC<DownloadQueuePanelProps> = ({
         />
     ), [platformColor, onCancelItem, handleRetry]);
 
-    // Added safety check for slideAnim value
-    // Note: getAnimatedValue is not a standard React Native method, usually we check __getValue() or just render anyway.
-    // In React Native, we can't easily check the value synchronously. 
-    // I'll remove the conditional return based on slideAnim value to be safer, or use the visible prop.
-    if (!visible && !isRunning && queue.length === 0) return null;
+    // Do NOT do an early `return null` based on queue.length here.
+    // Returning null removes the Modal from the tree, which skips the slide-out animation
+    // entirely — the panel just hard-disappears. The Modal's own `visible` prop and the
+    // Animated values manage the enter/exit transitions correctly; we just need to keep
+    // the component mounted while `visible` is true OR while there are items to show.
+    // Only skip rendering when the panel has genuinely never been needed yet.
+    if (!visible && queue.length === 0) return null;
 
     return (
         <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>

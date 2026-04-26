@@ -48,6 +48,7 @@ import { DownloadQueuePanel } from '../components/DownloadQueuePanel';
 import { checkForUpdates, UpdateInfo } from '../services/GitHubUpdateService';
 import { getSpotifyPlaylist, extractSpotifyId, getTrackInfo, buildYouTubeSearchQuery, formatTrackMetadata } from '../services/SpotifyService';
 import { checkLosslessAvailability, getLosslessDownloadUrl, LosslessAvailability } from '../services/LosslessService';
+import { getYouTubeMusicAlbumArt, isYouTubeMusicUrl, extractYouTubeVideoId } from '../services/YouTubeMusicService';
 import { detectPlatform } from '../utils/platform';
 import { Haptics } from '../utils/haptics';
 
@@ -98,6 +99,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
     const [isCheckingLossless, setIsCheckingLossless] = useState(false);
     const [isLosslessDownloading, setIsLosslessDownloading] = useState(false);
 
+    // YouTube Music album art state
+    // When a music.youtube.com URL is detected we fetch the real lh3 album art
+    // so both the preview card and the embedded ID3 tag use it.
+    const [ytMusicAlbumArtUrl, setYtMusicAlbumArtUrl] = useState<string | null>(null);
+
     const [state, actions] = useYtDlp();
 
     const [queuePanelVisible, setQueuePanelVisible] = useState(false);
@@ -122,12 +128,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
     // Check login state periodically or on change
     useEffect(() => {
         const checkLogins = async () => {
-            const ig = await CookieManagerService.getCookiesForPlatform('instagram');
-            const fb = await CookieManagerService.getCookiesForPlatform('facebook');
-            setLoggedInPlatforms({
-                instagram: !!ig,
-                facebook: !!fb
-            });
+            const platforms = ['instagram', 'facebook', 'youtube', 'tiktok', 'twitter', 'x', 'twitch'];
+            const states: Record<string, boolean> = {};
+            for (const p of platforms) {
+                const cookie = await CookieManagerService.getCookiesForPlatform(p === 'x' ? 'twitter' : p);
+                states[p] = !!cookie;
+            }
+            setLoggedInPlatforms(states);
         };
         checkLogins();
     }, [loginModalVisible, detectedPlatform]);
@@ -140,6 +147,34 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
         if (!text.trim()) {
             ToastAndroid.show('Please enter a URL', ToastAndroid.SHORT);
             return;
+        }
+
+        // Clear previous playlist state
+        setPlaylistItems([]);
+        setPlaylistTitle('');
+        setPlaylistImage(undefined);
+
+        // ── 0. YouTube Music — fetch real album art before/alongside normal fetch ──
+        if (isYouTubeMusicUrl(text)) {
+            setYtMusicAlbumArtUrl(null); // clear stale art from previous track
+            // Fire off the art fetch in parallel — don't block the main fetch
+            getYouTubeMusicAlbumArt(text)
+                .then((result) => {
+                    if (result) {
+                        console.log(
+                            `[HomeScreen] YT Music album art (${result.isRealAlbumArt ? 'real' : 'fallback'}): ${result.url.slice(0, 60)}`
+                        );
+                        setYtMusicAlbumArtUrl(result.url);
+                        // Patch the thumbnail in videoInfo once art arrives
+                        // so the preview card shows the actual album cover.
+                        // We use a functional setState via actions.setVideoInfo only
+                        // if info is already loaded.
+                        // HomeScreen re-renders automatically via the state update.
+                    }
+                })
+                .catch((e) => console.warn('[HomeScreen] YT Music art fetch failed:', e));
+        } else {
+            setYtMusicAlbumArtUrl(null);
         }
 
         // 1. Check Spotify
@@ -230,7 +265,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
 
             } catch (error: any) {
                 console.error('Spotify Track Error', error);
-                ToastAndroid.show('Failed to fetch Spotify track', ToastAndroid.SHORT);
+                ToastAndroid.show(`Spotify Error: ${error.message || 'Unknown error'}`, ToastAndroid.LONG);
             }
             return;
         }
@@ -379,6 +414,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
             const cookiesPath = detectedPlatform ? await CookieManagerService.getCookiesForPlatform(detectedPlatform) : null;
             await actions.fetchInfo(text, { cookies: cookiesPath || undefined });
             Haptics.success();
+
+            // If YT Music and album art arrived already, patch the thumbnail now.
+            // If art is still loading it will be patched by the parallel promise above.
         } catch (error: any) {
             console.error('Fetch error:', error);
             ToastAndroid.show(
@@ -662,6 +700,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
     }, [state.videoInfo, losslessAvailability, actions]);
 
     const handleBatchDownload = useCallback(async (selectedItems: any[], formatId: string) => {
+        // Close the playlist modal first — we MUST wait for its slide-down animation
+        // to fully complete before opening the queue panel. Opening two Android Modals
+        // in the same JS tick causes the UI thread to freeze or the second modal to
+        // silently never render.
         setPlaylistModalVisible(false);
 
         const items = await Promise.all(selectedItems.map(async (item) => {
@@ -679,8 +721,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
         }));
         addToQueue(items, formatId);
 
-        // Show the queue panel automatically
-        setQueuePanelVisible(true);
+        // Delay opening queue panel until the playlist modal closing animation finishes
+        // (Android slide animation duration is ~300ms, 380ms gives a safe buffer)
+        setTimeout(() => setQueuePanelVisible(true), 380);
     }, [addToQueue]);
 
     const handleDownload = useCallback(async (format: VideoFormat | string, forceTitle?: string, platform?: string) => {
@@ -699,20 +742,47 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                     info.thumbnail
                 );
             } else {
-                const cookiesPath = platform ? await CookieManagerService.getCookiesForPlatform(platform) : null;
-                
-                const result = await actions.download(state.videoInfo.url, typeof format === 'string' ? format : format.formatId, {
-                    title: forceTitle || state.videoInfo.title,
-                    artist: state.videoInfo.uploader || 'Unknown',
-                    platform: platform || 'Unknown',
-                    cookies: cookiesPath || undefined
-                });
+                const resolvedPlatform = platform || detectedPlatform || state.videoInfo.platform || null;
+                const cookiesPath = resolvedPlatform
+                    ? await CookieManagerService.getCookiesForPlatform(resolvedPlatform)
+                    : null;
+
+                if (cookiesPath) {
+                    console.log(`[handleDownload] Using cookies for ${resolvedPlatform}: ${cookiesPath}`);
+                } else if (resolvedPlatform && ['instagram', 'facebook'].includes(resolvedPlatform.toLowerCase())) {
+                    console.warn(`[handleDownload] No cookie file found for ${resolvedPlatform} — private content may fail.`);
+                }
+
+                // ── YouTube Music: pre-download high-res album art for embedding ──
+                let thumbnailPath: string | undefined;
+                const isYTMusic = isYouTubeMusicUrl(state.videoInfo.url);
+                if (isYTMusic && ytMusicAlbumArtUrl) {
+                    try {
+                        console.log('[handleDownload] Downloading YT Music album art to cache…');
+                        thumbnailPath = await YtDlpNative.downloadThumbnailToCache(ytMusicAlbumArtUrl);
+                        console.log('[handleDownload] Album art cached at:', thumbnailPath);
+                    } catch (thumbErr) {
+                        console.warn('[handleDownload] Failed to cache album art (non-fatal):', thumbErr);
+                    }
+                }
+
+                const result = await actions.download(
+                    state.videoInfo.url,
+                    typeof format === 'string' ? format : format.formatId,
+                    {
+                        title:         forceTitle || state.videoInfo.title,
+                        artist:        state.videoInfo.uploader || 'Unknown',
+                        platform:      resolvedPlatform || 'Unknown',
+                        cookies:       cookiesPath || undefined,
+                        thumbnailPath: thumbnailPath,
+                    }
+                );
             }
         } catch (error: any) {
             console.error('Download error:', error);
             ToastAndroid.show(error?.message || 'Download failed', ToastAndroid.LONG);
         }
-    }, [state.videoInfo, actions]);
+    }, [state.videoInfo, actions, detectedPlatform, ytMusicAlbumArtUrl]);
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: currentTheme.background }]} edges={['top']}>
@@ -820,28 +890,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 {/* URL Input */}
                 {!isOffline && (
                     <View style={styles.inputSection}>
-                        {detectedPlatform && ['instagram', 'facebook', 'youtube', 'tiktok', 'twitter', 'twitch', 'rumble'].includes(detectedPlatform) && (
-                            <TouchableOpacity 
-                                style={[
-                                    styles.authBadge, 
-                                    { backgroundColor: loggedInPlatforms[detectedPlatform] ? 'rgba(76, 175, 80, 0.15)' : 'rgba(255, 255, 255, 0.05)' }
-                                ]}
-                                onPress={() => setLoginModalVisible(true)}
-                            >
-                                <View style={[
-                                    styles.authDot, 
-                                    { backgroundColor: loggedInPlatforms[detectedPlatform] ? '#4CAF50' : Colors.textMuted }
-                                ]} />
-                                <Text style={[
-                                    styles.authText,
-                                    { color: loggedInPlatforms[detectedPlatform] ? '#4CAF50' : Colors.textMuted }
-                                ]}>
-                                    {loggedInPlatforms[detectedPlatform] 
-                                        ? `${detectedPlatform.charAt(0).toUpperCase() + detectedPlatform.slice(1)} Logged In (Private Access)` 
-                                        : `Login to ${detectedPlatform.charAt(0).toUpperCase() + detectedPlatform.slice(1)} for Private Stories/Videos`}
-                                </Text>
-                            </TouchableOpacity>
-                        )}
                         <View style={styles.inputRow}>
                             <URLInput
                                 value={url}
@@ -855,12 +903,72 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                                 }}
                                 onSubmit={() => handleFetch(url)}
                                 isLoading={state.isLoading}
-                                onPaste={handlePaste} // Assuming handlePaste is defined
+                                onPaste={handlePaste}
                                 platformColor={platformColor}
+                                placeholder={
+                                    ['instagram', 'facebook'].includes(detectedPlatform || '') 
+                                        ? "Paste video link or @username for stories..." 
+                                        : "Paste any video link..."
+                                }
                             />
                         </View>
+                        {detectedPlatform && ['instagram', 'facebook', 'youtube', 'tiktok', 'twitter', 'x', 'twitch'].includes(detectedPlatform.toLowerCase()) && (
+                            <TouchableOpacity 
+                                style={[
+                                    styles.loginBanner, 
+                                    { borderColor: loggedInPlatforms[detectedPlatform.toLowerCase()] ? 'rgba(76, 175, 80, 0.3)' : 'rgba(255, 255, 255, 0.1)' }
+                                ]}
+                                activeOpacity={0.8}
+                                onPress={() => setLoginModalVisible(true)}
+                            >
+                                <View style={styles.loginBannerContent}>
+                                    <View style={[
+                                        styles.statusIndicator, 
+                                        { backgroundColor: loggedInPlatforms[detectedPlatform] ? '#4CAF50' : Colors.textMuted }
+                                    ]}>
+                                        {loggedInPlatforms[detectedPlatform] && <View style={styles.statusPing} />}
+                                    </View>
+                                    <View style={styles.loginTextContainer}>
+                                        <Text style={[
+                                            styles.loginTitle,
+                                            { color: loggedInPlatforms[detectedPlatform] ? '#4CAF50' : Colors.textPrimary }
+                                        ]}>
+                                            {loggedInPlatforms[detectedPlatform] 
+                                                ? `${detectedPlatform.charAt(0).toUpperCase() + detectedPlatform.slice(1)} Session Active`
+                                                : `Access Restricted Content`}
+                                        </Text>
+                                        <Text style={styles.loginSubtitle}>
+                                            {(() => {
+                                                const pName = detectedPlatform.charAt(0).toUpperCase() + detectedPlatform.slice(1);
+                                                const isStory = ['instagram', 'facebook'].includes(detectedPlatform);
+                                                
+                                                if (loggedInPlatforms[detectedPlatform]) {
+                                                    return isStory ? 'Ready to download stories and private posts.' : 'Private and age-restricted access enabled.';
+                                                } else {
+                                                    return isStory
+                                                        ? `Login to ${pName} to download stories.`
+                                                        : `Login to ${pName} for private content.`;
+                                                }
+                                            })()}
+                                        </Text>
+                                    </View>
+                                </View>
+                                <View style={[
+                                    styles.loginActionBtn,
+                                    { backgroundColor: loggedInPlatforms[detectedPlatform] ? 'rgba(76, 175, 80, 0.1)' : 'rgba(255, 255, 255, 0.05)' }
+                                ]}>
+                                    <Text style={[
+                                        styles.loginActionText,
+                                        { color: loggedInPlatforms[detectedPlatform] ? '#4CAF50' : Colors.textSecondary }
+                                    ]}>
+                                        {loggedInPlatforms[detectedPlatform] ? 'MANAGE' : 'LOGIN'}
+                                    </Text>
+                                </View>
+                            </TouchableOpacity>
+                        )}
                     </View>
                 )}
+
 
                 {/* Error Message */}
                 {state.fetchError && (
@@ -899,9 +1007,22 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                         {/* ... Info Card ... */}
                         <View style={styles.videoSection}>
                             <VideoInfoCard
-                                videoInfo={state.videoInfo}
+                                videoInfo={
+                                    // If we have high-res YT Music album art, override the thumbnail
+                                    // so the preview card shows the real album cover.
+                                    ytMusicAlbumArtUrl
+                                        ? { ...state.videoInfo, thumbnail: ytMusicAlbumArtUrl }
+                                        : state.videoInfo
+                                }
                                 onSaveThumbnail={handleSaveThumbnail}
                             />
+                            {ytMusicAlbumArtUrl && (
+                                <View style={styles.albumArtBadge}>
+                                    <Text style={styles.albumArtBadgeText}>
+                                        🎵 Real album art loaded
+                                    </Text>
+                                </View>
+                            )}
                         </View>
 
                         {/* Lossless FLAC Card (Spotify only) */}
@@ -921,14 +1042,21 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                             <TouchableOpacity
                                 style={[styles.quickDownloadBtn, { backgroundColor: platformColor }]}
                                 onPress={() => {
-                                    // Auto-detect: Spotify/SoundCloud = audio, others = video
-                                    const isAudioPlatform = detectedPlatform === 'spotify' || detectedPlatform === 'soundcloud';
+                                    // YouTube Music and other audio platforms default to MP3
+                                    const isAudioPlatform =
+                                        detectedPlatform === 'spotify' ||
+                                        detectedPlatform === 'soundcloud' ||
+                                        isYouTubeMusicUrl(state.videoInfo?.url ?? '');
                                     handleDownload(isAudioPlatform ? 'audio_mp3' : 'best');
                                 }}
                             >
                                 <DownloadIcon size={20} color="#FFF" />
                                 <Text style={styles.quickDownloadText}>
-                                    Download {(detectedPlatform === 'spotify' || detectedPlatform === 'soundcloud') ? 'Audio (MP3)' : 'Best Quality'}
+                                    Download {(
+                                        detectedPlatform === 'spotify' ||
+                                        detectedPlatform === 'soundcloud' ||
+                                        isYouTubeMusicUrl(state.videoInfo?.url ?? '')
+                                    ) ? 'Audio (MP3)' : 'Best Quality'}
                                 </Text>
                             </TouchableOpacity>
                         </View>
@@ -948,7 +1076,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
 
                 {/* Animated Empty State */}
                 {!state.videoInfo && !state.isLoading && !state.fetchError && !url && (
-                    <EmptyState platform={detectedPlatform} isOffline={isOffline} />
+                    <EmptyState 
+                        platform={detectedPlatform} 
+                        isOffline={isOffline} 
+                        isLoggedIn={!!(detectedPlatform && loggedInPlatforms[detectedPlatform.toLowerCase() || ''])}
+                    />
                 )}
 
                 {/* Playlist Modal */}
@@ -976,10 +1108,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 )}
 
                 {/* Login Webview Modal */}
-                {detectedPlatform && ['instagram', 'facebook', 'youtube', 'tiktok', 'twitter', 'twitch', 'rumble'].includes(detectedPlatform) && (
+                {detectedPlatform && ['instagram', 'facebook', 'youtube', 'tiktok', 'twitter', 'x', 'twitch'].includes(detectedPlatform.toLowerCase()) && (
                     <LoginWebViewModal
                         visible={loginModalVisible}
-                        platform={detectedPlatform as any}
+                        platform={(detectedPlatform.toLowerCase() === 'x' ? 'twitter' : detectedPlatform.toLowerCase()) as any}
                         onClose={() => setLoginModalVisible(false)}
                         onSuccess={() => {
                             ToastAndroid.show(`Successfully authenticated with ${detectedPlatform}!`, ToastAndroid.SHORT);
@@ -1036,31 +1168,33 @@ const styles = StyleSheet.create({
 
 
     logo: {
-        fontSize: 26,
+        fontSize: 28,
         fontWeight: '900',
         color: Colors.textPrimary,
-        letterSpacing: -1,
+        letterSpacing: -1.5,
     },
     headerActions: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
+        gap: 10,
     },
     headerBtn: {
-        width: 38,
-        height: 38,
-        borderRadius: 12,
-        backgroundColor: Colors.surface,
+        width: 42,
+        height: 42,
+        borderRadius: 14,
+        backgroundColor: '#161618',
         justifyContent: 'center',
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: Colors.border,
+        borderColor: '#252528',
     },
     tagline: {
         color: Colors.textMuted,
-        fontSize: 13,
-        marginTop: 8,
-        letterSpacing: 0.2,
+        fontSize: 14,
+        fontWeight: '500',
+        marginTop: 6,
+        letterSpacing: -0.2,
+        opacity: 0.8,
     },
     // ── Input Section ──
     inputSection: {
@@ -1221,27 +1355,83 @@ const styles = StyleSheet.create({
         fontSize: 9,
         fontWeight: '800',
     },
-    authBadge: {
+    loginBanner: {
         flexDirection: 'row',
         alignItems: 'center',
-        alignSelf: 'center',
-        paddingHorizontal: Spacing.md,
-        paddingVertical: 6,
-        borderRadius: BorderRadius.round,
-        marginBottom: Spacing.md,
+        justifyContent: 'space-between',
+        backgroundColor: Colors.surfaceElevated,
+        marginHorizontal: 0,
+        marginTop: Spacing.md,
+        padding: 12,
+        borderRadius: 16,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
+        ...Shadows.sm,
     },
-    authDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        marginRight: Spacing.sm,
+    loginBannerContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
     },
-    authText: {
-        fontSize: Typography.sizes.xs,
-        fontWeight: Typography.weights.bold,
-    }
+    statusIndicator: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        marginRight: 14,
+        position: 'relative',
+    },
+    statusPing: {
+        position: 'absolute',
+        top: -2,
+        left: -2,
+        right: -2,
+        bottom: -2,
+        borderRadius: 10,
+        backgroundColor: '#4CAF50',
+        opacity: 0.3,
+    },
+    loginTextContainer: {
+        flex: 1,
+    },
+    loginTitle: {
+        fontSize: 13,
+        fontWeight: '800',
+        letterSpacing: 0.2,
+        marginBottom: 1,
+    },
+    loginSubtitle: {
+        fontSize: 11,
+        color: Colors.textMuted,
+        fontWeight: '500',
+    },
+    loginActionBtn: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.05)',
+    },
+    loginActionText: {
+        fontSize: 11,
+        fontWeight: '900',
+        letterSpacing: 0.5,
+    },
+    // YouTube Music album art badge shown below the VideoInfoCard
+    albumArtBadge: {
+        alignSelf: 'center',
+        marginTop: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        borderRadius: 20,
+        backgroundColor: 'rgba(255, 87, 34, 0.12)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 87, 34, 0.3)',
+    },
+    albumArtBadgeText: {
+        color: '#FF5722',
+        fontSize: 11,
+        fontWeight: '600' as const,
+        letterSpacing: 0.3,
+    },
 });
 
 export default HomeScreen;

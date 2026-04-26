@@ -22,7 +22,7 @@ interface UseYtDlpState {
 
 export interface UseYtDlpActions {
     fetchInfo: (url: string, options?: { cookies?: string }) => Promise<void>;
-    download: (url: string, formatId: string | null, options?: { title?: string; artist?: string; platform?: string; cookies?: string }) => Promise<DownloadResult | null>;
+    download: (url: string, formatId: string | null, options?: { title?: string; artist?: string; platform?: string; cookies?: string; thumbnailPath?: string }) => Promise<DownloadResult | null>;
     downloadSpotifyTrack: (searchQuery: string, title: string, artist: string, thumbnail: string | null) => Promise<DownloadResult | null>;
     cancelDownload: () => Promise<void>;
     validateUrl: (url: string) => Promise<ValidationResult>;
@@ -164,7 +164,7 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
     }, []);
 
     const download = useCallback(
-        async (url: string, formatId: string | null, options?: { title?: string; artist?: string; platform?: string }) => {
+        async (url: string, formatId: string | null, options?: { title?: string; artist?: string; platform?: string; cookies?: string; thumbnailPath?: string }) => {
             const processId = generateProcessId();
             processIdRef.current = processId;
 

@@ -19,7 +19,10 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
+import com.yausername.ffmpeg.FFmpeg
 import com.google.gson.Gson
+import org.jaudiotagger.audio.AudioFileIO
+import org.jaudiotagger.tag.images.ArtworkFactory
 import kotlinx.coroutines.*
 import java.io.File
 import java.io.BufferedInputStream
@@ -48,6 +51,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
 
         private val SUPPORTED_DOMAINS = listOf(
             "youtube.com", "youtu.be", "youtube-nocookie.com", "m.youtube.com",
+            "music.youtube.com", // YouTube Music — must be listed explicitly before youtube.com
             "instagram.com", "www.instagram.com",
             "facebook.com", "fb.watch", "fb.com", "www.facebook.com", "m.facebook.com",
             "tiktok.com", "www.tiktok.com", "vm.tiktok.com",
@@ -75,7 +79,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         if (isInitialized) return
         try {
             YoutubeDL.getInstance().init(reactApplicationContext)
-            com.yausername.ffmpeg.FFmpeg.getInstance().init(reactApplicationContext)
+            FFmpeg.init(reactApplicationContext)
             isInitialized = true
             Log.d(TAG, "YtDlp initialized successfully")
             
@@ -153,6 +157,23 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         }
     }
     
+    private fun updateServiceState() {
+        try {
+            val intent = Intent(reactApplicationContext, DownloadForegroundService::class.java)
+            if (activeDownloads.isNotEmpty()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    reactApplicationContext.startForegroundService(intent)
+                } else {
+                    reactApplicationContext.startService(intent)
+                }
+            } else {
+                reactApplicationContext.stopService(intent)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to update service state: ${e.message}")
+        }
+    }
+
     private fun showDownloadNotification(title: String, filePath: String, platform: String) {
         try {
             val file = File(filePath)
@@ -421,15 +442,52 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     @ReactMethod
     fun saveCookiesToFile(cookiesText: String, platform: String, promise: Promise) {
         try {
-            val cacheDir = reactApplicationContext.cacheDir
-            if (!cacheDir.exists()) cacheDir.mkdirs()
-            
-            val cookiesFile = File(cacheDir, "cookies_1$platform.txt")
+            // Use filesDir (persistent internal storage) instead of cacheDir.
+            // cacheDir is cleared by Android at any time; filesDir survives until
+            // the user explicitly clears app data.
+            val filesDir = reactApplicationContext.filesDir
+            if (!filesDir.exists()) filesDir.mkdirs()
+
+            val cookiesFile = File(filesDir, "cookies_$platform.txt")
             cookiesFile.writeText(cookiesText)
-            
+
+            Log.d(TAG, "Cookies saved to persistent storage: ${cookiesFile.absolutePath}")
             promise.resolve(cookiesFile.absolutePath)
         } catch (e: Exception) {
             promise.reject("COOKIE_SAVE_ERROR", "Failed to save cookies file", e)
+        }
+    }
+
+    @ReactMethod
+    fun fileExists(path: String, promise: Promise) {
+        promise.resolve(File(path).exists())
+    }
+
+    /**
+     * Reads ALL cookies (including HttpOnly session cookies) for [url] directly
+     * from the Android WebView CookieManager.
+     *
+     * android.webkit.CookieManager.getCookie(url) returns a flat cookie string:
+     *   "name1=value1; name2=value2; ..."
+     * This includes HttpOnly cookies that JavaScript / @react-native-cookies/cookies
+     * cannot access, making it the most reliable extraction method on Android.
+     *
+     * Must be called on the main thread; we post to the main looper accordingly.
+     */
+    @ReactMethod
+    fun getWebViewCookies(url: String, promise: Promise) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            try {
+                val wvCm = android.webkit.CookieManager.getInstance()
+                // Flush in-memory cookies to the persistent store before reading
+                wvCm.flush()
+                val rawCookies = wvCm.getCookie(url) ?: ""
+                Log.d(TAG, "getWebViewCookies(${url.take(60)}) → ${rawCookies.length} chars")
+                promise.resolve(rawCookies)
+            } catch (e: Exception) {
+                Log.w(TAG, "getWebViewCookies failed for $url: ${e.message}")
+                promise.resolve("")
+            }
         }
     }
 
@@ -476,6 +534,59 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     promise.reject("SAVE_ERROR", e.message ?: "Failed to save thumbnail")
+                }
+            }
+        }
+    }
+
+    /**
+     * Downloads an image from [url] into the app's cache directory and returns
+     * the absolute path to the local file. Used to pre-fetch high-res album art
+     * (lh3.googleusercontent.com) so yt-dlp can embed it with --thumbnail.
+     *
+     * Saves to:  <cacheDir>/thumbnails/<md5(url)>.jpg
+     */
+    @ReactMethod
+    fun downloadThumbnailToCache(url: String, promise: Promise) {
+        scope.launch {
+            try {
+                val thumbDir = File(reactApplicationContext.cacheDir, "thumbnails")
+                if (!thumbDir.exists()) thumbDir.mkdirs()
+
+                // Stable filename derived from the URL so repeated calls are idempotent
+                val hash = java.security.MessageDigest.getInstance("MD5")
+                    .digest(url.toByteArray())
+                    .joinToString("") { "%02x".format(it) }
+                val thumbFile = File(thumbDir, "$hash.jpg")
+
+                // Re-use cached file if already downloaded
+                if (thumbFile.exists() && thumbFile.length() > 0) {
+                    Log.d(TAG, "downloadThumbnailToCache: cache hit ${thumbFile.absolutePath}")
+                    withContext(Dispatchers.Main) { promise.resolve(thumbFile.absolutePath) }
+                    return@launch
+                }
+
+                val connection = java.net.URL(url).openConnection().apply {
+                    setRequestProperty("User-Agent",
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                    connectTimeout = 15_000
+                    readTimeout    = 15_000
+                    connect()
+                }
+
+                BufferedInputStream(connection.getInputStream()).use { input ->
+                    FileOutputStream(thumbFile).use { output ->
+                        input.copyTo(output, bufferSize = 8192)
+                    }
+                }
+
+                Log.d(TAG, "downloadThumbnailToCache: saved ${thumbFile.length()} bytes → ${thumbFile.absolutePath}")
+                withContext(Dispatchers.Main) { promise.resolve(thumbFile.absolutePath) }
+            } catch (e: Exception) {
+                Log.w(TAG, "downloadThumbnailToCache failed: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    promise.reject("THUMB_DOWNLOAD_ERROR", e.message ?: "Failed to download thumbnail")
                 }
             }
         }
@@ -746,13 +857,18 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         
         val isCancelled = AtomicBoolean(false)
         activeDownloads[processId] = isCancelled
+        updateServiceState()
         
         scope.launch {
             try {
                 // Extract options for custom metadata and naming
-                val forcedTitle = if (options?.hasKey("title") == true) options.getString("title") else null
-                val forcedArtist = if (options?.hasKey("artist") == true) options.getString("artist") else null
-                val forcedPlatform = if (options?.hasKey("platform") == true) options.getString("platform") else null
+                val forcedTitle          = if (options?.hasKey("title")         == true) options.getString("title")         else null
+                val forcedArtist         = if (options?.hasKey("artist")        == true) options.getString("artist")        else null
+                val forcedPlatform       = if (options?.hasKey("platform")      == true) options.getString("platform")      else null
+                // Optional path to a pre-downloaded high-res album art file.
+                // When set, yt-dlp uses this file as the embedded thumbnail instead
+                // of fetching whatever thumbnail is linked in the video metadata.
+                val overrideThumbnailPath = if (options?.hasKey("thumbnailPath") == true) options.getString("thumbnailPath") else null
                 
                 // Determine platform (use forced if provided, e.g. for Spotify lossless)
                 val platform = forcedPlatform ?: getPlatformName(url)
@@ -775,21 +891,37 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 val outputTemplate = if (!forcedTitle.isNullOrEmpty()) {
                     val safeTitle = forcedTitle.replace(Regex("[^a-zA-Z0-9 \\-_]"), "_").take(80)
                     val safeArtist = forcedArtist?.replace(Regex("[^a-zA-Z0-9 \\-_]"), "_")?.take(40)
+                    
                     if (!safeArtist.isNullOrEmpty()) {
                         request.addOption("--metadata-from-title", "%(artist)s - %(title)s")
-                        "${cacheDir.absolutePath}/$safeArtist - $safeTitle.%(ext)s"
+                        val baseName = "$safeArtist - $safeTitle"
+                        
+                        // Seed the custom thumbnail so yt-dlp embeds it
+                        if (overrideThumbnailPath != null) {
+                            val targetThumb = File(cacheDir, "$baseName.jpg")
+                            try { File(overrideThumbnailPath).copyTo(targetThumb, overwrite = true) } catch (e: Exception) {}
+                        }
+                        
+                        "${cacheDir.absolutePath}/$baseName.%(ext)s"
                     } else {
                         request.addOption("--metadata-from-title", "%(title)s")
-                        "${cacheDir.absolutePath}/$safeTitle.%(ext)s"
+                        val baseName = safeTitle
+                        
+                        if (overrideThumbnailPath != null) {
+                            val targetThumb = File(cacheDir, "$baseName.jpg")
+                            try { File(overrideThumbnailPath).copyTo(targetThumb, overwrite = true) } catch (e: Exception) {}
+                        }
+                        
+                        "${cacheDir.absolutePath}/$baseName.%(ext)s"
                     }
                 } else {
                     // Standard yt-dlp template - using [id] to ensure uniqueness
+                    request.addOption("--restrict-filenames")
                     "${cacheDir.absolutePath}/%(title).100s [%(id)s].%(ext)s"
                 }
                 
                 request.addOption("-o", outputTemplate)
                 request.addOption("--no-playlist")
-                request.addOption("--restrict-filenames")
                 
                 request.addOption("--force-ipv4")
                 request.addOption("--no-check-certificate")
@@ -844,11 +976,19 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 if (isAudioDownload) {
                     // Embed thumbnail directly into MP3/M4A ID3 tags so music players show cover art
                     request.addOption("--embed-thumbnail")
-                    request.addOption("--convert-thumbnails", "jpg")
+                    if (overrideThumbnailPath != null) {
+                        // Crux of the fix: forcefully stop yt-dlp from downloading its own 16:9 thumbnail
+                        // so it's forced to use the 1:1 high-res art we just seeded manually.
+                        request.addOption("--no-write-thumbnail")
+                    } else {
+                        request.addOption("--convert-thumbnails", "jpg")
+                    }
                 } else {
                     // For video, write thumbnail as sidecar (embedding into video is slow)
-                    request.addOption("--write-thumbnail")
-                    request.addOption("--convert-thumbnails", "jpg")
+                    if (overrideThumbnailPath == null) {
+                        request.addOption("--write-thumbnail")
+                        request.addOption("--convert-thumbnails", "jpg")
+                    }
                 }
                 request.addOption("--no-post-overwrites")
                 
@@ -888,6 +1028,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 
                 cancelNotification(processId)
                 activeDownloads.remove(processId)
+                updateServiceState()
                 
                 if (isCancelled.get()) {
                     cacheDir.deleteRecursively()
@@ -897,28 +1038,80 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 
                 // Scan cache for output file
                 val downloadedFile = cacheDir.listFiles()
-                    ?.filter { it.isFile && it.lastModified() > System.currentTimeMillis() - 600000 && !it.name.endsWith(".jpg") && !it.name.endsWith(".webp") }
+                    ?.filter { it.isFile && it.lastModified() > System.currentTimeMillis() - 10 * 60 * 1000 && !it.name.endsWith(".jpg") && !it.name.endsWith(".webp") && !it.name.endsWith(".png") }
                     ?.maxByOrNull { it.lastModified() }
                     
                 if (downloadedFile != null && downloadedFile.exists()) {
+                    var finalProcessingFile = downloadedFile
+                    
+                    // --- High-Res Album Art Embedding (JAudioTagger) ---
+                    // For YouTube Music / Spotify downloads: embed the high-res 1:1 square
+                    // album art directly into the audio file's tags using JAudioTagger.
+                    // This is a pure-Java approach — no native binary or FFmpeg needed.
+                    if (overrideThumbnailPath != null && File(overrideThumbnailPath).exists()) {
+                        try {
+                            val ext = downloadedFile.extension.lowercase()
+                            if (ext == "mp3" || ext == "m4a" || ext == "flac") {
+                                Log.d(TAG, "Embedding high-res album art into $ext via JAudioTagger...")
+                                // JAudioTagger requires the file to not be read-only
+                                downloadedFile.setWritable(true)
+                                val audioFile = AudioFileIO.read(downloadedFile)
+                                val tag = audioFile.tagOrCreateAndSetDefault
+                                val artwork = ArtworkFactory.createArtworkFromFile(File(overrideThumbnailPath))
+                                // Clear any existing artwork first so we don't stack thumbnails
+                                tag.deleteArtworkField()
+                                tag.setField(artwork)
+                                audioFile.commit()
+                                Log.d(TAG, "High-res album art embedded successfully via JAudioTagger")
+                            }
+                        } catch (fe: Exception) {
+                            // Non-fatal: yt-dlp's own --embed-thumbnail already ran above,
+                            // so the file still has artwork — just not the high-res override.
+                            Log.w(TAG, "JAudioTagger artwork embedding failed (non-fatal): ${fe.message}")
+                        }
+                    }
                     val baseName = downloadedFile.nameWithoutExtension
                     val thumbFile = cacheDir.listFiles()?.find { 
                         it.nameWithoutExtension == baseName && (it.extension == "jpg" || it.extension == "webp" || it.extension == "png") 
                     }
 
+                    // Prepare the physical thumbnail file to preserve
+                    var finalThumbFile: File? = null
+                    val overrideThumb = if (!overrideThumbnailPath.isNullOrEmpty()) File(overrideThumbnailPath) else null
+
+                    if (overrideThumb != null && overrideThumb.exists()) {
+                        finalThumbFile = overrideThumb
+                    } else if (thumbFile != null && thumbFile.exists()) {
+                        finalThumbFile = thumbFile
+                    }
+
                     // Move to public storage with proper categorization
                     val contentType = getContentType(url, platform)
-                    val finalFile = moveToPublicStorage(downloadedFile, platform, contentType)
+                    val finalFile = moveToPublicStorage(finalProcessingFile, platform, contentType)
                     
-                    // Preserve thumbnail
-                    if (thumbFile != null && thumbFile.exists()) {
+                    // Preserve thumbnail to public Music folder (as per user request)
+                    // and also to internal app thumbnails cache
+                    if (finalThumbFile != null && finalThumbFile.exists() && finalFile != null) {
                         try {
+                            // 1. Save to internal app cache
                             val thumbDir = File(reactApplicationContext.getExternalFilesDir(null), "thumbnails")
                             if (!thumbDir.exists()) thumbDir.mkdirs()
-                            val finalName = finalFile?.nameWithoutExtension ?: baseName
+                            val finalName = finalFile.nameWithoutExtension
                             val targetThumb = File(thumbDir, "$finalName.jpg")
-                            thumbFile.copyTo(targetThumb, overwrite = true)
-                            thumbFile.delete()
+                            finalThumbFile.copyTo(targetThumb, overwrite = true)
+                            
+                            // Note: Removed public storage saving of thumbnail as per user request.
+                            // Thumbnail is now ONLY embedded inside the media file.
+                            
+                            // 2. Cleanup: If the override thumbnail was in our cache, delete it now
+                            if (overrideThumbnailPath != null && overrideThumbnailPath.contains(reactApplicationContext.cacheDir.absolutePath)) {
+                                try { File(overrideThumbnailPath).delete() } catch (e: Exception) {}
+                            }
+
+                            // Cleanup if we used the yt-dlp extracted one
+                            if (thumbFile != null && thumbFile.exists() && finalThumbFile.absolutePath == thumbFile.absolutePath) {
+                                thumbFile.delete()
+                            }
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to preserve thumbnail", e)
                         }
@@ -952,6 +1145,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 } catch (e2: Exception) {}
                 
                 activeDownloads.remove(processId)
+                updateServiceState()
                 withContext(Dispatchers.Main) {
                     promise.reject("DOWNLOAD_ERROR", "Download failed: ${e.message}", e)
                 }
@@ -974,6 +1168,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         
         val isCancelled = AtomicBoolean(false)
         activeDownloads[processId] = isCancelled
+        updateServiceState()
         
         scope.launch {
             try {
@@ -988,9 +1183,29 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 
                 val request = YoutubeDLRequest(ytSearchUrl)
                 val safeFileName = "$artist - $title".replace(Regex("[^a-zA-Z0-9 \\-_]"), "_").take(100)
+                
+                // Pre-download the Spotify thumbnail so yt-dlp embeds it directly
+                if (!thumbnail.isNullOrEmpty()) {
+                    try {
+                        val thumbFile = File(cacheDir, "$safeFileName.jpg")
+                        val thumbUrl = URL(thumbnail)
+                        BufferedInputStream(thumbUrl.openStream()).use { input ->
+                            FileOutputStream(thumbFile).use { output ->
+                                val data = ByteArray(1024)
+                                var count: Int
+                                while (input.read(data).also { count = it } != -1) {
+                                    output.write(data, 0, count)
+                                }
+                            }
+                        }
+                        Log.d(TAG, "Pre-downloaded Spotify thumbnail for embedding: ${thumbFile.absolutePath}")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to pre-download Spotify thumbnail: ${e.message}")
+                    }
+                }
+                
                 request.addOption("-o", "${cacheDir.absolutePath}/$safeFileName.%(ext)s")
                 request.addOption("--no-playlist")
-                request.addOption("--restrict-filenames")
                 
                 // Audio download settings
                 request.addOption("-x")
@@ -1000,7 +1215,12 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 // Metadata & Thumbnails - embed cover art from YouTube into the MP3 ID3 tags
                 request.addOption("--embed-metadata")
                 request.addOption("--embed-thumbnail")
-                request.addOption("--convert-thumbnails", "jpg")
+                if (!thumbnail.isNullOrEmpty()) {
+                    // Force yt-dlp to use our pre-downloaded Spotify thumbnail
+                    request.addOption("--no-write-thumbnail")
+                } else {
+                    request.addOption("--convert-thumbnails", "jpg")
+                }
                 
                 // Network options
                 request.addOption("--force-ipv4")
@@ -1032,6 +1252,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 
                 cancelNotification(processId)
                 activeDownloads.remove(processId)
+                updateServiceState()
                 
                 if (isCancelled.get()) {
                     cacheDir.listFiles()?.forEach { it.delete() }
@@ -1101,6 +1322,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 } catch (e2: Exception) {}
                 
                 activeDownloads.remove(processId)
+                updateServiceState()
                 withContext(Dispatchers.Main) {
                     promise.reject("DOWNLOAD_ERROR", e.message ?: "Failed to download from YouTube", e)
                 }
@@ -1207,6 +1429,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 Log.e(TAG, "Error destroying process", e)
             }
             activeDownloads.remove(processId)
+            updateServiceState()
             promise.resolve(true)
         } else {
             promise.resolve(false)

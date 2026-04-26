@@ -42,6 +42,8 @@ export const PlaylistSelectionModal: React.FC<PlaylistSelectionModalProps> = ({
         if (items.length > 0) {
             const allIds = new Set(items.map(i => i.id));
             setSelectedIds(allIds);
+        } else {
+            setSelectedIds(new Set());
         }
     }, [items]);
 
@@ -131,7 +133,9 @@ export const PlaylistSelectionModal: React.FC<PlaylistSelectionModalProps> = ({
                             {playlistImage && <Image source={{ uri: playlistImage }} style={styles.playlistThumb} />}
                             <View>
                                 <Text style={styles.playlistTitle} numberOfLines={1}>{playlistTitle}</Text>
-                                <Text style={styles.trackCount}>{items.length} Tracks</Text>
+                                <Text style={styles.trackCount}>
+                                    {items.length} {isStoryMode ? 'Stories' : 'Tracks'}
+                                </Text>
                             </View>
                         </View>
                         <TouchableOpacity onPress={onClose} style={styles.closeButton}>
@@ -182,7 +186,8 @@ export const PlaylistSelectionModal: React.FC<PlaylistSelectionModalProps> = ({
                                     <TouchableOpacity
                                         style={[
                                             styles.videoBatchBtn,
-                                            { backgroundColor: selectedIds.size > 0 ? platformColor : Colors.surfaceElevated }
+                                            { backgroundColor: selectedIds.size > 0 ? platformColor : Colors.surfaceElevated },
+                                            selectedIds.size === 0 && { opacity: 0.4 },
                                         ]}
                                         disabled={selectedIds.size === 0}
                                         onPress={() => handleDownload('best')}
@@ -385,6 +390,8 @@ const styles = StyleSheet.create({
     footer: {
         backgroundColor: Colors.surface,
         padding: Spacing.lg,
+        // Extra bottom padding so the button clears the Android navigation bar
+        paddingBottom: Spacing.xl,
         borderTopWidth: 1,
         borderTopColor: Colors.border,
         ...Shadows.lg,

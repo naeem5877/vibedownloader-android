@@ -26,6 +26,14 @@ allprojects {
         mavenCentral()
         maven { url 'https://jitpack.io' }
     }
+
+    // Workaround for legacy libraries that still call jcenter()
+    // Gradle 9.0 removed the jcenter() method from RepositoryHandler
+    repositories.all { repo ->
+        if (repo.hasProperty('url') && repo.url.toString().contains("jcenter")) {
+            repo.url = URI.create("https://repo1.maven.org/maven2/")
+        }
+    }
 }
 
 // Workaround for Gradle 9.0 task dependency issues with React Native libraries

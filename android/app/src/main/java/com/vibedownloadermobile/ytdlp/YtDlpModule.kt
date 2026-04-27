@@ -482,7 +482,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 // Flush in-memory cookies to the persistent store before reading
                 wvCm.flush()
                 val rawCookies = wvCm.getCookie(url) ?: ""
-                Log.d(TAG, "getWebViewCookies(${url.take(60)}) → ${rawCookies.length} chars")
+                Log.d(TAG, "getWebViewCookies($url) → $rawCookies")
                 promise.resolve(rawCookies)
             } catch (e: Exception) {
                 Log.w(TAG, "getWebViewCookies failed for $url: ${e.message}")
@@ -614,6 +614,10 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 // Use a standard Desktop User-Agent to bypass simple bot protections for TikTok, Instagram, etc.
                 // Note: Do not use --impersonate as it requires curl-cffi which isn't available on Android
                 request.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                
+                if (url.contains("instagram.com")) {
+                    request.addOption("--referer", "https://www.instagram.com/")
+                }
                 
                 if (options?.hasKey("cookies") == true) {
                     val cookiesPath = options.getString("cookies")
@@ -832,6 +836,10 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 // Longer timeout for stories (multiple entries to resolve)
                 request.addOption("--socket-timeout", if (isStoryUrl) "45" else "30")
                 request.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                
+                if (url.contains("instagram.com")) {
+                    request.addOption("--referer", "https://www.instagram.com/")
+                }
 
                 if (options?.hasKey("cookies") == true) {
                     val cookiesPath = options.getString("cookies")
@@ -923,10 +931,11 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 request.addOption("-o", outputTemplate)
                 request.addOption("--no-playlist")
                 
-                request.addOption("--force-ipv4")
-                request.addOption("--no-check-certificate")
-                request.addOption("--socket-timeout", "30")
                 request.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                
+                if (url.contains("instagram.com")) {
+                    request.addOption("--referer", "https://www.instagram.com/")
+                }
                 
                 // --- Format and Codec Selection ---
                 val isAudioDownload = formatId?.startsWith("audio") == true || formatId == "audio_best" || formatId == "audio_mp3" || formatId == "lossless_flac"

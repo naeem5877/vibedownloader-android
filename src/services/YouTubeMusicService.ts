@@ -181,6 +181,7 @@ export interface YTMusicAlbumArt {
 
 /**
  * Fetches the highest-quality album art for a YouTube Music URL.
+ * Uses Promise.any to run three different fetch methods in parallel for maximum speed.
  *
  * @param ytMusicUrl  Full music.youtube.com/watch?v=... URL
  * @returns  YTMusicAlbumArt on success, null if all methods fail
@@ -194,23 +195,26 @@ export async function getYouTubeMusicAlbumArt(
         return null;
     }
 
-    console.log(`[YTMusicService] Fetching album art for video ID: ${videoId}`);
+    console.log(`[YTMusicService] Fetching album art in parallel for video ID: ${videoId}`);
 
-    // ── Method 1: Internal YTMusic API (best quality, real album art) ──
-    let artUrl = await getAlbumArtFromApi(videoId);
+    try {
+        // Run all 3 methods in parallel. Promise.any resolves with the first one that succeeds (returns a non-null URL).
+        const artUrl = await Promise.any([
+            getAlbumArtFromApi(videoId),
+            getAlbumArtFromPage(videoId),
+            getAlbumArtFallback(videoId),
+        ].map(p => p.then(url => {
+            if (!url) throw new Error('Method returned no result');
+            return url;
+        })));
 
-    // ── Method 2: Page scrape ──
-    if (!artUrl) artUrl = await getAlbumArtFromPage(videoId);
+        // If it's not a ytimg URL, it's real high-res album art from lh3
+        const isRealAlbumArt = !artUrl.includes('ytimg.com');
 
-    const isRealAlbumArt = artUrl !== null;
+        return { url: artUrl, isRealAlbumArt, videoId };
 
-    // ── Method 3: ytimg fallback ──
-    if (!artUrl) artUrl = await getAlbumArtFallback(videoId);
-
-    if (!artUrl) {
+    } catch (e) {
         console.warn(`[YTMusicService] ❌ All 3 methods failed for ${videoId}`);
         return null;
     }
-
-    return { url: artUrl, isRealAlbumArt, videoId };
 }

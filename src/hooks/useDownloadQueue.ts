@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { YtDlpNative, ytDlpEventEmitter } from '../native/YtDlpModule';
+import { isYouTubeMusicUrl, getYouTubeMusicAlbumArt } from '../services/YouTubeMusicService';
 
 export type QueueItemStatus = 'waiting' | 'downloading' | 'done' | 'failed' | 'cancelled';
 
@@ -101,13 +102,30 @@ export const useDownloadQueue = (): UseDownloadQueueReturn => {
                             processId
                         );
                     } else {
+                        let thumbnailPath: string | undefined;
+                        
+                        // ── YouTube Music High-Res Art Integration ──
+                        if (isYouTubeMusicUrl(nextItem.url)) {
+                            try {
+                                console.log(`[useDownloadQueue] Fetching high-res art for: ${nextItem.title}`);
+                                const art = await getYouTubeMusicAlbumArt(nextItem.url);
+                                if (art?.url) {
+                                    thumbnailPath = await YtDlpNative.downloadThumbnailToCache(art.url);
+                                    console.log(`[useDownloadQueue] High-res art cached: ${thumbnailPath}`);
+                                }
+                            } catch (e) {
+                                console.warn('[useDownloadQueue] YT Music art fetch failed (ignoring):', e);
+                            }
+                        }
+
                         const options = {
                             title: nextItem.title,
                             artist: nextItem.author,
                             platform: nextItem.type,
-                            cookies: nextItem.cookies || undefined
+                            cookies: nextItem.cookies || undefined,
+                            thumbnailPath: thumbnailPath // Pass the local file path if we got one
                         };
-                        await YtDlpNative.download(nextItem.url, nextItem.formatId, processId, options);
+                        await YtDlpNative.download(nextItem.url, nextItem.formatId, processId, (options as any));
                     }
 
                     updateItem(nextItem.id, { status: 'done', progress: 100 });

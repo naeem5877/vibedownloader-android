@@ -18,7 +18,7 @@ const originalJsonParse = JSON.parse;
     return originalJsonParse.call(JSON, text, reviver);
 };
 
-const spotifyUrlInfo = require('spotify-url-info');
+// Removed spotify-url-info as it is problematic in React Native/Hermes
 
 /**
  * Custom fetch for React Native to bypass Spotify blocking
@@ -71,7 +71,7 @@ const customFetch = async (url: any, options?: RequestInit) => {
     }
 };
 
-const spotify = spotifyUrlInfo(customFetch);
+// Use native fetch instead of spotify-url-info
 
 export interface SpotifyArtist {
     id: string;
@@ -127,41 +127,49 @@ export function extractSpotifyId(url: string): { type: 'track' | 'album' | 'play
 }
 
 /**
- * Get track metadata from Spotify
+ * Get track metadata from Spotify using oEmbed (free, no auth, reliable on mobile)
  */
 export async function getTrackInfo(trackId: string): Promise<SpotifyTrack> {
-    const url = `https://open.spotify.com/track/${trackId}`;
+    const spotifyUrl = `https://open.spotify.com/track/${trackId}`;
+    
     try {
-        const result = await spotify.getDetails(url);
-        const p = result.preview;
-        // In getDetails for a track, tracks is usually an array of 1
-        const t = result.tracks && result.tracks.length > 0 ? result.tracks[0] : null;
+        const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
         
-        const artistName = (t && t.artist) ? t.artist : p.artist || "Unknown Artist";
-        const trackName = (t && t.name) ? t.name : p.title || "Unknown Track";
-        const duration = (t && t.duration) ? t.duration : 0;
+        const response = await fetch(oembedUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+            }
+        });
+        
+        if (!response.ok) throw new Error(`oEmbed failed: ${response.status}`);
+        
+        const data = await response.json();
         
         return {
             id: trackId,
-            name: trackName,
-            artists: [{ id: "", name: artistName, external_urls: { spotify: "" } }],
+            name: data.title || "Unknown Track",
+            artists: [{ 
+                id: "", 
+                name: data.author_name || "Unknown Artist", 
+                external_urls: { spotify: "" } 
+            }],
             album: {
                 id: "",
-                name: p.title || "Unknown Album",
-                images: [{ url: p.image || '', height: 640, width: 640 }],
-                release_date: p.date || "",
+                name: data.album_name || data.title || "Unknown Album",
+                images: [{ url: data.thumbnail_url || '', height: 640, width: 640 }],
+                release_date: "",
                 total_tracks: 1
             },
-            duration_ms: duration,
+            duration_ms: 0,
             explicit: false,
-            preview_url: (t && t.previewUrl) ? t.previewUrl : p.audio || null,
-            external_urls: { spotify: url },
+            preview_url: null,
+            external_urls: { spotify: spotifyUrl },
             track_number: 1,
         };
     } catch (e) {
-        console.warn('[SpotifyService] Primary fetch failed, trying OG fallback...', e);
+        console.warn('[SpotifyService] oEmbed fetch failed, trying OG fallback...', e);
         try {
-            return await fetchSpotifyOGFallback(url, 'track');
+            return await fetchSpotifyOGFallback(spotifyUrl, 'track');
         } catch (fallbackError) {
             throw new Error('Failed to fetch Spotify track: ' + String(e));
         }
@@ -258,110 +266,63 @@ async function fetchSpotifyOGFallback(url: string, type: 'track' | 'album' | 'pl
 }
 
 /**
- * Get full playlist data from Spotify
+ * Get full playlist data from Spotify using oEmbed and OG scraping
  */
 export async function getSpotifyPlaylist(playlistId: string): Promise<SpotifyPlaylist> {
-    const url = `https://open.spotify.com/playlist/${playlistId}`;
+    const spotifyUrl = `https://open.spotify.com/playlist/${playlistId}`;
     try {
-        const result = await spotify.getDetails(url);
-        const p = result.preview;
-        
-        const items = (result.tracks || []).map((t: any) => {
-            const trackIdExtracted = t.uri ? t.uri.split(':').pop() : "";
-            const trackUrl = `https://open.spotify.com/track/${trackIdExtracted}`;
-            
-            return {
-                track: {
-                    id: trackIdExtracted,
-                    name: t.name || p.title,
-                    artists: [{ id: "", name: t.artist || "Unknown", external_urls: { spotify: "" } }],
-                    album: {
-                        id: "",
-                        name: "Playlist / Compilation", // getDetails doesn't expose individual album names inside playlists
-                        images: [{ url: p.image || '', height: 640, width: 640 }],
-                        release_date: "",
-                        total_tracks: 1
-                    },
-                    duration_ms: t.duration || 0,
-                    explicit: false,
-                    preview_url: t.previewUrl || null,
-                    external_urls: { spotify: trackUrl },
-                    track_number: 1,
-                }
-            };
+        const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
+        const response = await fetch(oembedUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
         });
         
+        const oembedData = response.ok ? await response.json() : null;
+        const fallbackData = await fetchSpotifyOGFallback(spotifyUrl, 'playlist');
+
         return {
             id: playlistId,
-            name: p.title || "Spotify Playlist",
-            description: "",
-            images: [{ url: p.image || '' }],
-            owner: { display_name: p.artist || "Spotify" },
+            name: oembedData?.title || fallbackData.name || "Spotify Playlist",
+            description: fallbackData.description || "",
+            images: [{ url: oembedData?.thumbnail_url || fallbackData.images?.[0]?.url || '' }],
+            owner: { display_name: oembedData?.author_name || fallbackData.owner?.display_name || "Spotify" },
             tracks: {
-                total: items.length,
-                items: items,
+                total: fallbackData.tracks?.total || 0,
+                items: fallbackData.tracks?.items || [],
             }
         };
     } catch (e) {
-        console.warn('[SpotifyService] Primary playlist fetch failed, trying OG fallback...', e);
-        try {
-            return await fetchSpotifyOGFallback(url, 'playlist');
-        } catch (fallbackError) {
-            throw new Error('Failed to fetch playlist from Spotify (free tier): ' + String(e));
-        }
+        console.warn('[SpotifyService] Playlist fetch failed:', e);
+        throw new Error('Failed to fetch playlist from Spotify: ' + String(e));
     }
 }
 
 /**
  * Get full album data from Spotify
  */
-// The app expects SpotifyAlbum & { tracks: { items: SpotifyTrack[] } }
 export async function getSpotifyAlbum(albumId: string): Promise<any> {
-    const url = `https://open.spotify.com/album/${albumId}`;
+    const spotifyUrl = `https://open.spotify.com/album/${albumId}`;
     try {
-        const result = await spotify.getDetails(url);
-        const p = result.preview;
-        
-        const items = (result.tracks || []).map((t: any) => {
-            const trackIdExtracted = t.uri ? t.uri.split(':').pop() : "";
-            const trackUrl = `https://open.spotify.com/track/${trackIdExtracted}`;
-            
-            return {
-                id: trackIdExtracted,
-                name: t.name || p.title,
-                artists: [{ id: "", name: t.artist || "Unknown", external_urls: { spotify: "" } }],
-                album: {
-                    id: albumId,
-                    name: p.title || "Unknown Album",
-                    images: [{ url: p.image || '', height: 640, width: 640 }],
-                    release_date: p.date || "",
-                    total_tracks: result.tracks?.length || 1
-                },
-                duration_ms: t.duration || 0,
-                explicit: false,
-                preview_url: t.previewUrl || null,
-                external_urls: { spotify: trackUrl },
-                track_number: 1,
-            };
+        const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
+        const response = await fetch(oembedUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
         });
         
+        const oembedData = response.ok ? await response.json() : null;
+        const fallbackData = await fetchSpotifyOGFallback(spotifyUrl, 'album');
+
         return {
             id: albumId,
-            name: p.title || "Spotify Album",
-            images: [{ url: p.image || '', height: 640, width: 640 }],
-            release_date: p.date || "",
-            total_tracks: items.length,
+            name: oembedData?.title || fallbackData.name || "Spotify Album",
+            images: [{ url: oembedData?.thumbnail_url || fallbackData.images?.[0]?.url || '' }],
+            release_date: fallbackData.release_date || "",
+            total_tracks: fallbackData.total_tracks || 0,
             tracks: {
-                items: items
+                items: fallbackData.tracks?.items || []
             }
         };
     } catch (e) {
-        console.warn('[SpotifyService] Primary album fetch failed, trying OG fallback...', e);
-        try {
-            return await fetchSpotifyOGFallback(url, 'album');
-        } catch (fallbackError) {
-            throw new Error('Failed to fetch album from Spotify (free tier): ' + String(e));
-        }
+        console.warn('[SpotifyService] Album fetch failed:', e);
+        throw new Error('Failed to fetch album from Spotify: ' + String(e));
     }
 }
 

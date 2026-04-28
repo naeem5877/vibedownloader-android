@@ -62,15 +62,17 @@ class WebViewLoginModule(reactContext: ReactApplicationContext) : ReactContextBa
             val success = data.getBooleanExtra(WebViewLoginActivity.RESULT_SUCCESS, false)
             val platform = data.getStringExtra(WebViewLoginActivity.RESULT_PLATFORM) ?: ""
             val cookieCount = data.getIntExtra(WebViewLoginActivity.RESULT_COOKIE_COUNT, 0)
+            val cookiePath = data.getStringExtra("cookiePath") ?: "" // ✅ Get the path
             val error = data.getStringExtra(WebViewLoginActivity.RESULT_ERROR)
 
             if (success) {
-                Log.d(TAG, "Login successful for $platform, extracted $cookieCount cookies")
+                Log.d(TAG, "Login successful for $platform, extracted $cookieCount cookies, path: $cookiePath")
 
                 val result = WritableNativeMap().apply {
                     putBoolean("success", true)
                     putString("platform", platform)
                     putInt("cookieCount", cookieCount)
+                    putString("cookiePath", cookiePath) // ✅ Return path to React Native
                 }
                 promise.resolve(result)
 
@@ -79,6 +81,7 @@ class WebViewLoginModule(reactContext: ReactApplicationContext) : ReactContextBa
                     putString("platform", platform)
                     putBoolean("loggedIn", true)
                     putInt("cookieCount", cookieCount)
+                    putString("cookiePath", cookiePath) // ✅ Also in event
                 }
                 sendEvent("onLoginComplete", params)
             } else {

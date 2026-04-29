@@ -1103,7 +1103,8 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                     }
                     val baseName = downloadedFile.nameWithoutExtension
                     val thumbFile = cacheDir.listFiles()?.find { 
-                        it.nameWithoutExtension == baseName && (it.extension == "jpg" || it.extension == "webp" || it.extension == "png") 
+                        (it.nameWithoutExtension == baseName || it.nameWithoutExtension == "$baseName.thumbnail") && 
+                        (it.extension == "jpg" || it.extension == "webp" || it.extension == "png") 
                     }
 
                     // Prepare the physical thumbnail file to preserve
@@ -1124,9 +1125,12 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                     // and also to internal app thumbnails cache
                     if (finalThumbFile != null && finalThumbFile.exists() && finalFile != null) {
                         try {
-                            // 1. Save to internal app cache
-                            val thumbDir = File(reactApplicationContext.getExternalFilesDir(null), "thumbnails")
-                            if (!thumbDir.exists()) thumbDir.mkdirs()
+                            // 1. Save to internal app storage (hidden from gallery)
+                            val thumbDir = File(reactApplicationContext.filesDir, "thumbnails")
+                            if (!thumbDir.exists()) {
+                                thumbDir.mkdirs()
+                                try { File(thumbDir, ".nomedia").createNewFile() } catch (e: Exception) {}
+                            }
                             val finalName = finalFile.nameWithoutExtension
                             val targetThumb = File(thumbDir, "$finalName.jpg")
                             finalThumbFile.copyTo(targetThumb, overwrite = true)
@@ -1206,8 +1210,8 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 // Use YouTube search instead of direct Spotify URL
                 val ytSearchUrl = "ytsearch1:$searchQuery"
                 
-                // 1. Download to temp cache directory first
-                val cacheDir = File(reactApplicationContext.cacheDir, "temp_download")
+                // 1. Download to temp cache directory first (process-specific)
+                val cacheDir = File(reactApplicationContext.cacheDir, "temp_download_$processId")
                 if (!cacheDir.exists()) cacheDir.mkdirs()
                 
                 Log.d(TAG, "Starting Spotify download via YouTube search: $searchQuery")
@@ -1297,35 +1301,54 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                     ?.maxByOrNull { it.lastModified() }
                 
                 if (downloadedFile != null && downloadedFile.exists()) {
+                    // --- High-Res Album Art Embedding (JAudioTagger) ---
+                    // Spotify special: always embed the high-res Spotify art we pre-downloaded
+                    val preDownloadedThumb = File(cacheDir, "$safeFileName.jpg")
+                    if (preDownloadedThumb.exists()) {
+                        try {
+                            Log.d(TAG, "Embedding high-res Spotify album art via JAudioTagger...")
+                            downloadedFile.setWritable(true)
+                            val audioFile = AudioFileIO.read(downloadedFile)
+                            val tag = audioFile.tagOrCreateAndSetDefault
+                            val artwork = ArtworkFactory.createArtworkFromFile(preDownloadedThumb)
+                            tag.deleteArtworkField()
+                            tag.setField(artwork)
+                            audioFile.commit()
+                            Log.d(TAG, "Spotify album art embedded successfully")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "JAudioTagger embedding failed for Spotify: ${e.message}")
+                        }
+                    }
+
                     // 1. Move MP3 to public storage
                     val finalFile = moveToPublicStorage(downloadedFile, "Spotify", "Music")
                     
                     if (finalFile != null) {
-                         // 2. Download and Save Thumbnail (Sidecar)
+                         // 2. Save sidecar thumbnail (as per user request)
                          if (!thumbnail.isNullOrEmpty()) {
                             try {
-                                val thumbFile = File(finalFile.parentFile, "${finalFile.nameWithoutExtension}.jpg")
-                                val thumbUrl = URL(thumbnail)
-                                BufferedInputStream(thumbUrl.openStream()).use { input ->
-                                    FileOutputStream(thumbFile).use { output ->
-                                        val data = ByteArray(1024)
-                                        var count: Int
-                                        while (input.read(data).also { count = it } != -1) {
-                                            output.write(data, 0, count)
+                                val thumbDir = File(reactApplicationContext.filesDir, "thumbnails")
+                                if (!thumbDir.exists()) {
+                                    thumbDir.mkdirs()
+                                    try { File(thumbDir, ".nomedia").createNewFile() } catch (e: Exception) {}
+                                }
+                                val targetThumb = File(thumbDir, "${finalFile.nameWithoutExtension}.jpg")
+                                
+                                if (preDownloadedThumb.exists()) {
+                                    preDownloadedThumb.copyTo(targetThumb, overwrite = true)
+                                } else {
+                                    // Fallback download if somehow missing
+                                    val thumbUrl = URL(thumbnail)
+                                    BufferedInputStream(thumbUrl.openStream()).use { input ->
+                                        FileOutputStream(targetThumb).use { output ->
+                                            input.copyTo(output)
                                         }
                                     }
                                 }
                                 
-                                // Scan the thumbnail so gallery/music players see it
-                                android.media.MediaScannerConnection.scanFile(
-                                     reactApplicationContext, 
-                                     arrayOf(thumbFile.absolutePath), 
-                                     arrayOf("image/jpeg"), 
-                                     null
-                                )
-                                Log.d(TAG, "Saved sidecar thumbnail: ${thumbFile.absolutePath}")
+                                Log.d(TAG, "Saved thumbnail sidecar for Spotify: ${targetThumb.absolutePath}")
                             } catch (e: Exception) {
-                                Log.w(TAG, "Failed to save sidecar thumbnail: ${e.message}")
+                                Log.w(TAG, "Failed to save Spotify sidecar thumbnail: ${e.message}")
                             }
                          }
                     
@@ -1338,6 +1361,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                         }
                         
                         showDownloadNotification("$artist - $title", finalFile.absolutePath, "Spotify")
+                        cacheDir.deleteRecursively() // Cleanup cache
                         withContext(Dispatchers.Main) { promise.resolve(result) }
                     } else {
                         throw Exception("Failed to move file to public storage")
@@ -1348,7 +1372,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 
             } catch (e: Exception) {
                 try {
-                    val cacheDir = File(reactApplicationContext.cacheDir, "temp_download")
+                    val cacheDir = File(reactApplicationContext.cacheDir, "temp_download_$processId")
                     if (cacheDir.exists()) cacheDir.deleteRecursively()
                 } catch (e2: Exception) {}
                 
@@ -1361,20 +1385,19 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         }
     }
     
-    // ... [Inside listDownloadedFiles method] ...
-    
     @ReactMethod
     fun listDownloadedFiles(promise: Promise) {
         scope.launch {
             try {
-                val thumbDir = File(reactApplicationContext.getExternalFilesDir(null), "thumbnails")
+                val thumbDir = File(reactApplicationContext.filesDir, "thumbnails")
                 val filesArray = WritableNativeArray()
                 
                 // Scan all VibeDownloader directories (Movies, Music, Pictures)
                 val directories = listOf(
                     Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
                     Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                 )
                 
                 for (baseDir in directories) {
@@ -1399,8 +1422,10 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                             // Resolve thumbnail: prefer sidecar file, but for audio files also
                             // try the MediaStore album art URI (populated when --embed-thumbnail is used)
                             val thumbPath = File(thumbDir, "${file.nameWithoutExtension}.jpg")
+                            val sidecarThumb = File(file.parentFile, "${file.nameWithoutExtension}.jpg")
                             val thumbnail: String? = when {
                                 thumbPath.exists() -> "file://${thumbPath.absolutePath}"
+                                sidecarThumb.exists() -> "file://${sidecarThumb.absolutePath}"
                                 listOf("mp3", "m4a", "flac", "aac", "wav").contains(file.extension.lowercase()) -> {
                                     // Look up album art from MediaStore for embedded-thumbnail audio
                                     val resolver = reactApplicationContext.contentResolver

@@ -22,6 +22,7 @@ import {
     Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, BorderRadius, Spacing, Typography, PlatformThemes, getPlatformColor, Shadows } from '../theme';
 import {
     PlatformSelector,
@@ -33,7 +34,6 @@ import {
     UpdateModal,
     EmptyState,
 } from '../components';
-import { LoginWebViewModal } from '../components/LoginWebViewModal';
 import { CookieManagerService } from '../services/CookieManagerService';
 import { PlaylistSelectionModal } from '../components/PlaylistSelectionModal';
 import { SkeletonCard } from '../components/SkeletonCard';
@@ -42,6 +42,7 @@ import { LosslessCard } from '../components/LosslessCard';
 // BatchDownloadProgress removed in favor of useDownloadQueue
 import { useYtDlp } from '../hooks/useYtDlp';
 import { VideoFormat, ytDlpEventEmitter, YtDlpNative } from '../native/YtDlpModule';
+import { WebViewLoginNative } from '../native/WebViewLoginModule';
 import { DownloadIcon, SparkleIcon, ShareIcon, GitHubIcon, DesktopIcon, StarIcon, WaveformIcon, LibraryIcon, CloseIcon } from '../components/Icons';
 import { useDownloadQueue } from '../hooks/useDownloadQueue';
 import { DownloadQueuePanel } from '../components/DownloadQueuePanel';
@@ -784,6 +785,40 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
         }
     }, [state.videoInfo, actions, detectedPlatform, ytMusicAlbumArtUrl]);
 
+    const handleOpenLogin = useCallback(async () => {
+        if (!detectedPlatform) return;
+        
+        const platform = (detectedPlatform.toLowerCase() === 'x' ? 'twitter' : detectedPlatform.toLowerCase());
+        
+        try {
+            const result = await WebViewLoginNative.openLogin(platform);
+            
+            if (result.success && result.cookiePath) {
+                // ✅ Store path so getCookiesForPlatform() can find it
+                await AsyncStorage.setItem(`cookies_path_${platform}`, result.cookiePath);
+                await AsyncStorage.setItem(
+                    `cookies_expiry_${platform}`,
+                    (Date.now() + 7 * 24 * 60 * 60 * 1000).toString()
+                );
+                
+                ToastAndroid.show(`✅ ${detectedPlatform} login successful!`, ToastAndroid.SHORT);
+                
+                // Refresh login states
+                const platforms = ['instagram', 'facebook', 'youtube', 'tiktok', 'twitter', 'x', 'twitch'];
+                const states: Record<string, boolean> = {};
+                for (const p of platforms) {
+                    const cookie = await CookieManagerService.getCookiesForPlatform(p === 'x' ? 'twitter' : p);
+                    states[p] = !!cookie;
+                }
+                setLoggedInPlatforms(states);
+            }
+        } catch (error: any) {
+            if (error.code !== 'LOGIN_CANCELLED') {
+                Alert.alert('Login Error', error.message || 'Failed to complete login');
+            }
+        }
+    }, [detectedPlatform]);
+
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: currentTheme.background }]} edges={['top']}>
             <OfflineBanner onActionPress={onNavigateToLibrary} />
@@ -919,7 +954,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                                     { borderColor: loggedInPlatforms[detectedPlatform.toLowerCase()] ? 'rgba(76, 175, 80, 0.3)' : 'rgba(255, 255, 255, 0.1)' }
                                 ]}
                                 activeOpacity={0.8}
-                                onPress={() => setLoginModalVisible(true)}
+                                onPress={handleOpenLogin}
                             >
                                 <View style={styles.loginBannerContent}>
                                     <View style={[
@@ -1108,16 +1143,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 )}
 
                 {/* Login Webview Modal */}
-                {detectedPlatform && ['instagram', 'facebook', 'youtube', 'tiktok', 'twitter', 'x', 'twitch'].includes(detectedPlatform.toLowerCase()) && (
-                    <LoginWebViewModal
-                        visible={loginModalVisible}
-                        platform={(detectedPlatform.toLowerCase() === 'x' ? 'twitter' : detectedPlatform.toLowerCase()) as any}
-                        onClose={() => setLoginModalVisible(false)}
-                        onSuccess={() => {
-                            ToastAndroid.show(`Successfully authenticated with ${detectedPlatform}!`, ToastAndroid.SHORT);
-                        }}
-                    />
-                )}
 
                 <View style={{ height: 100 }} />
             </ScrollView>

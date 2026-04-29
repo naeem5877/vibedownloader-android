@@ -44,11 +44,55 @@ export interface SpotifyPlaylist {
     };
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── Constants ─────────────────────────────────────────────────────────────────
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+const USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+    'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+];
+const UA = USER_AGENTS[0];
 
-// ─── extractSpotifyId ─────────────────────────────────────────────────────────
+// ─── Utilities ─────────────────────────────────────────────────────────────────
+
+function decodeHTMLEntities(str: string): string {
+    return str
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&#x27;/g, "'");
+}
+
+function getOGMeta(html: string, prop: string): string | null {
+    const m =
+        html.match(new RegExp(`<meta property="${prop}" content="([^"]*)"`, 'i')) ||
+        html.match(new RegExp(`<meta content="([^"]*)" property="${prop}"`, 'i'));
+    return m ? decodeHTMLEntities(m[1]) : null;
+}
+
+async function fetchSpotifyHtml(url: string): Promise<string> {
+    let lastError: any = null;
+    for (const ua of USER_AGENTS) {
+        try {
+            const res = await fetch(url, {
+                headers: {
+                    'User-Agent': ua,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                },
+            });
+            if (res.ok) return await res.text();
+            lastError = new Error(`HTTP ${res.status}`);
+        } catch (e) {
+            lastError = e;
+        }
+    }
+    throw lastError ?? new Error('All UA attempts failed');
+}
+
+// ─── extractSpotifyId ──────────────────────────────────────────────────────────
 
 export function extractSpotifyId(url: string): { type: 'track' | 'album' | 'playlist'; id: string } | null {
     const match = url.match(/spotify\.com\/(?:[a-z]{2}-[a-z]{2}\/|intl-[a-z]{2}\/)?(track|album|playlist)\/([a-zA-Z0-9]+)/);
@@ -58,9 +102,9 @@ export function extractSpotifyId(url: string): { type: 'track' | 'album' | 'play
     return null;
 }
 
-// ─── Method 1: oEmbed ────────────────────────────────────────────────────────
+// ─── Method 1: oEmbed ─────────────────────────────────────────────────────────
 // NOTE: Spotify removed author_name from oEmbed in 2024/2025.
-// oEmbed now only reliably gives: title + thumbnail_url.
+// oEmbed is now only used for title + thumbnail_url.
 
 async function tryOEmbed(spotifyUrl: string): Promise<{ title: string; thumbnail: string } | null> {
     const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
@@ -78,15 +122,15 @@ async function tryOEmbed(spotifyUrl: string): Promise<{ title: string; thumbnail
     }
 }
 
-// ─── Method 2: Embed page __NEXT_DATA__ ──────────────────────────────────────
-// Confirmed working 2025. Entity shape from live API:
-//   entity.name          → track title
-//   entity.artists[]     → [{ name, uri }]  (FLAT array, no .profile.name)
+// ─── Method 2: Embed page __NEXT_DATA__ ───────────────────────────────────────
+// Confirmed working 2025. Live API entity shape:
+//   entity.name                   → track title (string)
+//   entity.artists[]              → [{ name, uri }]  ← flat array, NOT .profile.name
 //   entity.visualIdentity.image[] → [{ url, maxWidth, maxHeight }]
-//   entity.duration      → milliseconds (direct number)
-//   entity.isExplicit    → boolean
-//   entity.audioPreview.url → preview mp3
-//   entity.releaseDate.isoString → "2022-10-21T00:00:00Z"
+//   entity.duration               → ms (direct number)
+//   entity.isExplicit             → boolean
+//   entity.audioPreview.url       → preview mp3 URL
+//   entity.releaseDate.isoString  → "2022-10-21T00:00:00Z"
 
 async function tryEmbedPage(trackId: string, oembedThumbnail?: string): Promise<SpotifyTrack | null> {
     const embedUrl = `https://open.spotify.com/embed/track/${trackId}`;
@@ -105,7 +149,7 @@ async function tryEmbedPage(trackId: string, oembedThumbnail?: string): Promise<
         const html = await res.text();
         console.log('[Spotify:Embed] HTML length:', html.length);
 
-        // Use indexOf (avoids regex multiline issues in Hermes JS engine)
+        // Use indexOf — avoids regex multiline issues in the Hermes JS engine
         const TAG = '__NEXT_DATA__';
         const tagIdx = html.indexOf(TAG);
         if (tagIdx === -1) {
@@ -128,7 +172,7 @@ async function tryEmbedPage(trackId: string, oembedThumbnail?: string): Promise<
             pageProps?.data?.track?.track;
 
         if (!entity || entity.type !== 'track') {
-            console.warn('[Spotify:Embed] Entity not found or wrong type (type=' + entity?.type + ')');
+            console.warn('[Spotify:Embed] Entity not found or wrong type:', entity?.type);
             console.warn('[Spotify:Embed] state.data keys:', Object.keys(pageProps?.state?.data || {}));
             console.warn('[Spotify:Embed] pageProps (800 chars):', JSON.stringify(pageProps).slice(0, 800));
             return null;
@@ -136,7 +180,7 @@ async function tryEmbedPage(trackId: string, oembedThumbnail?: string): Promise<
 
         console.log('[Spotify:Embed] Entity OK → name:', entity.name);
 
-        // Artists: confirmed flat array { name, uri }
+        // Artists: confirmed FLAT array { name, uri } — no .profile.name
         const rawArtists: any[] = entity.artists || [];
         const artists: SpotifyArtist[] = rawArtists.map((a: any) => ({
             id: a.uri?.split(':').pop() || '',
@@ -150,12 +194,11 @@ async function tryEmbedPage(trackId: string, oembedThumbnail?: string): Promise<
         let images = rawImages
             .sort((a: any, b: any) => (b.maxWidth || 0) - (a.maxWidth || 0))
             .map((img: any) => ({ url: img.url || '', height: img.maxHeight || 640, width: img.maxWidth || 640 }));
-        console.log('[Spotify:Embed] Images count:', images.length);
+        console.log('[Spotify:Embed] Images:', images.length);
 
-        // Fall back to oEmbed thumbnail if none found
+        // Fall back to oEmbed thumbnail if embed returned none
         if (images.length === 0 && oembedThumbnail) {
             images = [{ url: oembedThumbnail, height: 640, width: 640 }];
-            console.log('[Spotify:Embed] Using oEmbed thumbnail as fallback');
         }
 
         const spotifyUrl = `https://open.spotify.com/track/${trackId}`;
@@ -165,8 +208,7 @@ async function tryEmbedPage(trackId: string, oembedThumbnail?: string): Promise<
             artists: artists.length > 0 ? artists : [{ id: '', name: 'Unknown Artist', external_urls: { spotify: '' } }],
             album: {
                 id: '',
-                // Album data is not included in the embed entity — using track name as placeholder
-                name: entity.name || 'Unknown Album',
+                name: entity.name || 'Unknown Album', // album not included in embed entity
                 images,
                 release_date: entity.releaseDate?.isoString?.split('T')[0] || '',
                 total_tracks: 1,
@@ -183,15 +225,17 @@ async function tryEmbedPage(trackId: string, oembedThumbnail?: string): Promise<
     }
 }
 
-// ─── Method 3: OG tag scraping ───────────────────────────────────────────────
+// ─── Method 3: OG tag scraping ────────────────────────────────────────────────
 
 async function tryOGFallback(url: string, type: 'track' | 'album' | 'playlist'): Promise<any> {
     console.log('[Spotify:OG] →', url);
     let html = '';
-    for (const ua of [UA, 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)']) {
+    for (const ua of USER_AGENTS) {
         try {
-            const res = await fetch(url, { headers: { 'User-Agent': ua, 'Accept': 'text/html,*/*;q=0.8', 'Accept-Language': 'en-US,en;q=0.9' } });
-            console.log('[Spotify:OG] Status:', res.status, '(UA:', ua.slice(0, 30) + ')');
+            const res = await fetch(url, {
+                headers: { 'User-Agent': ua, 'Accept': 'text/html,*/*;q=0.8', 'Accept-Language': 'en-US,en;q=0.9' },
+            });
+            console.log('[Spotify:OG] Status:', res.status);
             if (res.ok) { html = await res.text(); break; }
         } catch (e: any) {
             console.warn('[Spotify:OG] Fetch error:', e?.message);
@@ -199,15 +243,9 @@ async function tryOGFallback(url: string, type: 'track' | 'album' | 'playlist'):
     }
     if (!html) throw new Error('OG fallback: all requests failed');
 
-    const getMeta = (prop: string) => {
-        const m = html.match(new RegExp(`<meta property="${prop}" content="(.*?)"`, 'i')) ||
-                  html.match(new RegExp(`<meta content="(.*?)" property="${prop}"`, 'i'));
-        return m ? m[1] : null;
-    };
-
-    const title = getMeta('og:title') || 'Unknown Title';
-    const image = getMeta('og:image') || '';
-    const desc = getMeta('og:description') || '';
+    const title = getOGMeta(html, 'og:title') || 'Unknown Title';
+    const image = getOGMeta(html, 'og:image') || '';
+    const desc = getOGMeta(html, 'og:description') || '';
     console.log('[Spotify:OG] og:title:', title, '| og:description:', desc);
 
     let artist = 'Unknown Artist';
@@ -234,21 +272,21 @@ async function tryOGFallback(url: string, type: 'track' | 'album' | 'playlist'):
     };
 }
 
-// ─── getTrackInfo (public) ────────────────────────────────────────────────────
+// ─── getTrackInfo ─────────────────────────────────────────────────────────────
 
 /**
  * Get Spotify track metadata.
- * Chain: oEmbed (title+thumbnail) → Embed __NEXT_DATA__ (full data) → OG fallback
+ * Chain: oEmbed (title+thumbnail) → Embed page __NEXT_DATA__ → OG tag fallback
  */
 export async function getTrackInfo(trackId: string): Promise<SpotifyTrack> {
     const spotifyUrl = `https://open.spotify.com/track/${trackId}`;
     console.log('[Spotify] ─── getTrackInfo ───', trackId);
 
-    // 1. oEmbed — just for title + thumbnail (author_name no longer returned by Spotify)
+    // 1. oEmbed — title + thumbnail only (author_name removed by Spotify)
     const oembed = await tryOEmbed(spotifyUrl);
     console.log('[Spotify] oEmbed:', oembed ? `"${oembed.title}"` : 'null');
 
-    // 2. Embed page — primary source of artist + full data
+    // 2. Embed page — primary source with full artist/image data
     const embedResult = await tryEmbedPage(trackId, oembed?.thumbnail);
     if (embedResult) {
         console.log('[Spotify] ✅ Embed page OK → artists:', embedResult.artists.map(a => a.name).join(', '));
@@ -267,18 +305,51 @@ export async function getTrackInfo(trackId: string): Promise<SpotifyTrack> {
     }
 }
 
-// ─── getSpotifyPlaylist (public) ──────────────────────────────────────────────
+// ─── getSpotifyPlaylist ───────────────────────────────────────────────────────
 
 export async function getSpotifyPlaylist(playlistId: string): Promise<SpotifyPlaylist> {
     const spotifyUrl = `https://open.spotify.com/playlist/${playlistId}`;
     console.log('[Spotify] ─── getSpotifyPlaylist ───', playlistId);
     try {
+        // Try __NEXT_DATA__ from the main playlist page
+        try {
+            const html = await fetchSpotifyHtml(spotifyUrl);
+            const tagIdx = html.indexOf('__NEXT_DATA__');
+            if (tagIdx !== -1) {
+                const jsonStart = html.indexOf('>', tagIdx) + 1;
+                const jsonEnd = html.indexOf('</script>', jsonStart);
+                const nextData = JSON.parse(html.slice(jsonStart, jsonEnd));
+                const pp = nextData?.props?.pageProps;
+                const playlist = pp?.state?.data?.entity || pp?.playlist || pp?.data?.playlist;
+                if (playlist?.name) {
+                    console.log('[Spotify:Playlist] Found via __NEXT_DATA__, name:', playlist.name);
+                    const images = (playlist.images?.items || playlist.images || []).map((img: any) => ({
+                        url: img?.sources?.[0]?.url || img?.url || '',
+                    }));
+                    return {
+                        id: playlistId,
+                        name: playlist.name,
+                        description: playlist.description || '',
+                        images,
+                        owner: { display_name: playlist.ownerV2?.data?.name || playlist.owner?.display_name || 'Spotify' },
+                        tracks: {
+                            total: playlist.tracks?.totalCount || playlist.tracks?.total || 0,
+                            items: (playlist.tracks?.items || []).map((item: any) => ({
+                                track: item.itemV2?.data || item.track,
+                            })),
+                        },
+                    };
+                }
+            }
+        } catch (e) {
+            console.warn('[Spotify:Playlist] __NEXT_DATA__ parse failed:', e);
+        }
+
+        // Fallback: oEmbed + OG
         const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
         const res = await fetch(oembedUrl, { headers: { 'User-Agent': UA } });
         console.log('[Spotify:Playlist:oEmbed] Status:', res.status);
         const oembedData = res.ok ? await res.json() : null;
-        console.log('[Spotify:Playlist:oEmbed] title:', oembedData?.title);
-
         const fallback = await tryOGFallback(spotifyUrl, 'playlist');
         return {
             id: playlistId,
@@ -294,12 +365,63 @@ export async function getSpotifyPlaylist(playlistId: string): Promise<SpotifyPla
     }
 }
 
-// ─── getSpotifyAlbum (public) ─────────────────────────────────────────────────
+// ─── getSpotifyAlbum ──────────────────────────────────────────────────────────
 
 export async function getSpotifyAlbum(albumId: string): Promise<any> {
     const spotifyUrl = `https://open.spotify.com/album/${albumId}`;
     console.log('[Spotify] ─── getSpotifyAlbum ───', albumId);
     try {
+        // Try __NEXT_DATA__ from the main album page
+        try {
+            const html = await fetchSpotifyHtml(spotifyUrl);
+            const tagIdx = html.indexOf('__NEXT_DATA__');
+            if (tagIdx !== -1) {
+                const jsonStart = html.indexOf('>', tagIdx) + 1;
+                const jsonEnd = html.indexOf('</script>', jsonStart);
+                const nextData = JSON.parse(html.slice(jsonStart, jsonEnd));
+                const pp = nextData?.props?.pageProps;
+                const album = pp?.state?.data?.entity || pp?.album || pp?.data?.album;
+                if (album?.name) {
+                    console.log('[Spotify:Album] Found via __NEXT_DATA__, name:', album.name);
+                    const images = (album.coverArt?.sources || album.images || []).map((img: any) => ({
+                        url: img.url || '', height: img.height || 640, width: img.width || 640,
+                    }));
+                    const tracks: SpotifyTrack[] = (album.tracks?.items || []).map((item: any) => {
+                        const t = item.track || item;
+                        const artists: SpotifyArtist[] = (t.artists?.items || t.artists || []).map((a: any) => ({
+                            id: a.id || a.uri?.split(':').pop() || '',
+                            name: a.profile?.name || a.name || 'Unknown Artist',
+                            external_urls: { spotify: '' },
+                        }));
+                        return {
+                            id: t.id || t.uri?.split(':').pop() || '',
+                            name: t.name || 'Unknown Track',
+                            artists,
+                            album: {
+                                id: albumId, name: album.name, images,
+                                release_date: album.date?.isoString?.split('T')[0] || '',
+                                total_tracks: album.tracks?.totalCount || 0,
+                            },
+                            duration_ms: t.duration?.totalMilliseconds || 0,
+                            explicit: t.contentRating?.label === 'EXPLICIT' || false,
+                            preview_url: null,
+                            external_urls: { spotify: `https://open.spotify.com/track/${t.id || ''}` },
+                            track_number: t.trackNumber || 0,
+                        };
+                    });
+                    return {
+                        id: albumId, name: album.name, images,
+                        release_date: album.date?.isoString?.split('T')[0] || '',
+                        total_tracks: album.tracks?.totalCount || tracks.length,
+                        tracks: { items: tracks },
+                    };
+                }
+            }
+        } catch (e) {
+            console.warn('[Spotify:Album] __NEXT_DATA__ parse failed:', e);
+        }
+
+        // Fallback: oEmbed
         const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
         const res = await fetch(oembedUrl, { headers: { 'User-Agent': UA } });
         const oembedData = res.ok ? await res.json() : null;

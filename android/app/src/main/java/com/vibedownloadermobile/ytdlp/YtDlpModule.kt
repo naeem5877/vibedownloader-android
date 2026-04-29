@@ -625,6 +625,8 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 }
                 
                 if (platform == "YouTube") {
+                    // tv_embedded bypasses age-restricted content on ALL Android versions without cookies
+                    request.addOption("--extractor-args", "youtube:player_client=tv_embedded,web")
                     request.addOption("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best")
                 }
                 request.addOption("--no-playlist")
@@ -957,6 +959,10 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                         }
                         else -> {
                             // Video format - ensure MP4 container
+                            if (url.contains("youtube.com") || url.contains("youtu.be")) {
+                                // Age-restriction bypass for explicit format selections
+                                request.addOption("--extractor-args", "youtube:player_client=tv_embedded,web")
+                            }
                             request.addOption("-f", "${formatId}+bestaudio/best")
                             request.addOption("--merge-output-format", "mp4")
                         }
@@ -965,6 +971,8 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                     // Smart defaults based on platform
                     when (platform) {
                         "YouTube" -> {
+                            // tv_embedded bypasses age gates on all Android versions without login
+                            request.addOption("--extractor-args", "youtube:player_client=tv_embedded,web")
                             request.addOption("-f", "bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best")
                             request.addOption("--merge-output-format", "mp4")
                         }
@@ -1045,10 +1053,24 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                     return@launch
                 }
                 
-                // Scan cache for output file
-                val downloadedFile = cacheDir.listFiles()
-                    ?.filter { it.isFile && it.lastModified() > System.currentTimeMillis() - 10 * 60 * 1000 && !it.name.endsWith(".jpg") && !it.name.endsWith(".webp") && !it.name.endsWith(".png") }
-                    ?.maxByOrNull { it.lastModified() }
+                // Scan cache for output file.
+                // Instagram/Facebook stories can be image-only (jpg/webp) — handle both cases:
+                //   1. First look for a proper video/audio file
+                //   2. If none found (image story), fall back to the image file
+                val recentCutoff = System.currentTimeMillis() - 10 * 60 * 1000
+                val allRecentFiles = cacheDir.listFiles()
+                    ?.filter { it.isFile && it.lastModified() > recentCutoff }
+                    ?: emptyList()
+
+                val mediaFile = allRecentFiles
+                    .filter { !it.name.endsWith(".jpg") && !it.name.endsWith(".webp") && !it.name.endsWith(".png") }
+                    .maxByOrNull { it.lastModified() }
+
+                // Fall back to image if no video/audio was produced (e.g. image story)
+                val downloadedFile = mediaFile
+                    ?: allRecentFiles
+                        .filter { it.name.endsWith(".jpg") || it.name.endsWith(".webp") || it.name.endsWith(".png") }
+                        .maxByOrNull { it.lastModified() }
                     
                 if (downloadedFile != null && downloadedFile.exists()) {
                     var finalProcessingFile = downloadedFile

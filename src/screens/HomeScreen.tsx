@@ -33,6 +33,7 @@ import {
     OfflineBanner,
     UpdateModal,
     EmptyState,
+    SettingsModal,
 } from '../components';
 import { CookieManagerService } from '../services/CookieManagerService';
 import { PlaylistSelectionModal } from '../components/PlaylistSelectionModal';
@@ -43,7 +44,7 @@ import { LosslessCard } from '../components/LosslessCard';
 import { useYtDlp } from '../hooks/useYtDlp';
 import { VideoFormat, ytDlpEventEmitter, YtDlpNative } from '../native/YtDlpModule';
 import { WebViewLoginNative } from '../native/WebViewLoginModule';
-import { DownloadIcon, SparkleIcon, ShareIcon, GitHubIcon, DesktopIcon, StarIcon, WaveformIcon, LibraryIcon, CloseIcon } from '../components/Icons';
+import { DownloadIcon, SparkleIcon, WaveformIcon, LibraryIcon, CloseIcon, SettingsIcon } from '../components/Icons';
 import { useDownloadQueue } from '../hooks/useDownloadQueue';
 import { DownloadQueuePanel } from '../components/DownloadQueuePanel';
 import { checkForUpdates, UpdateInfo } from '../services/GitHubUpdateService';
@@ -94,6 +95,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
     // Update Modal State
     const [updateModalVisible, setUpdateModalVisible] = useState(false);
     const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+
+    // Settings Modal State
+    const [settingsVisible, setSettingsVisible] = useState(false);
 
     // Lossless State
     const [losslessAvailability, setLosslessAvailability] = useState<LosslessAvailability | null>(null);
@@ -846,22 +850,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                         <View style={styles.headerActions}>
                             <DiscordButton compact />
                             <TouchableOpacity
-                                onPress={() => Share.share({ message: 'Check out VibeDownloader - The ultimate media downloader for Android! https://github.com/naeem5877/vibedownloader-android' })}
+                                onPress={() => setSettingsVisible(true)}
                                 style={styles.headerBtn}
                             >
-                                <ShareIcon size={18} color={Colors.textSecondary} />
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                onPress={() => Linking.openURL('https://github.com/naeem5877/vibedownloader-android')}
-                                style={styles.headerBtn}
-                            >
-                                <StarIcon size={18} color="#FFD700" />
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                onPress={() => Linking.openURL('https://github.com/naeem5877/VibeDownloader')}
-                                style={styles.headerBtn}
-                            >
-                                <DesktopIcon size={18} color={Colors.textSecondary} />
+                                <SettingsIcon size={18} color={Colors.textSecondary} />
                             </TouchableOpacity>
 
                             {queue.length > 0 && (
@@ -1087,11 +1079,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                             >
                                 <DownloadIcon size={20} color="#FFF" />
                                 <Text style={styles.quickDownloadText}>
-                                    Download {(
-                                        detectedPlatform === 'spotify' ||
-                                        detectedPlatform === 'soundcloud' ||
-                                        isYouTubeMusicUrl(state.videoInfo?.url ?? '')
-                                    ) ? 'Audio (MP3)' : 'Best Quality'}
+                                    Quick Download
                                 </Text>
                             </TouchableOpacity>
                         </View>
@@ -1141,6 +1129,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                         features={updateInfo.features}
                     />
                 )}
+
+                {/* Settings Modal */}
+                <SettingsModal
+                    visible={settingsVisible}
+                    onClose={() => setSettingsVisible(false)}
+                    appVersion={require('../../package.json').version}
+                />
 
                 {/* Login Webview Modal */}
 

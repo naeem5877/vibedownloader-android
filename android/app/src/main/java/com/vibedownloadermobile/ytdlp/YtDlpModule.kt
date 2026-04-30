@@ -349,6 +349,28 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     }
 
     @ReactMethod
+    fun getVersions(promise: Promise) {
+        scope.launch {
+            try {
+                val appVersion = reactApplicationContext.packageManager.getPackageInfo(reactApplicationContext.packageName, 0).versionName ?: "Unknown"
+                val ytDlpVersion = YoutubeDL.getInstance().version(reactApplicationContext) ?: "Unknown"
+                
+                val result = WritableNativeMap().apply {
+                    putString("appVersion", appVersion)
+                    putString("ytdlpVersion", ytDlpVersion)
+                }
+                withContext(Dispatchers.Main) {
+                    promise.resolve(result)
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    promise.reject("VERSIONS_ERROR", e.message ?: "Failed to get versions")
+                }
+            }
+        }
+    }
+
+    @ReactMethod
     fun getSharedText(promise: Promise) {
         try {
             // First check MainActivity pending data
@@ -442,19 +464,33 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     @ReactMethod
     fun saveCookiesToFile(cookiesText: String, platform: String, promise: Promise) {
         try {
-            // Use filesDir (persistent internal storage) instead of cacheDir.
-            // cacheDir is cleared by Android at any time; filesDir survives until
-            // the user explicitly clears app data.
             val filesDir = reactApplicationContext.filesDir
             if (!filesDir.exists()) filesDir.mkdirs()
 
             val cookiesFile = File(filesDir, "cookies_$platform.txt")
+            if (cookiesFile.exists()) {
+                cookiesFile.delete() // Create fresh file to avoid permission/sandbox staleness after update
+            }
             cookiesFile.writeText(cookiesText)
 
             Log.d(TAG, "Cookies saved to persistent storage: ${cookiesFile.absolutePath}")
             promise.resolve(cookiesFile.absolutePath)
         } catch (e: Exception) {
             promise.reject("COOKIE_SAVE_ERROR", "Failed to save cookies file", e)
+        }
+    }
+
+    @ReactMethod
+    fun getCookiesFilePath(platform: String, promise: Promise) {
+        try {
+            val cookiesFile = File(reactApplicationContext.filesDir, "cookies_$platform.txt")
+            if (cookiesFile.exists()) {
+                promise.resolve(cookiesFile.absolutePath)
+            } else {
+                promise.resolve(null)
+            }
+        } catch (e: Exception) {
+            promise.resolve(null)
         }
     }
 

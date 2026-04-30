@@ -70,18 +70,14 @@ export class CookieManagerService {
                 return null;
             }
 
-            const storedPath = await AsyncStorage.getItem(`cookies_path_${key}`);
-            if (!storedPath) return null;
+            // DYNAMICALLY get the correct current path from Native to avoid sandbox changes
+            const currentPath = await YtDlpNative.getCookiesFilePath(key);
+            if (!currentPath) {
+                 await CookieManagerService._clearStorageKeys(key);
+                 return null;
+            }
 
-            try {
-                const exists = await YtDlpNative.fileExists(storedPath);
-                if (!exists) {
-                    await CookieManagerService._clearStorageKeys(key);
-                    return null;
-                }
-            } catch (e) { }
-
-            return storedPath;
+            return currentPath;
         } catch (error) {
             return null;
         }
@@ -251,7 +247,8 @@ export class CookieManagerService {
                 return false;
             }
 
-            await AsyncStorage.setItem(`cookies_path_${key}`, filePath);
+            // We no longer store the absolute cookies_path in AsyncStorage
+            // to avoid sandbox path corruption on app updates.
             await AsyncStorage.setItem(
                 `cookies_expiry_${key}`,
                 (Date.now() + 7 * 24 * 60 * 60 * 1000).toString()

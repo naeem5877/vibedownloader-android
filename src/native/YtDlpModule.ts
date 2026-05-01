@@ -83,6 +83,7 @@ export interface YtDlpNativeModule {
     downloadSpotifyTrack(searchQuery: string, title: string, artist: string, thumbnail: string | null, processId: string): Promise<DownloadResult>;
     cancelDownload(processId: string): Promise<boolean>;
     updateYtDlp(): Promise<{ status: string }>;
+    getVersions(): Promise<{ appVersion: string; ytdlpVersion: string }>;
     getSupportedPlatforms(): Promise<string[]>;
     validateUrl(url: string): Promise<ValidationResult>;
     getOutputDirectory(): Promise<string>;
@@ -95,8 +96,8 @@ export interface YtDlpNativeModule {
     getSharedText(): Promise<string | null>;
     getSharedData(): Promise<SharedData | null>;
     saveThumbnail(url: string, title: string): Promise<string>;
-    getClipboardText(): Promise<string>;
     saveCookiesToFile(cookiesText: string, platform: string): Promise<string>;
+    getCookiesFilePath(platform: string): Promise<string | null>;
     fileExists(path: string): Promise<boolean>;
     /**
      * Deletes the cookie .txt file at [path] from the native filesDir.

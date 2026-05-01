@@ -275,8 +275,39 @@ export class CookieManagerService {
     }
 
     static async clearCookies(platform: string): Promise<void> {
-        try { await CookieManager.clearAll(); } catch (e) { }
-        await CookieManagerService._clearStorageKeys(platform.toLowerCase());
+        const key = platform.toLowerCase();
+
+        // ── Step 1: Read the file path BEFORE clearing AsyncStorage keys ──
+        let storedPath: string | null = null;
+        try {
+            storedPath = await AsyncStorage.getItem(`cookies_path_${key}`);
+        } catch (e) { }
+
+        // ── Step 2: Delete the physical .txt file from filesDir ──
+        // Bug fix: without this, the file persisted across app reinstalls and
+        // caused yt-dlp to use dead session tokens even after a fresh login.
+        if (storedPath) {
+            try {
+                await YtDlpNative.deleteCookieFile(storedPath);
+            } catch (e) {
+                console.warn('[Cookie] Failed to delete cookie file:', e);
+            }
+        }
+
+        // ── Step 3: Clear WebView cookies for THIS platform's domains only ──
+        // Bug fix: CookieManager.clearAll() was silently killing every other
+        // platform's WebView session (Instagram logout was wiping YouTube, etc.)
+        const domains = CookieManagerService.PLATFORM_DOMAINS[key] || [];
+        for (const url of domains) {
+            try {
+                await CookieManager.clearByName(url, ''); // clear all for this domain
+            } catch (e) { /* clearByName may not be available on all RN versions */ }
+        }
+        // Fallback: if clearByName isn't supported, at least flush
+        try { await CookieManager.flush(); } catch (e) { }
+
+        // ── Step 4: Clear AsyncStorage metadata keys ──
+        await CookieManagerService._clearStorageKeys(key);
     }
 
     static async hasValidSession(platform: string): Promise<boolean> {

@@ -99,6 +99,12 @@ export interface YtDlpNativeModule {
     saveCookiesToFile(cookiesText: string, platform: string): Promise<string>;
     fileExists(path: string): Promise<boolean>;
     /**
+     * Deletes the cookie .txt file at [path] from the native filesDir.
+     * Use this on logout to ensure stale session tokens don't persist across
+     * app reinstalls or debug builds.
+     */
+    deleteCookieFile(path: string): Promise<boolean>;
+    /**
      * Reads ALL cookies for [url] directly from Android's WebView CookieManager,
      * including HttpOnly session cookies that JS / @react-native-cookies cannot see.
      * Returns a flat string like "name1=value1; name2=value2" or "" if none found.

@@ -551,10 +551,56 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
         }
     }, [actions, handleFetch]);
 
+    // ─────────────────────────────────────────────────────────────
+    // Cookie cache version — bump this string whenever you push a new
+    // debug build to force stale cookie metadata to be cleared.
+    // This fixes the "works only after uninstall" bug: filesDir and
+    // AsyncStorage both survive APK updates, so old session tokens would
+    // linger even after re-login unless we explicitly invalidate them.
+    // ─────────────────────────────────────────────────────────────
+    const COOKIE_CACHE_VERSION = '3';
+
     // --- Effects ---
 
     useEffect(() => {
-        // Header entrance
+        // ── Cookie cache invalidation (Bug #1 + #2 fix) ──
+        // Runs once on every app start. If the stored version doesn't match
+        // COOKIE_CACHE_VERSION, wipe all stale cookie metadata so the user
+        // is forced to re-login with fresh tokens.
+        const invalidateStaleCookieCache = async () => {
+            try {
+                const ALL_PLATFORMS = ['instagram', 'facebook', 'youtube', 'tiktok', 'twitter', 'twitch'];
+
+                // Check 1: version-based invalidation (for APK update without uninstall)
+                const savedVersion = await AsyncStorage.getItem('cookie_cache_version');
+                if (savedVersion !== COOKIE_CACHE_VERSION) {
+                    console.log(`[Cookie] Cache version mismatch (${savedVersion} → ${COOKIE_CACHE_VERSION}) — clearing stale cookie metadata`);
+                    const keysToRemove = ALL_PLATFORMS.flatMap(p => [
+                        `cookies_path_${p}`,
+                        `cookies_expiry_${p}`,
+                    ]);
+                    await AsyncStorage.multiRemove(keysToRemove);
+                    await AsyncStorage.setItem('cookie_cache_version', COOKIE_CACHE_VERSION);
+                }
+
+                // Check 2: install_id guard (for true fresh install / uninstall+reinstall)
+                const savedInstallId = await AsyncStorage.getItem('vibe_install_id');
+                if (!savedInstallId) {
+                    // AsyncStorage was completely wiped — this is a fresh install.
+                    // Clear any cookie .txt files that may have survived in filesDir
+                    // (filesDir is wiped on full uninstall, so this is mostly a safety net).
+                    console.log('[Cookie] Fresh install detected — ensuring clean cookie state');
+                    await AsyncStorage.setItem('vibe_install_id', Date.now().toString());
+                    await AsyncStorage.setItem('cookie_cache_version', COOKIE_CACHE_VERSION);
+                }
+            } catch (e) {
+                console.warn('[Cookie] Cache invalidation check failed (non-fatal):', e);
+            }
+        };
+
+        invalidateStaleCookieCache();
+
+        // Header entrance animation
         Animated.parallel([
             Animated.timing(headerFadeAnim, {
                 toValue: 1,

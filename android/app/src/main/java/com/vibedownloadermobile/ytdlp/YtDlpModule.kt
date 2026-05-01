@@ -464,6 +464,24 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     }
 
     /**
+     * Physically deletes the cookie .txt file at [path] from filesDir.
+     * Called by the JS CookieManagerService on logout so stale session
+     * tokens do not survive across app reinstalls / debug builds.
+     */
+    @ReactMethod
+    fun deleteCookieFile(path: String, promise: Promise) {
+        try {
+            val file = File(path)
+            val deleted = if (file.exists()) file.delete() else true
+            Log.d(TAG, "deleteCookieFile: $path → deleted=$deleted")
+            promise.resolve(deleted)
+        } catch (e: Exception) {
+            Log.w(TAG, "deleteCookieFile failed for $path: ${e.message}")
+            promise.resolve(false) // non-fatal
+        }
+    }
+
+    /**
      * Reads ALL cookies (including HttpOnly session cookies) for [url] directly
      * from the Android WebView CookieManager.
      *

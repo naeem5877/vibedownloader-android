@@ -1,4 +1,16 @@
 import { Vibration, Platform } from 'react-native';
+import { LocalDB } from '../services/LocalDB';
+
+let isHapticsEnabled = false;
+
+// Initial load
+LocalDB.getSetting('pref_haptics', false).then(val => {
+    isHapticsEnabled = val;
+}).catch(() => {});
+
+const checkHaptics = () => {
+    return Platform.OS === 'android' && Vibration && typeof Vibration.vibrate === 'function' && isHapticsEnabled;
+};
 
 /**
  * Industrial Haptic System
@@ -6,11 +18,18 @@ import { Vibration, Platform } from 'react-native';
  */
 export const Haptics = {
     /**
+     * Update the haptics enabled state
+     */
+    setEnabled: (enabled: boolean) => {
+        isHapticsEnabled = enabled;
+    },
+
+    /**
      * Subtle tap - used for standard button clicks
      */
     selection: () => {
         try {
-            if (Platform.OS === 'android' && Vibration && typeof Vibration.vibrate === 'function') {
+            if (checkHaptics()) {
                 Vibration.vibrate(10);
             }
         } catch (error) {
@@ -23,7 +42,7 @@ export const Haptics = {
      */
     impact: () => {
         try {
-            if (Platform.OS === 'android' && Vibration && typeof Vibration.vibrate === 'function') {
+            if (checkHaptics()) {
                 Vibration.vibrate(20);
             }
         } catch (error) {
@@ -36,7 +55,7 @@ export const Haptics = {
      */
     heavy: () => {
         try {
-            if (Platform.OS === 'android' && Vibration && typeof Vibration.vibrate === 'function') {
+            if (checkHaptics()) {
                 Vibration.vibrate(40);
             }
         } catch (error) {
@@ -49,7 +68,7 @@ export const Haptics = {
      */
     success: () => {
         try {
-            if (Platform.OS === 'android' && Vibration && typeof Vibration.vibrate === 'function') {
+            if (checkHaptics()) {
                 Vibration.vibrate([0, 15, 50, 20]);
             }
         } catch (error) {
@@ -62,7 +81,7 @@ export const Haptics = {
      */
     error: () => {
         try {
-            if (Platform.OS === 'android' && Vibration && typeof Vibration.vibrate === 'function') {
+            if (checkHaptics()) {
                 Vibration.vibrate([0, 50, 100, 50]);
             }
         } catch (error) {

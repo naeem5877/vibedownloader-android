@@ -36,6 +36,7 @@ import {
     SettingsModal,
 } from '../components';
 import { CookieManagerService } from '../services/CookieManagerService';
+import { LocalDB } from '../services/LocalDB';
 import { PlaylistSelectionModal } from '../components/PlaylistSelectionModal';
 import { SkeletonCard } from '../components/SkeletonCard';
 import { DiscordButton } from '../components/DiscordButton';
@@ -147,6 +148,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
     const headerFadeAnim = useRef(new Animated.Value(0)).current;
     const headerSlideAnim = useRef(new Animated.Value(-20)).current;
     const batchActiveRef = useRef(false);
+    const lastPastedUrlRef = useRef<string>('');
 
     const handleFetch = useCallback(async (text: string = url) => {
         if (!text.trim()) {
@@ -470,9 +472,30 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                     if (detected !== 'YouTube') setDetectedPlatform(detected);
                     setTimeout(() => handleFetch(sharedUrl), 500);
                 }
+                return;
+            }
+
+            // Auto-paste logic
+            const autoClipPref = await LocalDB.getSetting('pref_autoclip', true);
+            
+            if (autoClipPref) {
+                const clipText = await actions.getClipboardText();
+                if (clipText) {
+                    const match = clipText.match(/(https?:\/\/[^\s]+)/);
+                    if (match && match[0]) {
+                        const clipUrl = match[0];
+                        if (clipUrl !== lastPastedUrlRef.current) {
+                            lastPastedUrlRef.current = clipUrl;
+                            setUrl(clipUrl);
+                            const detected = detectPlatform(clipUrl);
+                            if (detected !== 'YouTube') setDetectedPlatform(detected);
+                            ToastAndroid.show('Pasted from clipboard', ToastAndroid.SHORT);
+                        }
+                    }
+                }
             }
         } catch (error) {
-            console.warn('Error checking shared text:', error);
+            console.warn('Error checking shared text/clipboard:', error);
         }
     }, [actions, handleFetch]);
 
@@ -562,7 +585,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
     // AsyncStorage both survive APK updates, so old session tokens would
     // linger even after re-login unless we explicitly invalidate them.
     // ─────────────────────────────────────────────────────────────
-    const COOKIE_CACHE_VERSION = '3';
+    const COOKIE_CACHE_VERSION = '4';
 
     // --- Effects ---
 
@@ -584,6 +607,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                         `cookies_expiry_${p}`,
                     ]);
                     await AsyncStorage.multiRemove(keysToRemove);
+                    await LocalDB.clearAllSessions();
                     await AsyncStorage.setItem('cookie_cache_version', COOKIE_CACHE_VERSION);
                 }
 
@@ -594,12 +618,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                     // Clear any cookie .txt files that may have survived in filesDir
                     // (filesDir is wiped on full uninstall, so this is mostly a safety net).
                     console.log('[Cookie] Fresh install detected — ensuring clean cookie state');
+                    await LocalDB.clearAllSessions();
                     await AsyncStorage.setItem('vibe_install_id', Date.now().toString());
                     await AsyncStorage.setItem('cookie_cache_version', COOKIE_CACHE_VERSION);
                 }
             } catch (e) {
                 console.warn('[Cookie] Cache invalidation check failed (non-fatal):', e);
             }
+            
+            // Restore actual cookie sessions from the local database
+            // This ensures cookies survive even if filesDir is reset/updated
+            await LocalDB.restoreSessions();
         };
 
         invalidateStaleCookieCache();

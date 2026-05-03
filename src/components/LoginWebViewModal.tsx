@@ -6,35 +6,41 @@ import {
     StyleSheet,
     TouchableOpacity,
     ActivityIndicator,
-    Alert,
     ToastAndroid,
     Platform,
+    Animated,
+    Dimensions,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { Colors, BorderRadius, Spacing, Typography } from '../theme';
-import { CloseIcon, StarIcon } from './Icons';
+import { Colors, BorderRadius, Spacing, Typography, Shadows } from '../theme';
+import { CloseIcon, CheckIcon, GlobeIcon } from './Icons';
 import { CookieManagerService } from '../services/CookieManagerService';
+
+const { height: SCREEN_H } = Dimensions.get('window');
 
 interface LoginWebViewModalProps {
     visible: boolean;
-    platform: 'instagram' | 'facebook' | 'youtube' | 'tiktok' | 'twitter' | 'twitch' | 'rumble';
+    platform: 'instagram' | 'facebook' | 'youtube' | 'tiktok' | 'twitter' | 'twitch';
     onClose: () => void;
     onSuccess: () => void;
 }
 
-// ─── Injected JavaScript ────────────────────────────────────────────────────
-// This script runs on every page load inside the WebView.
-// Its only purpose is to force Android to sync in-memory cookies to the
-// native CookieManager before we try to read them via the native bridge.
-// It also posts a readiness signal so we can show a hint to the user.
+// Platform brand colours & labels
+const PLATFORM_META: Record<string, { color: string; label: string; emoji: string }> = {
+    instagram: { color: '#E1306C', label: 'Instagram', emoji: '📸' },
+    facebook:  { color: '#1877F2', label: 'Facebook',  emoji: '💬' },
+    youtube:   { color: '#FF0000', label: 'YouTube',   emoji: '▶️' },
+    tiktok:    { color: '#00F2EA', label: 'TikTok',    emoji: '🎵' },
+    twitter:   { color: '#1DA1F2', label: 'X / Twitter', emoji: '🐦' },
+    twitch:    { color: '#9146FF', label: 'Twitch',    emoji: '🎮' },
+};
+
 const COOKIE_SYNC_JS = `
 (function() {
     try {
-        // Force a no-op fetch that causes the WebKit layer to sync cookies
         var img = new Image();
         img.src = window.location.origin + '/favicon.ico?' + Date.now();
     } catch(e) {}
-    // Notify React Native that the page is interactive
     if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(JSON.stringify({
             type: 'PAGE_READY',
@@ -43,9 +49,22 @@ const COOKIE_SYNC_JS = `
             cookieCount: document.cookie ? document.cookie.split(';').length : 0
         }));
     }
-    true; // required — must end with truthy value
+    true;
 })();
 `;
+
+const URL_MAP: Record<string, string> = {
+    instagram: 'https://www.instagram.com/accounts/login/',
+    facebook:  'https://www.facebook.com/login/',
+    youtube:   'https://accounts.google.com/ServiceLogin?service=youtube',
+    tiktok:    'https://www.tiktok.com/login',
+    twitter:   'https://twitter.com/i/flow/login',
+    twitch:    'https://www.twitch.tv/login',
+};
+
+const DESKTOP_UA =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+    '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 export const LoginWebViewModal: React.FC<LoginWebViewModalProps> = ({
     visible,
@@ -54,72 +73,55 @@ export const LoginWebViewModal: React.FC<LoginWebViewModalProps> = ({
     onSuccess,
 }) => {
     const webViewRef = useRef<WebView>(null);
-    const [isLoading, setIsLoading]     = useState(true);
-    const [isSaving, setIsSaving]       = useState(false);
-    const [title, setTitle]             = useState('Loading...');
-    const [currentUrl, setCurrentUrl]   = useState('');
-    const [pageReady, setPageReady]     = useState(false);
+    const [isLoading, setIsLoading]   = useState(true);
+    const [isSaving,  setIsSaving]    = useState(false);
+    const [pageTitle, setPageTitle]   = useState('');
+    const [currentUrl, setCurrentUrl] = useState('');
+    const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-    const urlMap: Record<string, string> = {
-        instagram: 'https://www.instagram.com/accounts/login/',
-        facebook:  'https://www.facebook.com/login/',
-        youtube:   'https://accounts.google.com/ServiceLogin?service=youtube',
-        tiktok:    'https://www.tiktok.com/login',
-        twitter:   'https://twitter.com/i/flow/login',
-        twitch:    'https://www.twitch.tv/login',
-        rumble:    'https://rumble.com/login.php',
-    };
+    const saveAnim = useRef(new Animated.Value(1)).current;
 
-    // Desktop UA is REQUIRED: mobile UA causes Instagram/Facebook to serve
-    // stripped pages that don't set the full session cookies yt-dlp needs.
-    const DESKTOP_UA =
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-        '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+    const meta       = PLATFORM_META[platform] ?? { color: Colors.primary, label: platform, emoji: '🌐' };
+    const targetUrl  = URL_MAP[platform] ?? `https://www.${platform}.com`;
 
-    const targetUrl = urlMap[platform] ?? `https://www.${platform}.com`;
-
-    // ── Navigation state tracking ──────────────────────────────────────────
     const handleNavigationStateChange = useCallback((navState: any) => {
-        if (navState.title) setTitle(navState.title);
+        if (navState.title) setPageTitle(navState.title);
         if (navState.url)   setCurrentUrl(navState.url);
-    }, []);
 
-    // ── WebView message handler ────────────────────────────────────────────
-    // Receives the PAGE_READY signal from the injected JS above.
+        // Auto-detect login success heuristic: no longer on a login/auth path
+        const u = navState.url?.toLowerCase() ?? '';
+        const notLoginPage = !u.includes('login') && !u.includes('accounts') &&
+                             !u.includes('signin') && !u.includes('auth');
+        const onPlatformDomain = u.includes(platform) || u.includes('google.com');
+        if (notLoginPage && onPlatformDomain && navState.title && navState.title.length > 2) {
+            setIsLoggedIn(true);
+        }
+    }, [platform]);
+
     const handleMessage = useCallback((event: any) => {
         try {
             const msg = JSON.parse(event.nativeEvent.data);
-            if (msg.type === 'PAGE_READY') {
-                setPageReady(true);
-                console.log(
-                    `[LoginWebViewModal] Page ready: ${msg.url} | ` +
-                    `JS-visible cookies: ${msg.cookieCount}`
-                );
+            if (msg.type === 'PAGE_READY' && msg.cookieCount > 2) {
+                setIsLoggedIn(true);
             }
-        } catch (_) {
-            // non-JSON message from the page itself — ignore
-        }
+        } catch (_) {}
     }, []);
 
-    // ── "Save & Continue" handler ──────────────────────────────────────────
+    const animateBtn = () => {
+        Animated.sequence([
+            Animated.timing(saveAnim, { toValue: 0.96, duration: 80, useNativeDriver: true }),
+            Animated.timing(saveAnim, { toValue: 1,    duration: 120, useNativeDriver: true }),
+        ]).start();
+    };
+
     const handleManualSave = useCallback(async () => {
+        animateBtn();
         setIsSaving(true);
 
-        // Use the URL where the WebView currently is (post-login feed page),
-        // NOT just the original login URL. Session cookies live on the domain
-        // root (e.g. https://www.instagram.com), not on /accounts/login/.
-        const extractUrl =
-            currentUrl && currentUrl.startsWith('http') ? currentUrl : targetUrl;
+        const extractUrl = currentUrl?.startsWith('http') ? currentUrl : targetUrl;
 
-        console.log(
-            `[LoginWebViewModal] Extracting cookies for ${platform} from: ${extractUrl}`
-        );
-
-        // Inject the sync script one final time right before reading,
-        // to flush any last in-flight cookie writes.
         try {
             webViewRef.current?.injectJavaScript(COOKIE_SYNC_JS);
-            // Small delay to allow the flush to propagate
             await new Promise<void>(r => setTimeout(r, 400));
         } catch (_) {}
 
@@ -127,7 +129,7 @@ export const LoginWebViewModal: React.FC<LoginWebViewModalProps> = ({
         setIsSaving(false);
 
         if (Platform.OS === 'android') {
-            ToastAndroid.show('✅ Cookies saved and applied!', ToastAndroid.SHORT);
+            ToastAndroid.show(`✅ ${meta.label} session saved!`, ToastAndroid.SHORT);
         }
         onSuccess();
         onClose();
@@ -135,82 +137,128 @@ export const LoginWebViewModal: React.FC<LoginWebViewModalProps> = ({
 
     if (!visible) return null;
 
-    const platformLabel = platform.charAt(0).toUpperCase() + platform.slice(1);
-
     return (
-        <Modal visible={visible} animationType="slide" transparent>
+        <Modal visible={visible} animationType="slide" transparent statusBarTranslucent>
             <View style={styles.overlay}>
-                <View style={styles.modalContainer}>
+                {/* Backdrop tap to close */}
+                <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
+
+                <View style={styles.sheet}>
+                    {/* ── Pull Handle ── */}
+                    <View style={styles.handle} />
+
                     {/* ── Header ── */}
                     <View style={styles.header}>
-                        <View style={styles.titleContainer}>
-                            <StarIcon size={18} color={Colors.primary} />
-                            <Text style={styles.titleText} numberOfLines={1}>
-                                {title}
+                        {/* Platform badge pill */}
+                        <View style={[styles.platformPill, { backgroundColor: `${meta.color}18`, borderColor: `${meta.color}40` }]}>
+                            <Text style={styles.pillEmoji}>{meta.emoji}</Text>
+                            <Text style={[styles.pillLabel, { color: meta.color }]}>{meta.label}</Text>
+                        </View>
+
+                        <View style={styles.headerCenter}>
+                            <Text style={styles.headerTitle}>Secure Login</Text>
+                            <Text style={styles.headerSub} numberOfLines={1}>
+                                {isLoading ? 'Connecting…' : pageTitle || 'Sign in to continue'}
                             </Text>
                         </View>
-                        <TouchableOpacity
-                            onPress={onClose}
-                            style={styles.closeButton}
-                            disabled={isSaving}
-                        >
-                            <CloseIcon size={20} color={Colors.textPrimary} />
-                        </TouchableOpacity>
+
+                        {/* Login status + close */}
+                        <View style={styles.headerRight}>
+                            {isLoggedIn && (
+                                <View style={styles.loggedBadge}>
+                                    <CheckIcon size={10} color="#00E676" />
+                                </View>
+                            )}
+                            <TouchableOpacity
+                                onPress={onClose}
+                                style={styles.closeBtn}
+                                disabled={isSaving}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                                <CloseIcon size={18} color={Colors.textMuted} />
+                            </TouchableOpacity>
+                        </View>
                     </View>
 
-                    {/* ── Loading overlay ── */}
-                    {(isLoading || isSaving) && (
-                        <View style={styles.loaderContainer}>
-                            <ActivityIndicator color={Colors.primary} size="large" />
-                            {isSaving && (
-                                <Text style={styles.savingText}>
-                                    Saving cookies…
-                                </Text>
-                            )}
+                    {/* ── URL pill ── */}
+                    {!isLoading && currentUrl ? (
+                        <View style={styles.urlBar}>
+                            <GlobeIcon size={12} color={Colors.textMuted} />
+                            <Text style={styles.urlText} numberOfLines={1}>
+                                {currentUrl.replace(/^https?:\/\//, '').split('/')[0]}
+                            </Text>
+                            <View style={[styles.secureDot, { backgroundColor: currentUrl.startsWith('https') ? '#00E676' : Colors.warning }]} />
                         </View>
+                    ) : null}
+
+                    {/* ── Thin progress line ── */}
+                    {isLoading && (
+                        <View style={[styles.loadingBar, { backgroundColor: meta.color }]} />
                     )}
 
                     {/* ── WebView ── */}
-                    <WebView
-                        ref={webViewRef}
-                        source={{ uri: targetUrl }}
-                        style={styles.webview}
-                        userAgent={DESKTOP_UA}
-                        onLoadStart={() => { setIsLoading(true);  setPageReady(false); }}
-                        onLoadEnd={()   => { setIsLoading(false); }}
-                        onNavigationStateChange={handleNavigationStateChange}
-                        onMessage={handleMessage}
-                        injectedJavaScript={COOKIE_SYNC_JS}
-                        sharedCookiesEnabled={true}
-                        thirdPartyCookiesEnabled={true}
-                        incognito={false}
-                        javaScriptEnabled={true}
-                        domStorageEnabled={true}
-                    />
+                    <View style={styles.webviewContainer}>
+                        <WebView
+                            ref={webViewRef}
+                            source={{ uri: targetUrl }}
+                            style={styles.webview}
+                            userAgent={DESKTOP_UA}
+                            onLoadStart={() => { setIsLoading(true); setIsLoggedIn(false); }}
+                            onLoadEnd={() => setIsLoading(false)}
+                            onNavigationStateChange={handleNavigationStateChange}
+                            onMessage={handleMessage}
+                            injectedJavaScript={COOKIE_SYNC_JS}
+                            sharedCookiesEnabled={true}
+                            thirdPartyCookiesEnabled={true}
+                            incognito={false}
+                            javaScriptEnabled={true}
+                            domStorageEnabled={true}
+                        />
+
+                        {/* Saving overlay */}
+                        {isSaving && (
+                            <View style={styles.savingOverlay}>
+                                <ActivityIndicator color={meta.color} size="large" />
+                                <Text style={styles.savingText}>Saving session…</Text>
+                            </View>
+                        )}
+                    </View>
 
                     {/* ── Footer ── */}
                     <View style={styles.footer}>
-                        <Text style={styles.footerText}>
-                            Log in to {platformLabel} above (2FA is supported). Once you can see
-                            your feed / home page, tap the button below.
+                        <Text style={styles.footerHint}>
+                            Log in above, then tap <Text style={{ color: meta.color, fontWeight: '700' }}>Save Session</Text> when you see your feed.
                         </Text>
-                        <TouchableOpacity
-                            style={[
-                                styles.saveBtn,
-                                { backgroundColor: Colors.primary },
-                                isSaving && styles.saveBtnDisabled,
-                            ]}
-                            onPress={handleManualSave}
-                            disabled={isSaving || isLoading}
-                        >
-                            {isSaving
-                                ? <ActivityIndicator size="small" color="#FFF" />
-                                : <StarIcon size={16} color="#FFF" />
-                            }
-                            <Text style={styles.saveBtnText}>
-                                {isSaving ? 'Saving…' : 'Save & Continue'}
-                            </Text>
-                        </TouchableOpacity>
+
+                        <Animated.View style={{ transform: [{ scale: saveAnim }] }}>
+                            <TouchableOpacity
+                                style={[
+                                    styles.saveBtn,
+                                    { backgroundColor: isLoggedIn ? meta.color : Colors.surfaceHigh },
+                                    isSaving && styles.saveBtnDisabled,
+                                ]}
+                                onPress={handleManualSave}
+                                disabled={isSaving || isLoading}
+                                activeOpacity={0.85}
+                            >
+                                {isSaving ? (
+                                    <ActivityIndicator size="small" color="#FFF" />
+                                ) : (
+                                    <CheckIcon size={18} color={isLoggedIn ? '#FFF' : Colors.textMuted} />
+                                )}
+                                <Text style={[
+                                    styles.saveBtnText,
+                                    { color: isLoggedIn ? '#FFF' : Colors.textMuted }
+                                ]}>
+                                    {isSaving ? 'Saving…' : 'Save Session'}
+                                </Text>
+                            </TouchableOpacity>
+                        </Animated.View>
+
+                        {/* Security note */}
+                        <Text style={styles.secNote}>
+                            🔒 Cookies are stored locally on your device only.
+                        </Text>
                     </View>
                 </View>
             </View>
@@ -221,91 +269,176 @@ export const LoginWebViewModal: React.FC<LoginWebViewModalProps> = ({
 const styles = StyleSheet.create({
     overlay: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.7)',
         justifyContent: 'flex-end',
+        backgroundColor: 'transparent',
     },
-    modalContainer: {
-        backgroundColor: Colors.background,
-        height: '90%',
-        borderTopLeftRadius: BorderRadius.xl,
-        borderTopRightRadius: BorderRadius.xl,
+    backdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+    },
+    sheet: {
+        height: SCREEN_H * 0.91,
+        backgroundColor: Colors.surfaceLow,
+        borderTopLeftRadius: 28,
+        borderTopRightRadius: 28,
         overflow: 'hidden',
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        borderColor: Colors.innerBorder,
     },
+    handle: {
+        alignSelf: 'center',
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: 'rgba(255,255,255,0.15)',
+        marginTop: 12,
+        marginBottom: 8,
+    },
+    // ── Header ──
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: Spacing.md,
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        gap: 10,
         borderBottomWidth: 1,
         borderBottomColor: Colors.innerBorder,
         backgroundColor: Colors.surfaceMedium,
     },
-    titleContainer: {
+    platformPill: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.sm,
-        flex: 1,
-        marginRight: Spacing.sm,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 20,
+        borderWidth: 1,
+        gap: 5,
     },
-    titleText: {
+    pillEmoji: { fontSize: 13 },
+    pillLabel: {
+        fontSize: 12,
+        fontWeight: '700',
+        letterSpacing: 0.2,
+    },
+    headerCenter: { flex: 1 },
+    headerTitle: {
         color: Colors.textPrimary,
-        fontSize: Typography.sizes.base,
-        fontWeight: Typography.weights.bold,
-        flexShrink: 1,
+        fontSize: 14,
+        fontWeight: '700',
     },
-    closeButton: {
-        padding: Spacing.xs,
+    headerSub: {
+        color: Colors.textMuted,
+        fontSize: 11,
+        marginTop: 1,
+    },
+    headerRight: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    loggedBadge: {
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        backgroundColor: 'rgba(0,230,118,0.15)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(0,230,118,0.3)',
+    },
+    closeBtn: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
         backgroundColor: Colors.surfaceElevated,
-        borderRadius: BorderRadius.round,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    // ── URL bar ──
+    urlBar: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 14,
+        paddingVertical: 6,
+        backgroundColor: Colors.surfaceMedium,
+        borderBottomWidth: 1,
+        borderBottomColor: Colors.innerBorder,
+    },
+    urlText: {
+        flex: 1,
+        color: Colors.textMuted,
+        fontSize: 11,
+    },
+    secureDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+    },
+    loadingBar: {
+        height: 2,
+        opacity: 0.7,
+    },
+    // ── WebView ──
+    webviewContainer: {
+        flex: 1,
+        position: 'relative',
     },
     webview: {
         flex: 1,
-        backgroundColor: Colors.background,
+        backgroundColor: '#fff',
     },
-    loaderContainer: {
-        position: 'absolute',
-        top: 60,
-        left: 0,
-        right: 0,
-        bottom: 0,
+    savingOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(1,1,1,0.85)',
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: Colors.background,
+        gap: 14,
         zIndex: 10,
-        gap: 12,
     },
     savingText: {
         color: Colors.textSecondary,
-        fontSize: Typography.sizes.sm,
-        marginTop: 8,
+        fontSize: 15,
+        fontWeight: '600',
     },
+    // ── Footer ──
     footer: {
-        padding: Spacing.md,
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        paddingBottom: 20,
+        gap: 10,
         backgroundColor: Colors.surfaceMedium,
         borderTopWidth: 1,
         borderTopColor: Colors.innerBorder,
-        gap: Spacing.md,
     },
-    footerText: {
+    footerHint: {
         color: Colors.textMuted,
-        fontSize: Typography.sizes.xs,
+        fontSize: 12,
         textAlign: 'center',
-        fontWeight: Typography.weights.medium,
+        lineHeight: 18,
     },
     saveBtn: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 12,
-        borderRadius: BorderRadius.md,
-        gap: Spacing.sm,
+        paddingVertical: 15,
+        borderRadius: 18,
+        gap: 8,
+        borderWidth: 1,
+        borderColor: Colors.innerBorderLight,
+        ...Shadows.md,
     },
-    saveBtnDisabled: {
-        opacity: 0.6,
-    },
+    saveBtnDisabled: { opacity: 0.5 },
     saveBtnText: {
-        color: '#FFF',
-        fontSize: Typography.sizes.base,
-        fontWeight: Typography.weights.bold,
+        fontSize: 15,
+        fontWeight: '700',
+        letterSpacing: 0.3,
+    },
+    secNote: {
+        color: Colors.textMuted,
+        fontSize: 10,
+        textAlign: 'center',
+        opacity: 0.7,
     },
 });

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import {
     View,
     Text,
@@ -9,308 +9,476 @@ import {
     Dimensions,
     Linking,
     Share,
+    ScrollView,
+    Switch,
     Alert,
+    ToastAndroid,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, BorderRadius, Spacing, Typography, Shadows } from '../theme';
-import { SettingsIcon, StarIcon, ShareIcon, TrashIcon, CloseIcon } from './Icons';
+import {
+    SettingsIcon, StarIcon, ShareIcon, CloseIcon,
+    RefreshIcon, InfoIcon, TrashIcon, DiscordIcon,
+    ChevronRightIcon,
+} from './Icons';
 import { YtDlpNative } from '../native/YtDlpModule';
+import { CookieManagerService } from '../services/CookieManagerService';
+import { LocalDB } from '../services/LocalDB';
+import { Haptics } from '../utils/haptics';
 
-const { width } = Dimensions.get('window');
+const { height: SCREEN_H } = Dimensions.get('window');
 
 interface SettingsModalProps {
     visible: boolean;
     onClose: () => void;
     appVersion?: string;
-    ytdlpVersion?: string;
 }
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({
-    visible,
-    onClose,
-}) => {
-    const scaleAnim = useRef(new Animated.Value(0.9)).current;
+// ── Section header ──────────────────────────────────────────────────────────
+const SectionHeader: React.FC<{ label: string }> = ({ label }) => (
+    <Text style={styles.sectionHeader}>{label}</Text>
+);
+
+// ── Info row (label + value, no press) ─────────────────────────────────────
+const InfoRow: React.FC<{ icon: React.ReactNode; label: string; value: string; accent?: string }> = ({
+    icon, label, value, accent,
+}) => (
+    <View style={styles.row}>
+        <View style={styles.rowIcon}>{icon}</View>
+        <Text style={styles.rowLabel}>{label}</Text>
+        <Text style={[styles.rowValue, accent ? { color: accent } : null]}>{value}</Text>
+    </View>
+);
+
+// ── Action row (tappable) ───────────────────────────────────────────────────
+const ActionRow: React.FC<{
+    icon: React.ReactNode;
+    label: string;
+    sublabel?: string;
+    onPress: () => void;
+    destructive?: boolean;
+    rightEl?: React.ReactNode;
+}> = ({ icon, label, sublabel, onPress, destructive, rightEl }) => {
+    const pressAnim = useRef(new Animated.Value(1)).current;
+    const handlePress = () => {
+        Animated.sequence([
+            Animated.timing(pressAnim, { toValue: 0.97, duration: 70, useNativeDriver: true }),
+            Animated.timing(pressAnim, { toValue: 1, duration: 120, useNativeDriver: true }),
+        ]).start();
+        onPress();
+    };
+    return (
+        <Animated.View style={{ transform: [{ scale: pressAnim }] }}>
+            <TouchableOpacity
+                style={[styles.row, styles.rowTouchable, destructive && styles.rowDestructive]}
+                onPress={handlePress}
+                activeOpacity={1}
+            >
+                <View style={[styles.rowIcon, destructive && { backgroundColor: 'rgba(239,68,68,0.12)' }]}>
+                    {icon}
+                </View>
+                <View style={styles.rowTextCol}>
+                    <Text style={[styles.rowLabel, destructive && { color: Colors.error }]}>{label}</Text>
+                    {sublabel ? <Text style={styles.rowSublabel}>{sublabel}</Text> : null}
+                </View>
+                {rightEl ?? <ChevronRightIcon size={16} color={Colors.textMuted} />}
+            </TouchableOpacity>
+        </Animated.View>
+    );
+};
+
+// ── Toggle row ──────────────────────────────────────────────────────────────
+const ToggleRow: React.FC<{
+    icon: React.ReactNode;
+    label: string;
+    sublabel?: string;
+    value: boolean;
+    onToggle: (v: boolean) => void;
+}> = ({ icon, label, sublabel, value, onToggle }) => (
+    <View style={[styles.row, styles.rowTouchable]}>
+        <View style={styles.rowIcon}>{icon}</View>
+        <View style={styles.rowTextCol}>
+            <Text style={styles.rowLabel}>{label}</Text>
+            {sublabel ? <Text style={styles.rowSublabel}>{sublabel}</Text> : null}
+        </View>
+        <Switch
+            value={value}
+            onValueChange={onToggle}
+            trackColor={{ false: Colors.surfaceHigh, true: `${Colors.primary}80` }}
+            thumbColor={value ? Colors.primary : Colors.textMuted}
+            ios_backgroundColor={Colors.surfaceHigh}
+        />
+    </View>
+);
+
+// ── Main component ───────────────────────────────────────────────────────────
+export const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
+    const slideAnim   = useRef(new Animated.Value(SCREEN_H)).current;
     const opacityAnim = useRef(new Animated.Value(0)).current;
-    const translateY = useRef(new Animated.Value(20)).current;
 
-    const [appVer, setAppVer] = React.useState("Loading...");
-    const [ytVer, setYtVer] = React.useState("Loading...");
+    const [appVer, setAppVer]         = useState('–');
+    const [ytVer, setYtVer]           = useState('–');
+    const [updatingYt, setUpdatingYt] = useState(false);
+    const [haptics, setHaptics]       = useState(false);
+    const [autoClip, setAutoClip]     = useState(true);
 
+    // Load persisted prefs & versions on open
     useEffect(() => {
-        if (visible) {
-            Animated.parallel([
-                Animated.spring(scaleAnim, {
-                    toValue: 1,
-                    tension: 120,
-                    friction: 14,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(opacityAnim, {
-                    toValue: 1,
-                    duration: 300,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(translateY, {
-                    toValue: 0,
-                    duration: 300,
-                    useNativeDriver: true,
-                }),
-            ]).start();
-
-            // Fetch dynamic versions
-            YtDlpNative.getVersions()
-                .then(res => {
-                    setAppVer(res.appVersion);
-                    setYtVer(res.ytdlpVersion);
-                })
-                .catch(err => {
-                    console.warn("Failed to fetch versions natively:", err);
-                    setAppVer(require('../../package.json').version || "1.2.1");
-                    setYtVer("Unknown");
-                });
-        } else {
-            scaleAnim.setValue(0.9);
+        if (!visible) {
+            slideAnim.setValue(SCREEN_H);
             opacityAnim.setValue(0);
-            translateY.setValue(20);
+            return;
         }
+
+        Animated.parallel([
+            Animated.timing(opacityAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
+            Animated.spring(slideAnim, {
+                toValue: 0,
+                tension: 80,
+                friction: 14,
+                useNativeDriver: true,
+            }),
+        ]).start();
+
+        // Versions
+        YtDlpNative.getVersions?.()
+            .then(r => { setAppVer(r.appVersion); setYtVer(r.ytdlpVersion); })
+            .catch(() => {
+                try { setAppVer(require('../../package.json').version); } catch (_) {}
+                setYtVer('Unknown');
+            });
+
+        // Persisted settings
+        Promise.all([
+            LocalDB.getSetting('pref_haptics', false),
+            LocalDB.getSetting('pref_autoclip', true)
+        ]).then(([hapticsVal, autoclipVal]) => {
+            setHaptics(hapticsVal);
+            setAutoClip(autoclipVal);
+        }).catch(() => {});
     }, [visible]);
+
+    const close = () => {
+        Animated.parallel([
+            Animated.timing(opacityAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
+            Animated.timing(slideAnim, { toValue: SCREEN_H * 0.3, duration: 200, useNativeDriver: true }),
+        ]).start(onClose);
+    };
+
+    const savePref = (key: string, value: boolean) =>
+        LocalDB.setSetting(key, value);
+
+    const handleUpdateYtDlp = async () => {
+        setUpdatingYt(true);
+        try {
+            const res = await YtDlpNative.updateYtDlp();
+            ToastAndroid.show(`✅ yt-dlp: ${res.status}`, ToastAndroid.LONG);
+            // Re-fetch version after update
+            YtDlpNative.getVersions?.()
+                .then(r => setYtVer(r.ytdlpVersion))
+                .catch(() => {});
+        } catch (e: any) {
+            Alert.alert('Update Failed', e.message || 'Could not update yt-dlp');
+        } finally {
+            setUpdatingYt(false);
+        }
+    };
+
+    const handleClearAllSessions = () => {
+        Alert.alert(
+            'Clear All Sessions',
+            'This will log you out of all platforms (Instagram, YouTube, TikTok, etc.) and delete all saved cookie files. Continue?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Clear All',
+                    style: 'destructive',
+                    onPress: async () => {
+                        const platforms = ['instagram', 'facebook', 'youtube', 'tiktok', 'twitter', 'twitch'];
+                        for (const p of platforms) {
+                            try { await CookieManagerService.clearCookies(p); } catch (_) {}
+                        }
+                        ToastAndroid.show('🗑️ All sessions cleared', ToastAndroid.SHORT);
+                    },
+                },
+            ]
+        );
+    };
 
     if (!visible) return null;
 
-    const handleClearCache = () => {
-        Alert.alert("Clear Cache", "Cache cleared successfully!");
-    };
-
     return (
-        <Modal
-            transparent
-            visible={visible}
-            animationType="none"
-            onRequestClose={onClose}
-            statusBarTranslucent
-        >
-            <View style={styles.overlay}>
-                <Animated.View
-                    style={[
-                        styles.modalContainer,
-                        {
-                            opacity: opacityAnim,
-                            transform: [
-                                { scale: scaleAnim },
-                                { translateY: translateY }
-                            ],
-                        },
-                    ]}
-                >
-                    <View style={styles.bgPulse} />
-                    <View style={styles.scanline} />
+        <Modal transparent visible={visible} animationType="none" onRequestClose={close} statusBarTranslucent>
+            {/* Backdrop */}
+            <Animated.View style={[styles.backdrop, { opacity: opacityAnim }]}>
+                <TouchableOpacity style={StyleSheet.absoluteFill} onPress={close} activeOpacity={1} />
+            </Animated.View>
 
-                    <View style={styles.contentContainer}>
-                        {/* Header Section */}
-                        <View style={styles.header}>
-                            <View style={styles.headerIconContainer}>
-                                <View style={styles.headerIconGlow} />
-                                <SettingsIcon size={32} color={Colors.primary} />
-                            </View>
-                            <View style={styles.headerTextContainer}>
-                                <Text style={styles.technicalLabel}>SYSTEM CONTROL</Text>
-                                <Text style={styles.versionTitle}>Settings</Text>
-                            </View>
-                            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-                                <CloseIcon size={20} color={Colors.textSecondary} />
-                            </TouchableOpacity>
-                        </View>
+            {/* Sheet */}
+            <Animated.View style={[styles.sheet, { transform: [{ translateY: slideAnim }] }]}>
+                {/* Pull handle */}
+                <View style={styles.handle} />
 
-                        <View style={styles.technicalLine}>
-                            <View style={styles.lineDot} />
-                            <View style={styles.lineMain} />
-                            <View style={styles.lineDot} />
-                        </View>
-
-                        {/* Settings Options */}
-                        <View style={styles.optionsSection}>
-                            <View style={styles.optionRow}>
-                                <Text style={styles.optionLabel}>App Version</Text>
-                                <Text style={styles.optionValue}>v{appVer}</Text>
-                            </View>
-                            <View style={styles.optionRow}>
-                                <Text style={styles.optionLabel}>yt-dlp Version</Text>
-                                <Text style={styles.optionValue}>{ytVer}</Text>
-                            </View>
-
-                            <TouchableOpacity
-                                style={styles.actionBtn}
-                                onPress={() => Linking.openURL('https://github.com/naeem5877/vibedownloader-android')}
-                            >
-                                <StarIcon size={18} color="#FFD700" />
-                                <Text style={styles.actionBtnText}>Star GitHub Repository</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={styles.actionBtn}
-                                onPress={() => Share.share({ message: 'Check out VibeDownloader - The ultimate media downloader for Android! https://github.com/naeem5877/vibedownloader-android' })}
-                            >
-                                <ShareIcon size={18} color={Colors.textPrimary} />
-                                <Text style={styles.actionBtnText}>Share Application</Text>
-                            </TouchableOpacity>
-                            
-                            <TouchableOpacity
-                                style={[styles.actionBtn, { borderColor: 'rgba(255, 87, 34, 0.2)' }]}
-                                onPress={handleClearCache}
-                            >
-                                <TrashIcon size={18} color={Colors.error} />
-                                <Text style={[styles.actionBtnText, { color: Colors.error }]}>Clear Temporary Cache</Text>
-                            </TouchableOpacity>
-                        </View>
+                {/* ── Header ── */}
+                <View style={styles.header}>
+                    <View style={styles.headerIconWrap}>
+                        <SettingsIcon size={20} color={Colors.primary} />
                     </View>
-                </Animated.View>
-            </View>
+                    <View style={styles.headerText}>
+                        <Text style={styles.headerLabel}>PREFERENCES</Text>
+                        <Text style={styles.headerTitle}>Settings</Text>
+                    </View>
+                    <TouchableOpacity onPress={close} style={styles.closeBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                        <CloseIcon size={18} color={Colors.textMuted} />
+                    </TouchableOpacity>
+                </View>
+
+                <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+
+                    {/* ── Version info ── */}
+                    <SectionHeader label="VERSION INFO" />
+                    <View style={styles.card}>
+                        <InfoRow
+                            icon={<InfoIcon size={16} color={Colors.primary} />}
+                            label="App Version"
+                            value={`v${appVer}`}
+                            accent={Colors.primary}
+                        />
+                        <View style={styles.rowDivider} />
+                        <InfoRow
+                            icon={<RefreshIcon size={16} color={Colors.textMuted} />}
+                            label="yt-dlp Version"
+                            value={ytVer}
+                        />
+                    </View>
+
+                    {/* ── Download preferences ── */}
+                    <SectionHeader label="DOWNLOAD" />
+                    <View style={styles.card}>
+                        <ToggleRow
+                            icon={<InfoIcon size={16} color={Colors.textMuted} />}
+                            label="Auto-paste from Clipboard"
+                            sublabel="Paste clipboard URL when you open the app"
+                            value={autoClip}
+                            onToggle={v => { setAutoClip(v); savePref('pref_autoclip', v); }}
+                        />
+                        <View style={styles.rowDivider} />
+                        <ActionRow
+                            icon={<RefreshIcon size={16} color={Colors.secondary} />}
+                            label="Update yt-dlp Engine"
+                            sublabel={updatingYt ? 'Updating…' : 'Keep the download engine up to date'}
+                            onPress={handleUpdateYtDlp}
+                            rightEl={
+                                updatingYt
+                                    ? <RefreshIcon size={16} color={Colors.primary} />
+                                    : undefined
+                            }
+                        />
+                    </View>
+
+                    {/* ── Privacy & Sessions ── */}
+                    <SectionHeader label="PRIVACY & SESSIONS" />
+                    <View style={styles.card}>
+                        <ActionRow
+                            icon={<TrashIcon size={16} color={Colors.error} />}
+                            label="Clear All Platform Sessions"
+                            sublabel="Logs out of Instagram, YouTube, TikTok…"
+                            onPress={handleClearAllSessions}
+                            destructive
+                        />
+                    </View>
+
+                    {/* ── General ── */}
+                    <SectionHeader label="GENERAL" />
+                    <View style={styles.card}>
+                        <ToggleRow
+                            icon={<StarIcon size={16} color={Colors.accent} />}
+                            label="Haptic Feedback"
+                            sublabel="Vibration on button interactions"
+                            value={haptics}
+                            onToggle={v => { setHaptics(v); savePref('pref_haptics', v); Haptics.setEnabled(v); }}
+                        />
+                    </View>
+
+                    {/* ── Community ── */}
+                    <SectionHeader label="COMMUNITY" />
+                    <View style={styles.card}>
+                        <ActionRow
+                            icon={<StarIcon size={16} color="#FFD700" />}
+                            label="Star on GitHub"
+                            sublabel="Support the project ⭐"
+                            onPress={() => Linking.openURL('https://github.com/naeem5877/vibedownloader-android')}
+                        />
+                        <View style={styles.rowDivider} />
+                        <ActionRow
+                            icon={<DiscordIcon size={16} color="#5865F2" />}
+                            label="Join Discord"
+                            sublabel="Get support and share feedback"
+                            onPress={() => Linking.openURL('https://discord.gg/vibedownloader')}
+                        />
+                        <View style={styles.rowDivider} />
+                        <ActionRow
+                            icon={<ShareIcon size={16} color={Colors.textSecondary} />}
+                            label="Share App"
+                            sublabel="Tell your friends about VibeDownloader"
+                            onPress={() =>
+                                Share.share({
+                                    message:
+                                        'Check out VibeDownloader — Download from Instagram, YouTube, TikTok & more! https://github.com/naeem5877/vibedownloader-android',
+                                })
+                            }
+                        />
+                    </View>
+
+                    {/* Bottom spacer */}
+                    <View style={{ height: 32 }} />
+                </ScrollView>
+            </Animated.View>
         </Modal>
     );
 };
 
+
+
 const styles = StyleSheet.create({
-    overlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.92)',
+    backdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.7)',
+    },
+    sheet: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        maxHeight: SCREEN_H * 0.88,
+        backgroundColor: Colors.surfaceLow,
+        borderTopLeftRadius: 28,
+        borderTopRightRadius: 28,
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        borderColor: Colors.innerBorder,
+        overflow: 'hidden',
+        ...Shadows.xl,
+    },
+    handle: {
+        alignSelf: 'center',
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: 'rgba(255,255,255,0.15)',
+        marginTop: 12,
+        marginBottom: 4,
+    },
+    // ── Header ──
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        paddingHorizontal: 20,
+        paddingVertical: 14,
+        borderBottomWidth: 1,
+        borderBottomColor: Colors.innerBorder,
+    },
+    headerIconWrap: {
+        width: 40,
+        height: 40,
+        borderRadius: 13,
+        backgroundColor: `${Colors.primary}18`,
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 24,
+        borderWidth: 1,
+        borderColor: `${Colors.primary}30`,
     },
-    modalContainer: {
-        width: '100%',
-        maxWidth: 380,
-        backgroundColor: Colors.surfaceHigh,
-        borderRadius: 24,
+    headerText: { flex: 1 },
+    headerLabel: {
+        fontSize: 9,
+        fontWeight: '900',
+        color: Colors.primary,
+        letterSpacing: 1.5,
+    },
+    headerTitle: {
+        fontSize: 18,
+        fontWeight: '900',
+        color: Colors.textPrimary,
+        letterSpacing: -0.4,
+    },
+    closeBtn: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        backgroundColor: 'rgba(255,255,255,0.05)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    // ── Scroll ──
+    scroll: { flex: 1 },
+    scrollContent: {
+        paddingHorizontal: 16,
+        paddingTop: 8,
+    },
+    sectionHeader: {
+        fontSize: 10,
+        fontWeight: '800',
+        color: Colors.textMuted,
+        letterSpacing: 1.4,
+        marginTop: 20,
+        marginBottom: 8,
+        marginLeft: 4,
+    },
+    // ── Card container ──
+    card: {
+        backgroundColor: Colors.surfaceMedium,
+        borderRadius: 18,
         borderWidth: 1,
         borderColor: Colors.innerBorder,
         overflow: 'hidden',
     },
-    bgPulse: {
-        position: 'absolute',
-        width: width,
-        height: width,
-        borderRadius: width / 2,
-        backgroundColor: Colors.primary,
-        opacity: 0.05,
-        top: -width / 2,
-        right: -width / 4,
-    },
-    scanline: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
+    rowDivider: {
         height: 1,
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-        zIndex: 2,
+        backgroundColor: Colors.innerBorder,
+        marginLeft: 52,
     },
-    contentContainer: {
-        padding: 24,
-        zIndex: 3,
-    },
-    header: {
+    // ── Row base ──
+    row: {
+        flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 24,
-        position: 'relative',
+        paddingHorizontal: 14,
+        paddingVertical: 13,
+        gap: 12,
     },
-    closeBtn: {
-        position: 'absolute',
-        top: 0,
-        right: 0,
-        padding: 8,
+    rowTouchable: {
+        // tap feedback handled by Animated
     },
-    headerIconContainer: {
-        width: 64,
-        height: 64,
-        borderRadius: 18,
-        backgroundColor: `${Colors.primary}12`,
+    rowDestructive: {
+        // accent handled by icon bg
+    },
+    rowIcon: {
+        width: 34,
+        height: 34,
+        borderRadius: 10,
+        backgroundColor: 'rgba(255,255,255,0.05)',
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 16,
-        position: 'relative',
         borderWidth: 1,
-        borderColor: `${Colors.primary}20`,
+        borderColor: Colors.innerBorder,
     },
-    headerIconGlow: {
-        position: 'absolute',
-        width: '100%',
-        height: '100%',
-        borderRadius: 18,
-        backgroundColor: Colors.primary,
-        opacity: 0.1,
-    },
-    headerTextContainer: {
-        alignItems: 'center',
-    },
-    technicalLabel: {
-        fontSize: 10,
-        fontWeight: Typography.weights.black,
-        color: Colors.primary,
-        letterSpacing: 2,
-        marginBottom: 4,
-    },
-    versionTitle: {
-        fontSize: 22,
-        fontWeight: Typography.weights.black,
-        color: Colors.textPrimary,
-        letterSpacing: Typography.letterSpacing.tight,
-    },
-    technicalLine: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 24,
-        gap: 8,
-    },
-    lineDot: {
-        width: 4,
-        height: 4,
-        borderRadius: 2,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    },
-    lineMain: {
-        flex: 1,
-        height: 1,
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    },
-    optionsSection: {
-        gap: 12,
-    },
-    optionRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingVertical: 12,
-        paddingHorizontal: 16,
-        backgroundColor: 'rgba(255, 255, 255, 0.02)',
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.03)',
-    },
-    optionLabel: {
+    rowTextCol: { flex: 1 },
+    rowLabel: {
         fontSize: 14,
+        fontWeight: '600',
+        color: Colors.textPrimary,
+        letterSpacing: -0.1,
+    },
+    rowSublabel: {
+        fontSize: 11,
+        color: Colors.textMuted,
+        marginTop: 2,
+        fontWeight: '400',
+    },
+    rowValue: {
+        fontSize: 13,
+        fontWeight: '700',
         color: Colors.textSecondary,
-        fontWeight: Typography.weights.medium,
-    },
-    optionValue: {
-        fontSize: 14,
-        color: Colors.textPrimary,
-        fontWeight: Typography.weights.bold,
-    },
-    actionBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 14,
-        paddingHorizontal: 16,
-        backgroundColor: 'rgba(255, 255, 255, 0.03)',
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.05)',
-        gap: 12,
-    },
-    actionBtnText: {
-        color: Colors.textPrimary,
-        fontSize: 14,
-        fontWeight: Typography.weights.bold,
     },
 });
 

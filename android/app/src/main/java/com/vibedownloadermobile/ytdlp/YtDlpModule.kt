@@ -266,14 +266,15 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
 
     private fun getContentType(url: String, platform: String): String {
         val urlLower = url.lowercase()
-        if (SHORT_PATTERNS.any { urlLower.contains(it) }) return "Shorts"
         
         return when (platform) {
-            "YouTube" -> if (urlLower.contains("/shorts/")) "Shorts" else "Videos"
-            "Instagram" -> if (urlLower.contains("/reel")) "Reels" else "Posts"
-            "Facebook" -> if (urlLower.contains("/reel")) "Reels" else "Videos"
+            "YouTube" -> if (urlLower.contains("/short")) "Shorts" else "Videos"
+            "Instagram" -> if (urlLower.contains("/reel")) "Reels" else if (urlLower.contains("/stories/")) "Stories" else "Posts"
+            "Facebook" -> if (urlLower.contains("/reel")) "Reels" else if (urlLower.contains("/stories/")) "Stories" else "Videos"
+            "TikTok" -> "Videos"
             "Spotify", "SoundCloud" -> "Music"
             "Pinterest" -> "Pins"
+            "X" -> "Posts"
             else -> "Downloads"
         }
     }
@@ -760,7 +761,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         val relativePath = when {
             isAudio -> "Music/VibeDownloader/$platform"
             isVideo -> "Movies/VibeDownloader/$platform/$contentType"
-            isImage -> "Pictures/VibeDownloader/$platform"
+            isImage -> "Pictures/VibeDownloader/$platform/$contentType"
             else -> "Download/VibeDownloader/$platform"
         }
         
@@ -1469,6 +1470,8 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                             val platform = if (pathParts.size >= 2) pathParts[0] else "Unknown"
                             val contentType = when {
                                 baseDir.absolutePath.contains("Music") -> "Music"
+                                baseDir.absolutePath.contains("Pictures") -> if (pathParts.size >= 3) pathParts[1] else "Images"
+                                baseDir.absolutePath.contains("Movies") -> if (pathParts.size >= 3) pathParts[1] else "Videos"
                                 pathParts.size >= 3 -> pathParts[1]
                                 else -> "Downloads"
                             }

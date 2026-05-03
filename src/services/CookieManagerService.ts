@@ -2,6 +2,7 @@ import CookieManager from '@react-native-cookies/cookies';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { YtDlpNative } from '../native/YtDlpModule';
+import { LocalDB } from './LocalDB';
 
 export class CookieManagerService {
 
@@ -64,6 +65,27 @@ export class CookieManagerService {
         try {
             const key = platform.toLowerCase();
 
+            // Check robust LocalDB first
+            const session = await LocalDB.getSessionData(key);
+            if (session) {
+                if (Date.now() > session.expiry) {
+                    await LocalDB.clearSessionData(key);
+                    await CookieManagerService._clearStorageKeys(key);
+                    return null;
+                }
+                
+                // Check if file already exists natively
+                let currentPath = await YtDlpNative.getCookiesFilePath(key);
+                
+                if (!currentPath) {
+                    // Rewrite the file dynamically only if it's missing
+                    // (Fixes the bug where cookie path messes up after app update)
+                    currentPath = await YtDlpNative.saveCookiesToFile(session.cookieString, key);
+                }
+                return currentPath;
+            }
+
+            // Fallback for older sessions
             const expiryStr = await AsyncStorage.getItem(`cookies_expiry_${key}`);
             if (expiryStr && Date.now() > parseInt(expiryStr, 10)) {
                 await CookieManagerService._clearStorageKeys(key);
@@ -249,9 +271,15 @@ export class CookieManagerService {
 
             // We no longer store the absolute cookies_path in AsyncStorage
             // to avoid sandbox path corruption on app updates.
+            const expiry = Date.now() + 7 * 24 * 60 * 60 * 1000;
+            
+            // Save the cookie text directly into LocalDB so we can restore the file later
+            await LocalDB.saveSessionData(key, content, expiry);
+
+            // Legacy fallback
             await AsyncStorage.setItem(
                 `cookies_expiry_${key}`,
-                (Date.now() + 7 * 24 * 60 * 60 * 1000).toString()
+                expiry.toString()
             );
 
             console.log(`[Cookie] ✅ Saved ${finalMap.size} cookies to ${filePath}`);
@@ -305,6 +333,7 @@ export class CookieManagerService {
 
         // ── Step 4: Clear AsyncStorage metadata keys ──
         await CookieManagerService._clearStorageKeys(key);
+        await LocalDB.clearSessionData(key);
     }
 
     static async hasValidSession(platform: string): Promise<boolean> {

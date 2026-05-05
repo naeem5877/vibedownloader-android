@@ -268,9 +268,24 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         val urlLower = url.lowercase()
         
         return when (platform) {
-            "YouTube" -> if (urlLower.contains("/short")) "Shorts" else "Videos"
-            "Instagram" -> if (urlLower.contains("/reel")) "Reels" else if (urlLower.contains("/stories/")) "Stories" else "Posts"
-            "Facebook" -> if (urlLower.contains("/reel")) "Reels" else if (urlLower.contains("/stories/")) "Stories" else "Videos"
+            "YouTube" -> {
+                if (urlLower.contains("/shorts") || urlLower.contains("/short")) "Shorts" 
+                else "Videos"
+            }
+            "Instagram" -> {
+                when {
+                    urlLower.contains("/reel") || urlLower.contains("/reels") -> "Reels"
+                    urlLower.contains("/stories") || urlLower.contains("/story") -> "Stories"
+                    else -> "Posts"
+                }
+            }
+            "Facebook" -> {
+                when {
+                    urlLower.contains("/reel") || urlLower.contains("/reels") -> "Reels"
+                    urlLower.contains("/stories") || urlLower.contains("/story") -> "Stories"
+                    else -> "Videos"
+                }
+            }
             "TikTok" -> "Videos"
             "Spotify", "SoundCloud" -> "Music"
             "Pinterest" -> "Pins"
@@ -753,8 +768,8 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
 
     private fun moveToPublicStorage(sourceFile: File, platform: String, contentType: String): File? {
         val extension = sourceFile.extension.lowercase()
-        val isVideo = listOf("mp4", "mkv", "webm").contains(extension)
-        val isAudio = listOf("mp3", "m4a", "wav", "aac", "flac").contains(extension)
+        val isVideo = listOf("mp4", "mkv", "webm", "mov", "avi", "flv").contains(extension)
+        val isAudio = listOf("mp3", "m4a", "wav", "aac", "flac", "ogg").contains(extension)
         val isImage = listOf("jpg", "png", "webp", "jpeg").contains(extension)
         
         // Use proper directories based on file type for better gallery integration
@@ -769,11 +784,15 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
             "mp4" -> "video/mp4"
             "mkv" -> "video/x-matroska"
             "webm" -> "video/webm"
+            "mov" -> "video/quicktime"
+            "avi" -> "video/x-msvideo"
+            "flv" -> "video/x-flv"
             "mp3" -> "audio/mpeg"
             "m4a" -> "audio/mp4"
             "aac" -> "audio/aac"
             "wav" -> "audio/wav"
             "flac" -> "audio/flac"
+            "ogg" -> "audio/ogg"
             "jpg", "jpeg" -> "image/jpeg"
             "png" -> "image/png"
             "webp" -> "image/webp"
@@ -1472,7 +1491,13 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                                 baseDir.absolutePath.contains("Music") -> "Music"
                                 baseDir.absolutePath.contains("Pictures") -> if (pathParts.size >= 3) pathParts[1] else "Images"
                                 baseDir.absolutePath.contains("Movies") -> if (pathParts.size >= 3) pathParts[1] else "Videos"
-                                pathParts.size >= 3 -> pathParts[1]
+                                pathParts.size >= 3 -> {
+                                    // Handle cases where files might be in subfolders like "Shorts" or "Reels"
+                                    val type = pathParts[1]
+                                    // Normalize "Shorts" for Instagram to "Reels" if needed, 
+                                    // but usually we trust the folder name created by getContentType
+                                    if (platform == "Instagram" && type == "Shorts") "Reels" else type
+                                }
                                 else -> "Downloads"
                             }
                             
@@ -1614,9 +1639,12 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 filePath.endsWith(".mp4") -> "video/mp4"
                 filePath.endsWith(".webm") -> "video/webm"
                 filePath.endsWith(".mkv") -> "video/x-matroska"
+                filePath.endsWith(".mov") -> "video/quicktime"
+                filePath.endsWith(".avi") -> "video/x-msvideo"
                 filePath.endsWith(".mp3") -> "audio/mpeg"
                 filePath.endsWith(".m4a") -> "audio/m4a"
                 filePath.endsWith(".flac") -> "audio/flac"
+                filePath.endsWith(".ogg") -> "audio/ogg"
                 filePath.endsWith(".jpg") || filePath.endsWith(".jpeg") -> "image/jpeg"
                 filePath.endsWith(".png") -> "image/png"
                 filePath.endsWith(".webp") -> "image/webp"
@@ -1655,9 +1683,12 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 filePath.endsWith(".mp4") -> "video/mp4"
                 filePath.endsWith(".webm") -> "video/webm"
                 filePath.endsWith(".mkv") -> "video/x-matroska"
+                filePath.endsWith(".mov") -> "video/quicktime"
+                filePath.endsWith(".avi") -> "video/x-msvideo"
                 filePath.endsWith(".mp3") -> "audio/mpeg"
                 filePath.endsWith(".m4a") -> "audio/m4a"
                 filePath.endsWith(".flac") -> "audio/flac"
+                filePath.endsWith(".ogg") -> "audio/ogg"
                 filePath.endsWith(".jpg") || filePath.endsWith(".jpeg") -> "image/jpeg"
                 filePath.endsWith(".png") -> "image/png"
                 filePath.endsWith(".webp") -> "image/webp"

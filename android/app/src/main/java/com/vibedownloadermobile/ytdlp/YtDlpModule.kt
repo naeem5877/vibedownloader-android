@@ -922,6 +922,11 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                     if (!cookiesPath.isNullOrEmpty()) request.addOption("--cookies", cookiesPath)
                 }
 
+                if (options?.hasKey("extractorArgs") == true) {
+                    val args = options.getString("extractorArgs")
+                    if (!args.isNullOrEmpty()) request.addOption("--extractor-args", args)
+                }
+
                 val response = YoutubeDL.getInstance().execute(request)
                 promise.resolve(response.out)
             } catch (e: Exception) {

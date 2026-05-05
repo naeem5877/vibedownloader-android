@@ -87,7 +87,7 @@ export interface YtDlpNativeModule {
     getSupportedPlatforms(): Promise<string[]>;
     validateUrl(url: string): Promise<ValidationResult>;
     getOutputDirectory(): Promise<string>;
-    getPlaylistInfo(url: string, options?: { cookies?: string }): Promise<string>;
+    getPlaylistInfo(url: string, options?: { cookies?: string; extractorArgs?: string }): Promise<string>;
     listDownloadedFiles(): Promise<DownloadedFile[]>;
     deleteFile(filePath: string): Promise<boolean>;
     openFile(filePath: string): Promise<boolean>;

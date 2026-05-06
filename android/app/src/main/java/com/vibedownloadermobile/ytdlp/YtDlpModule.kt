@@ -694,6 +694,16 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                     if (!cookiesPath.isNullOrEmpty()) request.addOption("--cookies", cookiesPath)
                 }
                 
+                if (options?.hasKey("args") == true) {
+                    val extraArgs = options.getArray("args")
+                    if (extraArgs != null) {
+                        for (i in 0 until extraArgs.size()) {
+                            val arg = extraArgs.getString(i)
+                            if (!arg.isNullOrEmpty()) request.addOption(arg)
+                        }
+                    }
+                }
+                
                 if (platform == "YouTube") {
                     // tv_embedded bypasses age-restricted content on ALL Android versions without cookies
                     request.addOption("--extractor-args", "youtube:player_client=tv_embedded,web")
@@ -912,6 +922,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 // Longer timeout for stories (multiple entries to resolve)
                 request.addOption("--socket-timeout", if (isStoryUrl) "45" else "30")
                 request.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                request.addOption("--no-warnings")
                 
                 if (url.contains("instagram.com")) {
                     request.addOption("--referer", "https://www.instagram.com/")
@@ -925,6 +936,19 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 if (options?.hasKey("extractorArgs") == true) {
                     val args = options.getString("extractorArgs")
                     if (!args.isNullOrEmpty()) request.addOption("--extractor-args", args)
+                }
+
+                if (options?.hasKey("args") == true) {
+                    val extraArgs = options.getArray("args")
+                    if (extraArgs != null) {
+                        for (i in 0 until extraArgs.size()) {
+                            val arg = extraArgs.getString(i)
+                            if (!arg.isNullOrEmpty()) {
+                                // Add individual option. Note: this expects a full option like "--no-warnings"
+                                request.addOption(arg)
+                            }
+                        }
+                    }
                 }
 
                 val response = YoutubeDL.getInstance().execute(request)
@@ -1620,6 +1644,72 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
             promise.resolve(vibeDir.absolutePath)
         } catch (e: Exception) {
             promise.reject("ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun getClipboardText(promise: Promise) {
+        scope.launch {
+            try {
+                withContext(Dispatchers.Main) {
+                    val clipboard = reactApplicationContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    if (!clipboard.hasPrimaryClip()) {
+                        promise.resolve("")
+                    } else {
+                        val item = clipboard.primaryClip?.getItemAt(0)
+                        promise.resolve(item?.text?.toString() ?: "")
+                    }
+                }
+            } catch (e: Exception) {
+                promise.reject("CLIPBOARD_ERROR", e.message)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun getSharedText(promise: Promise) {
+        val activity = currentActivity
+        val intent = activity?.intent
+        if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+            val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+            promise.resolve(sharedText)
+        } else {
+            promise.resolve(null)
+        }
+    }
+
+    @ReactMethod
+    fun getSharedData(promise: Promise) {
+        val activity = currentActivity
+        val intent = activity?.intent
+        if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+            val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+            if (sharedText != null) {
+                val data = WritableNativeMap().apply {
+                    putString("url", sharedText)
+                    putString("platform", getPlatformName(sharedText))
+                    putBoolean("autoFetch", true)
+                }
+                promise.resolve(data)
+                return
+            }
+        }
+        promise.resolve(null)
+    }
+
+    @ReactMethod
+    fun getVersions(promise: Promise) {
+        try {
+            val pInfo = reactApplicationContext.packageManager.getPackageInfo(reactApplicationContext.packageName, 0)
+            val version = pInfo.versionName
+            val ytdlpVersion = YoutubeDL.getInstance().version(reactApplicationContext)
+            val result = WritableNativeMap().apply {
+                putString("appVersion", version)
+                putString("ytdlpVersion", ytdlpVersion)
+            }
+            promise.resolve(result)
+        } catch (e: Exception) {
+            promise.reject("VERSION_ERROR", e.message)
         }
     }
 

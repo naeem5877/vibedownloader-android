@@ -21,7 +21,7 @@ interface UseYtDlpState {
 }
 
 export interface UseYtDlpActions {
-    fetchInfo: (url: string, options?: { cookies?: string }) => Promise<void>;
+    fetchInfo: (url: string, options?: { cookies?: string; args?: string[] }) => Promise<void>;
     download: (url: string, formatId: string | null, options?: { title?: string; artist?: string; platform?: string; cookies?: string; thumbnailPath?: string }) => Promise<DownloadResult | null>;
     downloadSpotifyTrack: (searchQuery: string, title: string, artist: string, thumbnail: string | null) => Promise<DownloadResult | null>;
     cancelDownload: () => Promise<void>;
@@ -125,7 +125,7 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
 
     const generateProcessId = () => Math.random().toString(36).substring(7);
 
-    const fetchInfo = useCallback(async (url: string, options?: { cookies?: string }) => {
+    const fetchInfo = useCallback(async (url: string, options?: { cookies?: string; args?: string[] }) => {
         setState((prev) => ({
             ...prev,
             isLoading: true,

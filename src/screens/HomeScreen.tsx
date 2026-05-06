@@ -280,6 +280,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
 
         // 1.5 Check Instagram / Facebook Profile for Stories
         const igRegex = /(?:https?:\/\/)?(?:www\.)?instagram\.com\/([a-zA-Z0-9._]+)\/?$/;
+        const igHighlightRegex = /(?:https?:\/\/)?(?:www\.)?instagram\.com\/stories\/highlights\/([0-9]+)\/?/;
         const fbRegex = /(?:https?:\/\/)?(?:www\.)?facebook\.com\/([a-zA-Z0-9._-]+)\/?$/;
         
         let isStoryFetch = false;
@@ -297,8 +298,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
             if (match && match[1] && !['stories', 'watch', 'groups', 'events'].includes(match[1].toLowerCase())) {
                 isStoryFetch = true;
                 storyUrl = `https://www.facebook.com/${match[1]}/stories/`;
-                platformName = 'facebook';
-            } else if (inputStr.startsWith('@')) {
+            platformName = 'facebook';
+        } else if (inputStr.includes('/stories/highlights/')) {
+            isStoryFetch = true;
+            storyUrl = inputStr;
+            platformName = 'instagram';
+        } else if (inputStr.startsWith('@')) {
                 isStoryFetch = true;
                 const username = inputStr.substring(1);
                 platformName = detectedPlatform?.toLowerCase() === 'facebook' ? 'facebook' : 'instagram';
@@ -339,9 +344,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
 
                      const playlistJson = await YtDlpNative.getPlaylistInfo(storyUrl, { 
                          cookies: cookiesPath || undefined,
-                         extractorArgs 
+                         extractorArgs,
+                         args: ['--no-warnings']
                      });
-                     const data = JSON.parse(playlistJson);
+                     
+                     // Sanitize JSON in case there are warnings/logs prepended by yt-dlp/python
+                     const jsonStart = playlistJson.indexOf('{');
+                     if (jsonStart === -1) throw new Error('Invalid response from server (no JSON found)');
+                     const sanitizedJson = playlistJson.substring(jsonStart);
+                     
+                     const data = JSON.parse(sanitizedJson);
                      setPlaylistTitle(data.title || `${platformName.charAt(0).toUpperCase() + platformName.slice(1)} Stories`);
                      setPlaylistImage(data.thumbnails?.[0]?.url || data.thumbnail);
                      
@@ -361,10 +373,18 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                                  if (instagramMode === 'highlights' && entry.id) {
                                      // For highlights, the URL should be constructed properly if not present
                                      entryUrl = entry.url || `https://www.instagram.com/stories/highlights/${entry.id}/`;
+                                 } else if (entry.id) {
+                                     // Check if entry ID is a highlight ID (long numeric) vs a story ID
+                                     const isHighlightId = /^[0-9]{15,25}$/.test(entry.id);
+                                     if (isHighlightId) {
+                                         entryUrl = `https://www.instagram.com/stories/highlights/${entry.id}/`;
+                                     } else {
+                                         entryUrl = (storyUsername && entry.id)
+                                             ? `https://www.instagram.com/stories/${storyUsername}/${entry.id}/`
+                                             : storyUrl;
+                                     }
                                  } else {
-                                     entryUrl = (storyUsername && entryId)
-                                         ? `https://www.instagram.com/stories/${storyUsername}/${entryId}/`
-                                         : storyUrl;
+                                     entryUrl = storyUrl;
                                  }
                              }
                          }
@@ -376,6 +396,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                              url: entryUrl,
                              thumbnail: entry.thumbnail || entry.thumbnails?.[0]?.url,
                              type: platformName,
+                             isReel: (platformName === 'instagram' && instagramMode === 'highlights' && !storyUrl.includes('/highlights/')),
                          };
                      });
 
@@ -442,7 +463,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
         // 3. Normal Single Fetch
         try {
             const cookiesPath = detectedPlatform ? await CookieManagerService.getCookiesForPlatform(detectedPlatform) : null;
-            await actions.fetchInfo(text, { cookies: cookiesPath || undefined });
+            await actions.fetchInfo(text, { cookies: cookiesPath || undefined, args: ['--no-warnings'] });
             Haptics.success();
 
             // If YT Music and album art arrived already, patch the thumbnail now.
@@ -454,7 +475,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 ToastAndroid.LONG
             );
         }
-    }, [url, actions, detectedPlatform]);
+    }, [url, actions, detectedPlatform, instagramMode]);
 
     const checkShareIntent = useCallback(async () => {
         try {
@@ -801,6 +822,74 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
             setIsLosslessDownloading(false);
         }
     }, [state.videoInfo, losslessAvailability, actions]);
+    
+    const handlePlaylistItemPress = useCallback(async (item: any) => {
+        if (!item.isReel) {
+            // Normal behavior: toggle selection is handled by the component if onItemPress is NOT called, 
+            // but we are passing onItemPress so we must handle toggle here too if we want selection.
+            // Actually, we can just return and let the modal handle it? No, if onItemPress is provided, 
+            // the modal expects us to handle everything.
+            // Wait, I'll update the modal to handle toggle internally if onItemPress returns false or something? 
+            // Better to just handle it here.
+            return; 
+        }
+
+        // It's a reel! Fetch its contents.
+        ToastAndroid.show(`Opening ${item.title}...`, ToastAndroid.SHORT);
+        setIsPlaylistLoading(true);
+        
+        try {
+            const platformName = item.type || 'instagram';
+            const cookiesPath = await CookieManagerService.getCookiesForPlatform(platformName);
+            
+            if (YtDlpNative && YtDlpNative.getPlaylistInfo) {
+                // Fetch the specific highlight reel URL
+                const playlistJson = await YtDlpNative.getPlaylistInfo(item.url, { 
+                    cookies: cookiesPath || undefined,
+                    args: ['--no-warnings']
+                });
+                
+                // Sanitize JSON
+                const jsonStart = playlistJson.indexOf('{');
+                if (jsonStart === -1) throw new Error('Invalid response from server');
+                const sanitizedJson = playlistJson.substring(jsonStart);
+                
+                const data = JSON.parse(sanitizedJson);
+                setPlaylistTitle(data.title || item.title);
+                setPlaylistImage(data.thumbnails?.[0]?.url || data.thumbnail || item.thumbnail);
+                
+                const items = (data.entries || []).map((entry: any, index: number) => {
+                    let entryUrl = entry.url || entry.webpage_url || '';
+                    if (!entryUrl.startsWith('http')) {
+                        // For highlights, the entries are stories
+                        entryUrl = `https://www.instagram.com/stories/highlights/${data.id || item.id}/${entry.id}/`;
+                    }
+                    
+                    return {
+                        id: entry.id || `story-${index}`,
+                        title: entry.title || `Story ${index + 1}`,
+                        author: entry.uploader || data.title || item.author || 'Unknown',
+                        duration: entry.duration ? `${Math.floor(entry.duration / 60)}:${(entry.duration % 60).toString().padStart(2, '0')}` : undefined,
+                        url: entryUrl,
+                        thumbnail: entry.thumbnail || entry.thumbnails?.[0]?.url,
+                        type: platformName,
+                        isReel: false, // These are the actual stories
+                    };
+                });
+
+                if (items.length === 0) {
+                    ToastAndroid.show('No stories found in this highlight.', ToastAndroid.SHORT);
+                } else {
+                    setPlaylistItems(items);
+                }
+            }
+        } catch (error: any) {
+            console.warn('Reel fetch error:', error);
+            ToastAndroid.show(`Failed to open highlight: ${error.message || 'Unknown error'}`, ToastAndroid.SHORT);
+        } finally {
+            setIsPlaylistLoading(false);
+        }
+    }, [setPlaylistItems, setPlaylistTitle, setPlaylistImage, setIsPlaylistLoading]);
 
     const handleBatchDownload = useCallback(async (selectedItems: any[], formatId: string) => {
         // Close the playlist modal first — we MUST wait for its slide-down animation
@@ -1238,6 +1327,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                     items={playlistItems}
                     platformColor={platformColor}
                     isLoading={isPlaylistLoading}
+                    onItemPress={handlePlaylistItemPress}
                 />
 
                 {/* Update Modal */}

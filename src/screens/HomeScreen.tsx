@@ -1030,7 +1030,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                     <View style={styles.headerTop}>
                         <View style={styles.headerBrand}>
                             <Text style={styles.logo}>Vibe</Text>
-                            <Text style={[styles.logo, { color: Colors.primary }]}>Downloader</Text>
+                            <Text style={[styles.logo, { color: platformColor }]}>Downloader</Text>
                         </View>
 
                         {/* Header Actions */}
@@ -1062,7 +1062,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                             )}
                         </View>
                     </View>
-                    <Text style={styles.tagline}>
+                    <Text style={[styles.tagline, { color: platformColor, opacity: 0.9 }]}>
                         Download from any platform, instantly ⚡
                     </Text>
                 </Animated.View>
@@ -1184,23 +1184,23 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                         {/* Instagram Mode Toggle */}
                         {detectedPlatform?.toLowerCase() === 'instagram' && (
                             <View style={styles.modeToggleContainer}>
-                                <TouchableOpacity 
-                                    style={[styles.modeBtn, instagramMode === 'stories' && styles.modeBtnActive]}
+                                <TouchableOpacity
+                                    style={[styles.modeBtn, instagramMode === 'stories' && { backgroundColor: `${platformColor}20`, borderColor: `${platformColor}40`, borderWidth: 1 }]}
                                     onPress={() => {
                                         setInstagramMode('stories');
                                         Haptics.selection();
                                     }}
                                 >
-                                    <Text style={[styles.modeBtnText, instagramMode === 'stories' && styles.modeBtnTextActive]}>Stories</Text>
+                                    <Text style={[styles.modeBtnText, instagramMode === 'stories' && { color: platformColor, fontWeight: '800' }]}>Stories</Text>
                                 </TouchableOpacity>
-                                <TouchableOpacity 
-                                    style={[styles.modeBtn, instagramMode === 'highlights' && styles.modeBtnActive]}
+                                <TouchableOpacity
+                                    style={[styles.modeBtn, instagramMode === 'highlights' && { backgroundColor: `${platformColor}20`, borderColor: `${platformColor}40`, borderWidth: 1 }]}
                                     onPress={() => {
                                         setInstagramMode('highlights');
                                         Haptics.selection();
                                     }}
                                 >
-                                    <Text style={[styles.modeBtnText, instagramMode === 'highlights' && styles.modeBtnTextActive]}>Highlights</Text>
+                                    <Text style={[styles.modeBtnText, instagramMode === 'highlights' && { color: platformColor, fontWeight: '800' }]}>Highlights</Text>
                                 </TouchableOpacity>
                             </View>
                         )}

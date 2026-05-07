@@ -132,7 +132,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
     const [loggedInPlatforms, setLoggedInPlatforms] = useState<Record<string, boolean>>({});
 
     // Check login state periodically or on change
+    // sessionsRestored ensures we don't run checkLogins before
+    // LocalDB.restoreSessions() has finished writing the cookie files.
+    const [sessionsRestored, setSessionsRestored] = useState(false);
+
     useEffect(() => {
+        if (!sessionsRestored) return; // wait for cookie files to be written first
         const checkLogins = async () => {
             const platforms = ['instagram', 'facebook', 'youtube', 'tiktok', 'twitter', 'x', 'twitch'];
             const states: Record<string, boolean> = {};
@@ -143,7 +148,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
             setLoggedInPlatforms(states);
         };
         checkLogins();
-    }, [loginModalVisible, detectedPlatform]);
+    }, [sessionsRestored, loginModalVisible, detectedPlatform]);
 
     const headerFadeAnim = useRef(new Animated.Value(0)).current;
     const headerSlideAnim = useRef(new Animated.Value(-20)).current;
@@ -590,24 +595,25 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
     // --- Effects ---
 
     useEffect(() => {
-        // ── Cookie cache invalidation (Bug #1 + #2 fix) ──
-        // Runs once on every app start. If the stored version doesn't match
-        // COOKIE_CACHE_VERSION, wipe all stale cookie metadata so the user
-        // is forced to re-login with fresh tokens.
+        // ── Cookie cache invalidation + session restore on every app start ──
         const invalidateStaleCookieCache = async () => {
             try {
                 const ALL_PLATFORMS = ['instagram', 'facebook', 'youtube', 'tiktok', 'twitter', 'twitch'];
 
-                // Check 1: version-based invalidation (for APK update without uninstall)
+                // Check 1: version-based invalidation — only clear the OLD path-based
+                // AsyncStorage keys (cookies_path_*, cookies_expiry_*). Do NOT wipe
+                // LocalDB sessions: those contain the full cookie string and are needed
+                // by restoreSessions() to recreate the file after an APK update.
                 const savedVersion = await AsyncStorage.getItem('cookie_cache_version');
                 if (savedVersion !== COOKIE_CACHE_VERSION) {
-                    console.log(`[Cookie] Cache version mismatch (${savedVersion} → ${COOKIE_CACHE_VERSION}) — clearing stale cookie metadata`);
+                    console.log(`[Cookie] Cache version mismatch (${savedVersion} → ${COOKIE_CACHE_VERSION}) — clearing stale path cache only`);
                     const keysToRemove = ALL_PLATFORMS.flatMap(p => [
                         `cookies_path_${p}`,
                         `cookies_expiry_${p}`,
                     ]);
                     await AsyncStorage.multiRemove(keysToRemove);
-                    await LocalDB.clearAllSessions();
+                    // ⚠️ Do NOT call LocalDB.clearAllSessions() here — that would
+                    // destroy the cookie strings we need to restore the files.
                     await AsyncStorage.setItem('cookie_cache_version', COOKIE_CACHE_VERSION);
                 }
 
@@ -615,8 +621,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 const savedInstallId = await AsyncStorage.getItem('vibe_install_id');
                 if (!savedInstallId) {
                     // AsyncStorage was completely wiped — this is a fresh install.
-                    // Clear any cookie .txt files that may have survived in filesDir
-                    // (filesDir is wiped on full uninstall, so this is mostly a safety net).
                     console.log('[Cookie] Fresh install detected — ensuring clean cookie state');
                     await LocalDB.clearAllSessions();
                     await AsyncStorage.setItem('vibe_install_id', Date.now().toString());
@@ -625,12 +629,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
             } catch (e) {
                 console.warn('[Cookie] Cache invalidation check failed (non-fatal):', e);
             }
-            
-            // Restore actual cookie sessions from the local database
-            // This ensures cookies survive even if filesDir is reset/updated
+
+            // MUST await this: restoreSessions() rewrites the physical cookie .txt files
+            // from LocalDB. If we don't await it, the first getCookiesForPlatform() call
+            // may run before the file is written and incorrectly report "not logged in".
             await LocalDB.restoreSessions();
+
+            // Signal that cookie files are ready — checkLogins effect can now safely run.
+            setSessionsRestored(true);
         };
 
+        // Await the full restore chain before marking any login states.
+        // Without this, checkLogins() (triggered by the effect below) races
+        // against restoreSessions() and sees missing cookie files.
         invalidateStaleCookieCache();
 
         // Header entrance animation
@@ -866,22 +877,47 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
 
     const handleOpenLogin = useCallback(async () => {
         if (!detectedPlatform) return;
-        
+
         const platform = (detectedPlatform.toLowerCase() === 'x' ? 'twitter' : detectedPlatform.toLowerCase());
-        
+
         try {
             const result = await WebViewLoginNative.openLogin(platform);
-            
+
             if (result.success && result.cookiePath) {
-                // ✅ Store path so getCookiesForPlatform() can find it
+                // The native WebViewLoginActivity wrote the cookie file and
+                // the WebView cookies are still live in Android's CookieManager.
+                // Call extractAndSaveCookies() to:
+                //   1. Re-extract those cookies from the CookieManager
+                //   2. Save a fresh Netscape file via YtDlpNative.saveCookiesToFile()
+                //   3. Persist the full cookie string to LocalDB
+                // This is the critical fix: without step 3, after any APK update
+                // the file path changes and there is nothing to restore from.
+                try {
+                    const platformUrl = {
+                        instagram: 'https://www.instagram.com',
+                        facebook:  'https://www.facebook.com',
+                        youtube:   'https://www.youtube.com',
+                        tiktok:    'https://www.tiktok.com',
+                        twitter:   'https://twitter.com',
+                        twitch:    'https://www.twitch.tv',
+                    }[platform] ?? `https://www.${platform}.com`;
+                    await CookieManagerService.extractAndSaveCookies(platform, platformUrl);
+                    console.log(`[handleOpenLogin] Cookie string persisted to LocalDB for ${platform}`);
+                } catch (extractErr) {
+                    // Non-fatal: the file from the native activity still works right now.
+                    // Legacy AsyncStorage keys below will act as fallback.
+                    console.warn(`[handleOpenLogin] extractAndSaveCookies failed (non-fatal):`, extractErr);
+                }
+
+                // Keep the legacy AsyncStorage path key as a fallback for old code paths
                 await AsyncStorage.setItem(`cookies_path_${platform}`, result.cookiePath);
                 await AsyncStorage.setItem(
                     `cookies_expiry_${platform}`,
                     (Date.now() + 7 * 24 * 60 * 60 * 1000).toString()
                 );
-                
+
                 ToastAndroid.show(`✅ ${detectedPlatform} login successful!`, ToastAndroid.SHORT);
-                
+
                 // Refresh login states
                 const platforms = ['instagram', 'facebook', 'youtube', 'tiktok', 'twitter', 'x', 'twitch'];
                 const states: Record<string, boolean> = {};

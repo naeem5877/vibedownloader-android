@@ -12,6 +12,7 @@ interface PlaylistItem {
     url: string; // Actual URL to download (e.g. YouTube video URL or search query)
     originalUrl?: string; // Original Spotify/YT URL
     type?: string; // platform type like 'instagram', 'facebook', 'youtube'
+    isReel?: boolean; // If true, it's a folder/highlight reel that can be opened
 }
 
 interface PlaylistSelectionModalProps {
@@ -23,6 +24,7 @@ interface PlaylistSelectionModalProps {
     items: PlaylistItem[];
     platformColor: string;
     isLoading?: boolean;
+    onItemPress?: (item: PlaylistItem) => void;
 }
 
 export const PlaylistSelectionModal: React.FC<PlaylistSelectionModalProps> = ({
@@ -34,6 +36,7 @@ export const PlaylistSelectionModal: React.FC<PlaylistSelectionModalProps> = ({
     items,
     platformColor,
     isLoading,
+    onItemPress,
 }) => {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -76,7 +79,7 @@ export const PlaylistSelectionModal: React.FC<PlaylistSelectionModalProps> = ({
         return (
             <TouchableOpacity
                 style={[styles.itemRow, isSelected && { backgroundColor: `${platformColor}10` }]}
-                onPress={() => toggleSelection(item.id)}
+                onPress={() => item.isReel && onItemPress ? onItemPress(item) : toggleSelection(item.id)}
                 activeOpacity={0.7}
             >
                 <View style={[styles.checkbox, isSelected && { backgroundColor: platformColor, borderColor: platformColor }]}>
@@ -98,7 +101,7 @@ export const PlaylistSelectionModal: React.FC<PlaylistSelectionModalProps> = ({
         return (
             <TouchableOpacity
                 style={[styles.storyGridItem, isSelected && { borderColor: platformColor, borderWidth: 2 }]}
-                onPress={() => toggleSelection(item.id)}
+                onPress={() => item.isReel && onItemPress ? onItemPress(item) : toggleSelection(item.id)}
                 activeOpacity={0.8}
             >
                 {item.thumbnail ? (
@@ -108,9 +111,15 @@ export const PlaylistSelectionModal: React.FC<PlaylistSelectionModalProps> = ({
                 )}
                 <View style={styles.storyGradient} />
                 
-                <View style={[styles.storyCheckbox, isSelected ? { backgroundColor: platformColor, borderColor: platformColor } : { backgroundColor: 'rgba(0,0,0,0.5)', borderColor: '#FFF' }]}>
-                    {isSelected && <CheckIcon size={12} color="#FFF" />}
-                </View>
+                {item.isReel ? (
+                    <View style={[styles.storyCheckbox, { backgroundColor: 'rgba(0,0,0,0.7)', borderColor: platformColor }]}>
+                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: platformColor }} />
+                    </View>
+                ) : (
+                    <View style={[styles.storyCheckbox, isSelected ? { backgroundColor: platformColor, borderColor: platformColor } : { backgroundColor: 'rgba(0,0,0,0.5)', borderColor: '#FFF' }]}>
+                        {isSelected && <CheckIcon size={12} color="#FFF" />}
+                    </View>
+                )}
 
                 {item.duration && (
                     <View style={styles.storyDurationContainer}>

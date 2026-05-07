@@ -694,6 +694,16 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                     if (!cookiesPath.isNullOrEmpty()) request.addOption("--cookies", cookiesPath)
                 }
                 
+                if (options?.hasKey("args") == true) {
+                    val extraArgs = options.getArray("args")
+                    if (extraArgs != null) {
+                        for (i in 0 until extraArgs.size()) {
+                            val arg = extraArgs.getString(i)
+                            if (!arg.isNullOrEmpty()) request.addOption(arg)
+                        }
+                    }
+                }
+                
                 if (platform == "YouTube") {
                     // tv_embedded bypasses age-restricted content on ALL Android versions without cookies
                     request.addOption("--extractor-args", "youtube:player_client=tv_embedded,web")
@@ -912,6 +922,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 // Longer timeout for stories (multiple entries to resolve)
                 request.addOption("--socket-timeout", if (isStoryUrl) "45" else "30")
                 request.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                request.addOption("--no-warnings")
                 
                 if (url.contains("instagram.com")) {
                     request.addOption("--referer", "https://www.instagram.com/")
@@ -920,6 +931,24 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 if (options?.hasKey("cookies") == true) {
                     val cookiesPath = options.getString("cookies")
                     if (!cookiesPath.isNullOrEmpty()) request.addOption("--cookies", cookiesPath)
+                }
+
+                if (options?.hasKey("extractorArgs") == true) {
+                    val args = options.getString("extractorArgs")
+                    if (!args.isNullOrEmpty()) request.addOption("--extractor-args", args)
+                }
+
+                if (options?.hasKey("args") == true) {
+                    val extraArgs = options.getArray("args")
+                    if (extraArgs != null) {
+                        for (i in 0 until extraArgs.size()) {
+                            val arg = extraArgs.getString(i)
+                            if (!arg.isNullOrEmpty()) {
+                                // Add individual option. Note: this expects a full option like "--no-warnings"
+                                request.addOption(arg)
+                            }
+                        }
+                    }
                 }
 
                 val response = YoutubeDL.getInstance().execute(request)
@@ -1617,6 +1646,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
             promise.reject("ERROR", e.message)
         }
     }
+
 
 
     

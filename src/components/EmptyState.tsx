@@ -166,9 +166,9 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
         },
         Spotify: {
             title: 'Spotify Downloader',
-            subtitle: 'Music, Lossless & Hi-Res',
+            subtitle: 'Tracks, Albums & Playlists',
             support: 'Supported Content',
-            features: ['🎵 Music', '🎬 Video', '🎧 Lossless', '💎 Hi-Res'],
+            features: ['🎵 Music', '📋 Playlists', '💿 Albums', '🎨 Cover Art'],
             icon: <SpotifyIcon size={44} color={PlatformThemes.Spotify.primary} />,
             color: PlatformThemes.Spotify.primary
         },

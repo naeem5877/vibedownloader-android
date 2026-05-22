@@ -18,6 +18,7 @@ export interface QueueItem {
     eta: number;
     errorMessage?: string;
     cookies?: string;
+    album?: string;
 }
 
 interface UseDownloadQueueReturn {
@@ -98,6 +99,7 @@ export const useDownloadQueue = (): UseDownloadQueueReturn => {
                             nextItem.searchQuery,
                             nextItem.title,
                             nextItem.author,
+                            nextItem.album || 'Unknown',
                             nextItem.thumbnail || null,
                             processId
                         );

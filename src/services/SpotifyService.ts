@@ -454,7 +454,7 @@ export async function getPlaylistTracks(playlistId: string): Promise<SpotifyTrac
 
 export function buildYouTubeSearchQuery(track: SpotifyTrack): string {
     const artists = track.artists.map(a => a.name).join(' ');
-    return `${track.name} ${artists} audio`;
+    return `${track.name} ${artists}`;
 }
 
 export function getHighQualityThumbnail(track: SpotifyTrack): string {

@@ -40,7 +40,7 @@ import { LocalDB } from '../services/LocalDB';
 import { PlaylistSelectionModal } from '../components/PlaylistSelectionModal';
 import { SkeletonCard } from '../components/SkeletonCard';
 import { DiscordButton } from '../components/DiscordButton';
-import { LosslessCard } from '../components/LosslessCard';
+
 // BatchDownloadProgress removed in favor of useDownloadQueue
 import { useYtDlp } from '../hooks/useYtDlp';
 import { VideoFormat, ytDlpEventEmitter, YtDlpNative } from '../native/YtDlpModule';
@@ -50,7 +50,7 @@ import { useDownloadQueue } from '../hooks/useDownloadQueue';
 import { DownloadQueuePanel } from '../components/DownloadQueuePanel';
 import { checkForUpdates, UpdateInfo } from '../services/GitHubUpdateService';
 import { getSpotifyPlaylist, extractSpotifyId, getTrackInfo, buildYouTubeSearchQuery, formatTrackMetadata } from '../services/SpotifyService';
-import { checkLosslessAvailability, getLosslessDownloadUrl, LosslessAvailability } from '../services/LosslessService';
+
 import { getYouTubeMusicAlbumArt, isYouTubeMusicUrl, extractYouTubeVideoId } from '../services/YouTubeMusicService';
 import { detectPlatform } from '../utils/platform';
 import { Haptics } from '../utils/haptics';
@@ -101,10 +101,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
     // Settings Modal State
     const [settingsVisible, setSettingsVisible] = useState(false);
 
-    // Lossless State
-    const [losslessAvailability, setLosslessAvailability] = useState<LosslessAvailability | null>(null);
-    const [isCheckingLossless, setIsCheckingLossless] = useState(false);
-    const [isLosslessDownloading, setIsLosslessDownloading] = useState(false);
+
 
     // YouTube Music album art state
     // When a music.youtube.com URL is detected we fetch the real lh3 album art
@@ -260,21 +257,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
 
                 actions.setVideoInfo(syntheticInfo);
 
-                // Check lossless availability in background
-                setIsCheckingLossless(true);
-                setLosslessAvailability(null);
-                checkLosslessAvailability(spotifyData.id)
-                    .then((result) => {
-                        setLosslessAvailability(result);
-                        if (result.available) {
-                            ToastAndroid.show('🎵 Lossless FLAC available!', ToastAndroid.SHORT);
-                        }
-                    })
-                    .catch((err) => {
-                        console.warn('Lossless check failed:', err);
-                        setLosslessAvailability({ available: false, source: 'none' });
-                    })
-                    .finally(() => setIsCheckingLossless(false));
+
 
             } catch (error: any) {
                 console.error('Spotify Track Error', error);
@@ -796,43 +779,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
         };
     }, [handleFetch, checkShareIntent]);
 
-    // ── Lossless Download Handler ──
-    const handleLosslessDownload = useCallback(async () => {
-        if (!state.videoInfo || !losslessAvailability?.downloadUrl) return;
-
-        const info = state.videoInfo as any;
-        const spotifyId = info.spotifyId;
-        if (!spotifyId) {
-            ToastAndroid.show('No Spotify ID found', ToastAndroid.SHORT);
-            return;
-        }
-
-        setIsLosslessDownloading(true);
-        ToastAndroid.show('Downloading lossless FLAC...', ToastAndroid.SHORT);
-
-        try {
-            const downloadUrl = losslessAvailability.downloadUrl;
-
-            // Use standard download action with specific format ID for lossless
-            // This triggers the native module to use the correct User-Agent and skip conversion
-            const result = await actions.download(downloadUrl, 'lossless_flac', {
-                title: info.title,
-                artist: info.uploader,
-                platform: 'Spotify' // Force Spotify for better categorization
-            });
-
-            if (result && (result.exitCode === 0 || !result.hasOwnProperty('exitCode'))) {
-                ToastAndroid.show(`✓ Lossless FLAC saved!`, ToastAndroid.SHORT);
-            } else if (result !== null) {
-                throw new Error(`Download failed (exit code: ${result?.exitCode})`);
-            }
-        } catch (error: any) {
-            console.error('Lossless download error:', error);
-            ToastAndroid.show(`Lossless download failed: ${error.message}`, ToastAndroid.LONG);
-        } finally {
-            setIsLosslessDownloading(false);
-        }
-    }, [state.videoInfo, losslessAvailability, actions]);
     
     const handlePlaylistItemPress = useCallback(async (item: any) => {
         if (!item.isReel) {
@@ -919,7 +865,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 type: item.type || 'youtube',
                 searchQuery: item.searchQuery,
                 formatId,
-                cookies: cookiesPath || undefined
+                cookies: cookiesPath || undefined,
+                album: item.rawTrack?.album?.name || 'Unknown'
             };
         }));
         addToQueue(items, formatId);
@@ -942,6 +889,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                     info.searchQuery,
                     info.title,
                     info.uploader, // stored artist here
+                    info.rawMetadata?.album || 'Unknown',
                     info.thumbnail
                 );
             } else {
@@ -1253,14 +1201,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 )}
 
                 {/* Download Progress */}
-                {(state.isDownloading || isLosslessDownloading) && (
+                {state.isDownloading && (
                     <View style={styles.progressSection}>
                         <DownloadProgress
                             progress={state.downloadProgress}
                             eta={state.downloadEta}
                             onCancel={handleCancelDownload}
-                            title={isLosslessDownloading ? `🎵 ${state.videoInfo?.title || 'Lossless FLAC'}` : state.videoInfo?.title}
-                            platformColor={isLosslessDownloading ? Colors.lossless : platformColor}
+                            title={state.videoInfo?.title}
+                            platformColor={platformColor}
                             statusLine={state.downloadLine}
                         />
                     </View>
@@ -1276,7 +1224,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 )}
 
                 {/* Video Info & Downloads */}
-                {state.videoInfo && !state.isLoading && !state.isDownloading && !isLosslessDownloading && (
+                {state.videoInfo && !state.isLoading && !state.isDownloading && (
                     <>
                         {/* ... Info Card ... */}
                         <View style={styles.videoSection}>
@@ -1299,17 +1247,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                             )}
                         </View>
 
-                        {/* Lossless FLAC Card (Spotify only) */}
-                        {(isCheckingLossless || (losslessAvailability && losslessAvailability.available)) && (
-                            <LosslessCard
-                                availability={losslessAvailability || { available: false, source: 'none' }}
-                                isLoading={isCheckingLossless}
-                                onDownload={handleLosslessDownload}
-                                title={state.videoInfo.title}
-                                artist={state.videoInfo.uploader}
-                                platformColor={platformColor}
-                            />
-                        )}
+
 
                         {/* Quick Action - Platform Auto-Detect */}
                         <View style={styles.quickActionContainer}>

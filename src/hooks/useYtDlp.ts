@@ -23,7 +23,7 @@ interface UseYtDlpState {
 export interface UseYtDlpActions {
     fetchInfo: (url: string, options?: { cookies?: string; args?: string[] }) => Promise<void>;
     download: (url: string, formatId: string | null, options?: { title?: string; artist?: string; platform?: string; cookies?: string; thumbnailPath?: string }) => Promise<DownloadResult | null>;
-    downloadSpotifyTrack: (searchQuery: string, title: string, artist: string, thumbnail: string | null) => Promise<DownloadResult | null>;
+    downloadSpotifyTrack: (searchQuery: string, title: string, artist: string, album: string, thumbnail: string | null) => Promise<DownloadResult | null>;
     cancelDownload: () => Promise<void>;
     validateUrl: (url: string) => Promise<ValidationResult>;
     reset: () => void;
@@ -223,10 +223,10 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
     );
 
     const downloadSpotifyTrack = useCallback(
-        async (searchQuery: string, title: string, artist: string, thumbnail: string | null) => {
+        async (searchQuery: string, title: string, artist: string, album: string, thumbnail: string | null) => {
             const processId = generateProcessId();
             processIdRef.current = processId;
-
+ 
             setState((prev) => ({
                 ...prev,
                 isDownloading: true,
@@ -235,7 +235,7 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 downloadLine: 'Searching for track...',
                 downloadError: null,
             }));
-
+ 
             // Overall timeout (5 minutes)
             const downloadTimeout = setTimeout(() => {
                 console.warn('Spotify download hard timeout reached (5 min)');
@@ -248,13 +248,13 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                     downloadError: 'Download timed out. Please try again.',
                 }));
             }, 300000);
-
+ 
             try {
                 if (!YtDlpNative || !YtDlpNative.downloadSpotifyTrack) {
                     throw new Error('Native module not available');
                 }
-
-                const result = await YtDlpNative.downloadSpotifyTrack(searchQuery, title, artist, thumbnail, processId);
+ 
+                const result = await YtDlpNative.downloadSpotifyTrack(searchQuery, title, artist, album, thumbnail, processId);
                 clearTimeout(downloadTimeout);
                 setState((prev) => ({ ...prev, isDownloading: false, downloadProgress: 100 }));
                 return result;
@@ -264,10 +264,10 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                     setState((prev) => ({ ...prev, isDownloading: false }));
                     return null;
                 }
-
+ 
                 const errorMessage = error?.message || 'Download failed. Please try again.';
                 console.warn('downloadSpotifyTrack error:', error);
-
+ 
                 setState((prev) => ({
                     ...prev,
                     isDownloading: false,

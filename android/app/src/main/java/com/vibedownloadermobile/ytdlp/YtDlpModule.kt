@@ -23,6 +23,7 @@ import com.yausername.ffmpeg.FFmpeg
 import com.google.gson.Gson
 import org.jaudiotagger.audio.AudioFileIO
 import org.jaudiotagger.tag.images.ArtworkFactory
+import org.jaudiotagger.tag.FieldKey
 import kotlinx.coroutines.*
 import java.io.File
 import java.io.BufferedInputStream
@@ -1043,14 +1044,10 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 }
                 
                 // --- Format and Codec Selection ---
-                val isAudioDownload = formatId?.startsWith("audio") == true || formatId == "audio_best" || formatId == "audio_mp3" || formatId == "lossless_flac"
+                val isAudioDownload = formatId?.startsWith("audio") == true || formatId == "audio_best" || formatId == "audio_mp3"
                 
                 if (!formatId.isNullOrEmpty()) {
                      when {
-                         formatId == "lossless_flac" -> {
-                            // Direct FLAC/Lossless download
-                            request.addOption("-f", "best") // Get original quality without re-encoding
-                        }
                         formatId == "audio_best" || formatId == "audio_mp3" -> {
                             request.addOption("-x")
                             request.addOption("--audio-format", "mp3")
@@ -1301,7 +1298,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
      * @param processId - Unique process ID for tracking
      */
     @ReactMethod
-    fun downloadSpotifyTrack(searchQuery: String, title: String, artist: String, thumbnail: String?, processId: String, promise: Promise) {
+    fun downloadSpotifyTrack(searchQuery: String, title: String, artist: String, album: String, thumbnail: String?, processId: String, promise: Promise) {
         if (!isInitialized) initializeYtDlp()
         
         val isCancelled = AtomicBoolean(false)
@@ -1310,14 +1307,14 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         
         scope.launch {
             try {
-                // Use YouTube search instead of direct Spotify URL
-                val ytSearchUrl = "ytsearch1:$searchQuery"
+                // Use YouTube Music search instead of direct Spotify URL or general YouTube search
+                val ytSearchUrl = "ytmsearch1:$searchQuery"
                 
                 // 1. Download to temp cache directory first (process-specific)
                 val cacheDir = File(reactApplicationContext.cacheDir, "temp_download_$processId")
                 if (!cacheDir.exists()) cacheDir.mkdirs()
                 
-                Log.d(TAG, "Starting Spotify download via YouTube search: $searchQuery")
+                Log.d(TAG, "Starting Spotify download via YouTube Music search: $searchQuery")
                 
                 val request = YoutubeDLRequest(ytSearchUrl)
                 val safeFileName = "$artist - $title".replace(Regex("[^a-zA-Z0-9 \\-_]"), "_").take(100)
@@ -1370,7 +1367,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                     
                     val displayLine = when {
                         line.isNullOrEmpty() -> "Preparing..."
-                        line.contains("Searching", ignoreCase = true) -> "Searching YouTube..."
+                        line.contains("Searching", ignoreCase = true) -> "Searching YouTube Music..."
                         line.contains("Downloading", ignoreCase = true) && progress > 0 -> "${progress.toInt()}% - Downloading..."
                         line.contains("Converting", ignoreCase = true) -> "Converting to MP3..."
                         line.contains("Extracting", ignoreCase = true) -> "Extracting audio..."
@@ -1404,30 +1401,39 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                     ?.maxByOrNull { it.lastModified() }
                 
                 if (downloadedFile != null && downloadedFile.exists()) {
-                    // --- High-Res Album Art Embedding (JAudioTagger) ---
-                    // Spotify special: always embed the high-res Spotify art we pre-downloaded
-                    val preDownloadedThumb = File(cacheDir, "$safeFileName.jpg")
-                    if (preDownloadedThumb.exists()) {
-                        try {
-                            Log.d(TAG, "Embedding high-res Spotify album art via JAudioTagger...")
-                            downloadedFile.setWritable(true)
-                            val audioFile = AudioFileIO.read(downloadedFile)
-                            val tag = audioFile.tagOrCreateAndSetDefault
+                    // --- High-Res Album Art and Metadata Embedding (JAudioTagger) ---
+                    try {
+                        Log.d(TAG, "Embedding Spotify metadata tags and high-res album art via JAudioTagger...")
+                        downloadedFile.setWritable(true)
+                        val audioFile = AudioFileIO.read(downloadedFile)
+                        val tag = audioFile.tagOrCreateAndSetDefault
+                        
+                        // Set standard text tags from Spotify
+                        tag.setField(FieldKey.TITLE, title)
+                        tag.setField(FieldKey.ARTIST, artist)
+                        tag.setField(FieldKey.ALBUM, album)
+                        
+                        // Spotify special: always embed the high-res Spotify art we pre-downloaded
+                        val preDownloadedThumb = File(cacheDir, "$safeFileName.jpg")
+                        if (preDownloadedThumb.exists()) {
                             val artwork = ArtworkFactory.createArtworkFromFile(preDownloadedThumb)
                             tag.deleteArtworkField()
                             tag.setField(artwork)
-                            audioFile.commit()
                             Log.d(TAG, "Spotify album art embedded successfully")
-                        } catch (e: Exception) {
-                            Log.w(TAG, "JAudioTagger embedding failed for Spotify: ${e.message}")
                         }
+                        
+                        audioFile.commit()
+                        Log.d(TAG, "JAudioTagger commit completed successfully")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "JAudioTagger embedding failed for Spotify: ${e.message}")
                     }
-
+ 
                     // 1. Move MP3 to public storage
                     val finalFile = moveToPublicStorage(downloadedFile, "Spotify", "Music")
                     
                     if (finalFile != null) {
                          // 2. Save sidecar thumbnail (as per user request)
+                         val preDownloadedThumb = File(cacheDir, "$safeFileName.jpg")
                          if (!thumbnail.isNullOrEmpty()) {
                             try {
                                 val thumbDir = File(reactApplicationContext.filesDir, "thumbnails")
@@ -1453,8 +1459,8 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                             } catch (e: Exception) {
                                 Log.w(TAG, "Failed to save Spotify sidecar thumbnail: ${e.message}")
                             }
-                         }
-                    
+                          }
+                     
                         val result = WritableNativeMap().apply {
                             putString("processId", processId)
                             putString("outputDir", finalFile.parent)
@@ -1482,7 +1488,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 activeDownloads.remove(processId)
                 updateServiceState()
                 withContext(Dispatchers.Main) {
-                    promise.reject("DOWNLOAD_ERROR", e.message ?: "Failed to download from YouTube", e)
+                    promise.reject("DOWNLOAD_ERROR", e.message ?: "Failed to download from YouTube Music", e)
                 }
             }
         }

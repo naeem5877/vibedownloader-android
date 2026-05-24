@@ -65,7 +65,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
     const [url, setUrl] = useState('');
     const [detectedPlatform, setDetectedPlatform] = useState<string | null>(null);
     const [userSelectedPlatform, setUserSelectedPlatform] = useState(false);
-    const [instagramMode, setInstagramMode] = useState<'stories' | 'highlights'>('stories');
     // Removed downloadMode toggle - auto-detect based on platform (Spotify/SoundCloud = audio)
 
     // Playlist State
@@ -287,10 +286,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 isStoryFetch = true;
                 storyUrl = `https://www.facebook.com/${match[1]}/stories/`;
             platformName = 'facebook';
-        } else if (inputStr.includes('/stories/highlights/')) {
-            isStoryFetch = true;
-            storyUrl = inputStr;
-            platformName = 'instagram';
         } else if (inputStr.startsWith('@')) {
                 isStoryFetch = true;
                 const username = inputStr.substring(1);
@@ -298,9 +293,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 if (platformName === 'facebook') {
                     storyUrl = `https://www.facebook.com/${username}/stories/`;
                 } else {
-                    storyUrl = instagramMode === 'highlights'
-                        ? `https://instagram.com/${username}/`
-                        : `https://instagram.com/stories/${username}/`;
+                    storyUrl = `https://instagram.com/stories/${username}/`;
                 }
             } else if (!inputStr.includes('://') && !inputStr.includes(' ') && (detectedPlatform?.toLowerCase() === 'instagram' || detectedPlatform?.toLowerCase() === 'facebook')) {
                 isStoryFetch = true;
@@ -309,9 +302,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 if (platformName === 'facebook') {
                     storyUrl = `https://www.facebook.com/${username}/stories/`;
                 } else {
-                    storyUrl = instagramMode === 'highlights'
-                        ? `https://instagram.com/${username}/`
-                        : `https://instagram.com/stories/${username}/`;
+                    storyUrl = `https://instagram.com/stories/${username}/`;
                 }
             }
         }
@@ -325,10 +316,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 if (YtDlpNative && YtDlpNative.getPlaylistInfo) {
                      const cookiesPath = await CookieManagerService.getCookiesForPlatform(platformName);
                      
-                     // Use extractor args for highlights to tell yt-dlp to include them and exclude posts/stories
-                     const extractorArgs = (platformName === 'instagram' && instagramMode === 'highlights')
-                         ? 'instagram:include_highlights=true;include_posts=false;include_stories=false'
-                         : undefined;
+                     // No longer using extractor args for highlights
+                     const extractorArgs = undefined;
 
                      const playlistJson = await YtDlpNative.getPlaylistInfo(storyUrl, { 
                          cookies: cookiesPath || undefined,
@@ -358,19 +347,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                                      : storyUrl;
                              } else {
                                  // Instagram
-                                 if (instagramMode === 'highlights' && entry.id) {
-                                     // For highlights, the URL should be constructed properly if not present
-                                     entryUrl = entry.url || `https://www.instagram.com/stories/highlights/${entry.id}/`;
-                                 } else if (entry.id) {
-                                     // Check if entry ID is a highlight ID (long numeric) vs a story ID
-                                     const isHighlightId = /^[0-9]{15,25}$/.test(entry.id);
-                                     if (isHighlightId) {
-                                         entryUrl = `https://www.instagram.com/stories/highlights/${entry.id}/`;
-                                     } else {
-                                         entryUrl = (storyUsername && entry.id)
-                                             ? `https://www.instagram.com/stories/${storyUsername}/${entry.id}/`
-                                             : storyUrl;
-                                     }
+                                 if (entry.id) {
+                                     entryUrl = (storyUsername && entry.id)
+                                         ? `https://www.instagram.com/stories/${storyUsername}/${entry.id}/`
+                                         : storyUrl;
                                  } else {
                                      entryUrl = storyUrl;
                                  }
@@ -384,7 +364,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                              url: entryUrl,
                              thumbnail: entry.thumbnail || entry.thumbnails?.[0]?.url,
                              type: platformName,
-                             isReel: (platformName === 'instagram' && instagramMode === 'highlights' && !storyUrl.includes('/highlights/')),
+                             isReel: false,
                          };
                      });
 
@@ -463,7 +443,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 ToastAndroid.LONG
             );
         }
-    }, [url, actions, detectedPlatform, instagramMode]);
+    }, [url, actions, detectedPlatform]);
 
     const checkShareIntent = useCallback(async () => {
         try {
@@ -1014,7 +994,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                     <View style={styles.headerTop}>
                         <View style={styles.headerBrand}>
                             <Text style={styles.logo}>Vibe</Text>
-                            <Text style={[styles.logo, { color: platformColor }]}>Downloader</Text>
+                            <Text style={[styles.logo, { color: Colors.primary }]}>Downloader</Text>
                         </View>
 
                         {/* Header Actions */}
@@ -1165,29 +1145,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                             </TouchableOpacity>
                         )}
 
-                        {/* Instagram Mode Toggle */}
-                        {detectedPlatform?.toLowerCase() === 'instagram' && (
-                            <View style={styles.modeToggleContainer}>
-                                <TouchableOpacity
-                                    style={[styles.modeBtn, instagramMode === 'stories' && { backgroundColor: `${platformColor}20`, borderColor: `${platformColor}40`, borderWidth: 1 }]}
-                                    onPress={() => {
-                                        setInstagramMode('stories');
-                                        Haptics.selection();
-                                    }}
-                                >
-                                    <Text style={[styles.modeBtnText, instagramMode === 'stories' && { color: platformColor, fontWeight: '800' }]}>Stories</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={[styles.modeBtn, instagramMode === 'highlights' && { backgroundColor: `${platformColor}20`, borderColor: `${platformColor}40`, borderWidth: 1 }]}
-                                    onPress={() => {
-                                        setInstagramMode('highlights');
-                                        Haptics.selection();
-                                    }}
-                                >
-                                    <Text style={[styles.modeBtnText, instagramMode === 'highlights' && { color: platformColor, fontWeight: '800' }]}>Highlights</Text>
-                                </TouchableOpacity>
-                            </View>
-                        )}
+                        {/* Removed Instagram Mode Toggle */}
                     </View>
                 )}
 

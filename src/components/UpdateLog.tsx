@@ -17,7 +17,7 @@ import { SparkleIcon, CloseIcon, CheckIcon, StarIcon } from './Icons';
 
 const { width } = Dimensions.get('window');
 
-const CURRENT_VERSION = '1.4.0';
+const CURRENT_VERSION = '1.3.0';
 const VERSION_KEY = 'last_seen_version';
 
 interface ChangeItem {

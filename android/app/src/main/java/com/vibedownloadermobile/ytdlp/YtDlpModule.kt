@@ -1307,8 +1307,8 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         
         scope.launch {
             try {
-                // Use YouTube Music search instead of direct Spotify URL or general YouTube search
-                val ytSearchUrl = "ytmsearch1:$searchQuery"
+                // Use general YouTube search instead of YouTube Music search as it is more reliable
+                val ytSearchUrl = "ytsearch1:$searchQuery"
                 
                 // 1. Download to temp cache directory first (process-specific)
                 val cacheDir = File(reactApplicationContext.cacheDir, "temp_download_$processId")
@@ -1317,7 +1317,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                 Log.d(TAG, "Starting Spotify download via YouTube Music search: $searchQuery")
                 
                 val request = YoutubeDLRequest(ytSearchUrl)
-                val safeFileName = "$artist - $title".replace(Regex("[^a-zA-Z0-9 \\-_]"), "_").take(100)
+                val safeFileName = title.replace(Regex("[^a-zA-Z0-9 \\-_]"), "_").take(100)
                 
                 // Pre-download the Spotify thumbnail so yt-dlp embeds it directly
                 if (!thumbnail.isNullOrEmpty()) {
@@ -1367,7 +1367,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                     
                     val displayLine = when {
                         line.isNullOrEmpty() -> "Preparing..."
-                        line.contains("Searching", ignoreCase = true) -> "Searching YouTube Music..."
+                        line.contains("Searching", ignoreCase = true) -> "Searching YouTube..."
                         line.contains("Downloading", ignoreCase = true) && progress > 0 -> "${progress.toInt()}% - Downloading..."
                         line.contains("Converting", ignoreCase = true) -> "Converting to MP3..."
                         line.contains("Extracting", ignoreCase = true) -> "Extracting audio..."

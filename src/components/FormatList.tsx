@@ -317,7 +317,7 @@ const styles = StyleSheet.create({
         color: Colors.textMuted,
         fontSize: Typography.sizes.xxs,
         fontWeight: Typography.weights.bold,
-        letterSpacing: Typography.letterSpacing.widest,
+        letterSpacing: Typography.letterSpacing.wider,
     },
     formatCard: {
         flexDirection: 'row',

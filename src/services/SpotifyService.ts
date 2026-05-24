@@ -453,8 +453,11 @@ export async function getPlaylistTracks(playlistId: string): Promise<SpotifyTrac
 }
 
 export function buildYouTubeSearchQuery(track: SpotifyTrack): string {
-    const artists = track.artists.map(a => a.name).join(' ');
-    return `${track.name} ${artists}`;
+    const cleanTrackName = track.name.replace(/"/g, '');
+    const cleanArtists = track.artists.map(a => a.name.replace(/"/g, '')).join(' ');
+    // Append "official audio" or "Topic" to ensure we get the original song
+    // instead of music videos with long intros, fan covers, or lyrics videos.
+    return `"${cleanTrackName}" "${cleanArtists}" (official audio OR topic)`;
 }
 
 export function getHighQualityThumbnail(track: SpotifyTrack): string {

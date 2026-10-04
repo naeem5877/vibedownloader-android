@@ -1,5 +1,5 @@
 /**
- * Premium Update Modal - Custom styled update notification
+ * Update Modal - Shown when a newer version is available on GitHub
  */
 import React, { useRef, useEffect } from 'react';
 import {
@@ -13,10 +13,10 @@ import {
     Linking,
     ScrollView,
 } from 'react-native';
-import { Colors, BorderRadius, Spacing, Typography, Shadows } from '../theme';
-import { SparkleIcon, DownloadIcon, CloseIcon, ChevronRightIcon } from './Icons';
+import { Colors, Typography, Shadows } from '../theme';
+import { SparkleIcon, DownloadIcon } from './Icons';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
 interface UpdateModalProps {
     visible: boolean;
@@ -35,34 +35,34 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
     downloadUrl,
     features = [],
 }) => {
-    const scaleAnim = useRef(new Animated.Value(0.9)).current;
+    const scaleAnim = useRef(new Animated.Value(0.92)).current;
     const opacityAnim = useRef(new Animated.Value(0)).current;
-    const translateY = useRef(new Animated.Value(20)).current;
+    const translateY = useRef(new Animated.Value(24)).current;
 
     useEffect(() => {
         if (visible) {
             Animated.parallel([
                 Animated.spring(scaleAnim, {
                     toValue: 1,
-                    tension: 120,
-                    friction: 14,
+                    tension: 90,
+                    friction: 13,
                     useNativeDriver: true,
                 }),
                 Animated.timing(opacityAnim, {
                     toValue: 1,
-                    duration: 300,
+                    duration: 260,
                     useNativeDriver: true,
                 }),
                 Animated.timing(translateY, {
                     toValue: 0,
-                    duration: 300,
+                    duration: 280,
                     useNativeDriver: true,
                 }),
             ]).start();
         } else {
-            scaleAnim.setValue(0.9);
+            scaleAnim.setValue(0.92);
             opacityAnim.setValue(0);
-            translateY.setValue(20);
+            translateY.setValue(24);
         }
     }, [visible]);
 
@@ -88,58 +88,47 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                         styles.modalContainer,
                         {
                             opacity: opacityAnim,
-                            transform: [
-                                { scale: scaleAnim },
-                                { translateY: translateY }
-                            ],
+                            transform: [{ scale: scaleAnim }, { translateY }],
                         },
                     ]}
                 >
-                    {/* Atmospheric Background Layers */}
-                    <View style={styles.bgPulse} />
-                    <View style={styles.scanline} />
+                    <View style={styles.bgGlow} />
 
-                    <View style={styles.contentContainer}>
-                        {/* Header Section */}
+                    <View style={styles.content}>
+                        {/* Header */}
                         <View style={styles.header}>
-                            <View style={styles.headerIconContainer}>
-                                <View style={styles.headerIconGlow} />
-                                <SparkleIcon size={32} color={Colors.primary} />
+                            <View style={styles.iconWrap}>
+                                <SparkleIcon size={28} color={Colors.primary} />
                             </View>
-                            <View style={styles.headerTextContainer}>
-                                <Text style={styles.technicalLabel}>CORE SYSTEM UPDATE</Text>
-                                <Text style={styles.versionTitle}>Build v{version} Ready</Text>
-                            </View>
+                            <Text style={styles.label}>UPDATE AVAILABLE</Text>
+                            <Text style={styles.title}>Version {version}</Text>
+                            <Text style={styles.subtitle}>
+                                A newer build is ready to download
+                            </Text>
                         </View>
 
-                        {/* Technical Separator */}
-                        <View style={styles.technicalLine}>
-                            <View style={styles.lineDot} />
-                            <View style={styles.lineMain} />
-                            <View style={styles.lineDot} />
-                        </View>
-
-                        {/* Features List */}
-                        <View style={styles.featuresSection}>
-                            <Text style={styles.featuresTitle}>PATCH NOTES & LOGS</Text>
+                        {/* Features */}
+                        <View style={styles.featuresBlock}>
+                            <Text style={styles.featuresHeading}>What's included</Text>
                             <ScrollView
-                                style={styles.featuresList}
+                                style={styles.featuresScroll}
                                 showsVerticalScrollIndicator={false}
-                                contentContainerStyle={styles.featuresContent}
+                                contentContainerStyle={styles.featuresInner}
+                                bounces={false}
                             >
-                                {features.length > 0 ? features.map((feature, index) => (
-                                    <View key={index} style={styles.featureItem}>
-                                        <View style={styles.featureBullet}>
-                                            <View style={styles.bulletCore} />
+                                {features.length > 0 ? (
+                                    features.map((feature, index) => (
+                                        <View key={index} style={styles.featureRow}>
+                                            <View style={styles.bullet} />
+                                            <Text style={styles.featureText}>{feature}</Text>
                                         </View>
-                                        <Text style={styles.featureText}>{feature}</Text>
-                                    </View>
-                                )) : (
-                                    <View style={styles.featureItem}>
-                                        <View style={styles.featureBullet}>
-                                            <View style={styles.bulletCore} />
-                                        </View>
-                                        <Text style={styles.featureText}>Stable system build optimization.</Text>
+                                    ))
+                                ) : (
+                                    <View style={styles.featureRow}>
+                                        <View style={styles.bullet} />
+                                        <Text style={styles.featureText}>
+                                            Performance and stability improvements
+                                        </Text>
                                     </View>
                                 )}
                             </ScrollView>
@@ -148,20 +137,20 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                         {/* Actions */}
                         <View style={styles.actions}>
                             <TouchableOpacity
-                                style={styles.updateButton}
+                                style={styles.primaryBtn}
                                 onPress={handleUpdate}
-                                activeOpacity={0.8}
+                                activeOpacity={0.85}
                             >
-                                <Text style={styles.updateButtonText}>INITIALIZE PATCH</Text>
-                                <DownloadIcon size={18} color={Colors.textPrimary} />
+                                <DownloadIcon size={18} color="#FFF" />
+                                <Text style={styles.primaryBtnText}>Download update</Text>
                             </TouchableOpacity>
 
                             <TouchableOpacity
-                                style={styles.laterButton}
+                                style={styles.secondaryBtn}
                                 onPress={onClose}
-                                activeOpacity={0.6}
+                                activeOpacity={0.7}
                             >
-                                <Text style={styles.laterButtonText}>DEFER INSTALLATION</Text>
+                                <Text style={styles.secondaryBtnText}>Not now</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -174,178 +163,144 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
 const styles = StyleSheet.create({
     overlay: {
         flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.92)',
+        backgroundColor: 'rgba(0, 0, 0, 0.9)',
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 24,
+        padding: 22,
     },
     modalContainer: {
         width: '100%',
-        maxWidth: 380,
+        maxWidth: 360,
         backgroundColor: Colors.surfaceHigh,
         borderRadius: 24,
         borderWidth: 1,
-        borderColor: Colors.innerBorder,
+        borderColor: Colors.innerBorderLight,
         overflow: 'hidden',
+        ...Shadows.xl,
     },
-    bgPulse: {
+    bgGlow: {
         position: 'absolute',
-        width: width,
-        height: width,
-        borderRadius: width / 2,
+        width: width * 0.7,
+        height: width * 0.7,
+        borderRadius: width * 0.35,
         backgroundColor: Colors.primary,
-        opacity: 0.05,
-        top: -width / 2,
-        right: -width / 4,
+        opacity: 0.06,
+        top: -width * 0.25,
+        alignSelf: 'center',
+        left: '15%',
     },
-    scanline: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        height: 1,
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    content: {
+        padding: 22,
         zIndex: 2,
-    },
-    contentContainer: {
-        padding: 24,
-        zIndex: 3,
     },
     header: {
         alignItems: 'center',
-        marginBottom: 24,
+        marginBottom: 20,
     },
-    headerIconContainer: {
-        width: 64,
-        height: 64,
-        borderRadius: 18,
-        backgroundColor: `${Colors.primary}12`,
+    iconWrap: {
+        width: 56,
+        height: 56,
+        borderRadius: 16,
+        backgroundColor: `${Colors.primary}15`,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 16,
-        position: 'relative',
+        marginBottom: 14,
         borderWidth: 1,
-        borderColor: `${Colors.primary}20`,
+        borderColor: `${Colors.primary}28`,
     },
-    headerIconGlow: {
-        position: 'absolute',
-        width: '100%',
-        height: '100%',
-        borderRadius: 18,
-        backgroundColor: Colors.primary,
-        opacity: 0.1,
-    },
-    headerTextContainer: {
-        alignItems: 'center',
-    },
-    technicalLabel: {
+    label: {
         fontSize: 10,
-        fontWeight: Typography.weights.black,
+        fontWeight: '800',
         color: Colors.primary,
-        letterSpacing: 2,
+        letterSpacing: 1.6,
         marginBottom: 4,
     },
-    versionTitle: {
+    title: {
         fontSize: 22,
-        fontWeight: Typography.weights.black,
+        fontWeight: '800',
         color: Colors.textPrimary,
-        letterSpacing: Typography.letterSpacing.tight,
+        letterSpacing: -0.4,
+        marginBottom: 4,
     },
-    technicalLine: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 24,
+    subtitle: {
+        fontSize: 13,
+        color: Colors.textMuted,
+        fontWeight: '500',
+    },
+    featuresBlock: {
+        marginBottom: 22,
+    },
+    featuresHeading: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: Colors.textMuted,
+        letterSpacing: 0.6,
+        marginBottom: 10,
+        textTransform: 'uppercase',
+    },
+    featuresScroll: {
+        maxHeight: 160,
+    },
+    featuresInner: {
         gap: 8,
     },
-    lineDot: {
-        width: 4,
-        height: 4,
-        borderRadius: 2,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    },
-    lineMain: {
-        flex: 1,
-        height: 1,
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    },
-    featuresSection: {
-        marginBottom: 32,
-    },
-    featuresTitle: {
-        fontSize: 9,
-        fontWeight: Typography.weights.bold,
-        color: Colors.textMuted,
-        letterSpacing: 1.5,
-        marginBottom: 16,
-    },
-    featuresList: {
-        maxHeight: 180,
-    },
-    featuresContent: {
-        paddingRight: 4,
-    },
-    featureItem: {
+    featureRow: {
         flexDirection: 'row',
         alignItems: 'flex-start',
-        marginBottom: 14,
-        backgroundColor: 'rgba(255, 255, 255, 0.02)',
-        padding: 10,
+        backgroundColor: 'rgba(255,255,255,0.03)',
+        paddingVertical: 10,
+        paddingHorizontal: 12,
         borderRadius: 12,
         borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.03)',
+        borderColor: Colors.innerBorder,
     },
-    featureBullet: {
-        width: 16,
-        height: 16,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 10,
-        marginTop: 2,
-    },
-    bulletCore: {
-        width: 4,
-        height: 4,
-        borderRadius: 2,
+    bullet: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
         backgroundColor: Colors.primary,
+        marginTop: 5,
+        marginRight: 10,
+        flexShrink: 0,
     },
     featureText: {
         flex: 1,
-        fontSize: 12,
+        fontSize: 13,
         color: Colors.textSecondary,
         lineHeight: 18,
-        fontWeight: Typography.weights.medium,
+        fontWeight: '500',
     },
     actions: {
-        gap: 12,
+        gap: 10,
     },
-    updateButton: {
+    primaryBtn: {
         backgroundColor: Colors.primary,
-        borderRadius: 16,
-        paddingVertical: 18,
+        borderRadius: 14,
+        paddingVertical: 15,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 10,
+        gap: 8,
+        ...Shadows.glow(Colors.primary),
     },
-    updateButtonText: {
-        color: Colors.textPrimary,
-        fontSize: 14,
-        fontWeight: Typography.weights.black,
-        letterSpacing: 1,
+    primaryBtnText: {
+        color: '#FFF',
+        fontSize: 15,
+        fontWeight: '800',
+        letterSpacing: 0.2,
     },
-    laterButton: {
+    secondaryBtn: {
         alignItems: 'center',
         paddingVertical: 12,
         borderRadius: 14,
-        backgroundColor: 'rgba(255, 255, 255, 0.03)',
+        backgroundColor: 'rgba(255,255,255,0.04)',
         borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.05)',
+        borderColor: Colors.innerBorderLight,
     },
-    laterButtonText: {
+    secondaryBtnText: {
         color: Colors.textMuted,
-        fontSize: 11,
-        fontWeight: Typography.weights.bold,
-        letterSpacing: 1,
+        fontSize: 13,
+        fontWeight: '700',
     },
 });
 

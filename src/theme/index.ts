@@ -151,9 +151,9 @@ export const SUPPORTED_PLATFORMS = [
     { id: 'TikTok', color: Colors.tiktok, label: 'TikTok' },
     { id: 'Spotify', color: Colors.spotify, label: 'Spotify' },
     { id: 'X', color: Colors.x, label: 'X' },
+    { id: 'Twitch', color: Colors.twitch, label: 'Twitch' },
     { id: 'Pinterest', color: Colors.pinterest, label: 'Pinterest' },
     { id: 'SoundCloud', color: Colors.soundcloud, label: 'SoundCloud' },
-{ id: 'Twitch', color: Colors.twitch, label: 'Twitch' },
 ];
 
 export const getPlatformColor = (platform: string | null | undefined): string => {

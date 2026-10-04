@@ -11,7 +11,6 @@ import {
   StyleSheet,
   View,
   TouchableOpacity,
-  Text,
   Animated,
   Dimensions,
   PanResponder,
@@ -41,21 +40,22 @@ interface TabButtonProps {
   onPress: () => void;
 }
 
-const TabButton: React.FC<TabButtonProps> = ({ id, label, icon, activeIcon, isActive, onPress }) => {
-  const scaleAnim = useRef(new Animated.Value(1)).current;
-  const indicatorAnim = useRef(new Animated.Value(isActive ? 1 : 0)).current;
+const TabButton: React.FC<TabButtonProps> = ({ label, icon, activeIcon, isActive, onPress }) => {
+  const scaleAnim = useRef(new Animated.Value(isActive ? 1 : 0.94)).current;
+  const pillAnim = useRef(new Animated.Value(isActive ? 1 : 0)).current;
 
   useEffect(() => {
     Animated.parallel([
       Animated.spring(scaleAnim, {
-        toValue: isActive ? 1.1 : 1,
-        tension: 300,
-        friction: 15,
+        toValue: isActive ? 1 : 0.94,
+        tension: 280,
+        friction: 18,
         useNativeDriver: true,
       }),
-      Animated.timing(indicatorAnim, {
+      Animated.timing(pillAnim, {
         toValue: isActive ? 1 : 0,
-        duration: 200,
+        duration: 240,
+        easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
     ]).start();
@@ -68,38 +68,37 @@ const TabButton: React.FC<TabButtonProps> = ({ id, label, icon, activeIcon, isAc
         Haptics.selection();
         onPress();
       }}
-      activeOpacity={1} // Physical buttons don't fade, they react
+      activeOpacity={0.85}
     >
-      {/* Top indicator bar */}
-      <Animated.View
-        style={[
-          styles.indicator,
-          {
-            opacity: indicatorAnim,
-            backgroundColor: Colors.primary,
-            transform: [{ scaleX: indicatorAnim }]
-          }
-        ]}
-      />
+      <Animated.View style={[styles.tabInner, { transform: [{ scale: scaleAnim }] }]}>
+        {/* Rounded highlight pill behind the active tab */}
+        <Animated.View style={[styles.activePill, { opacity: pillAnim }]} />
 
-      <Animated.View
-        style={[
-          styles.tabIconContainer,
-          {
-            transform: [{ scale: scaleAnim }],
-          }
-        ]}
-      >
-        {isActive ? activeIcon : icon}
+        <View style={styles.tabContent}>
+          {isActive ? activeIcon : icon}
+          {isActive && (
+            <Animated.Text
+              numberOfLines={1}
+              style={[
+                styles.tabLabel,
+                {
+                  opacity: pillAnim,
+                  transform: [
+                    {
+                      translateX: pillAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [-6, 0],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              {label}
+            </Animated.Text>
+          )}
+        </View>
       </Animated.View>
-      <Text
-        style={[
-          styles.tabLabel,
-          isActive && styles.tabLabelActive,
-        ]}
-      >
-        {label}
-      </Text>
     </TouchableOpacity>
   );
 };
@@ -237,8 +236,8 @@ function App(): React.JSX.Element {
                 <TabButton
                   id="home"
                   label="Download"
-                  icon={<DownloadIcon size={22} color={Colors.textMuted} />}
-                  activeIcon={<DownloadIcon size={22} color={Colors.primary} />}
+                  icon={<DownloadIcon size={24} color={Colors.textMuted} />}
+                  activeIcon={<DownloadIcon size={24} color={Colors.primaryLight} />}
                   isActive={activeTab === 'home'}
                   onPress={() => setActiveTab('home')}
                 />
@@ -246,8 +245,8 @@ function App(): React.JSX.Element {
                 <TabButton
                   id="library"
                   label="Library"
-                  icon={<LibraryIcon size={22} color={Colors.textMuted} />}
-                  activeIcon={<LibraryIcon size={22} color={Colors.primary} />}
+                  icon={<LibraryIcon size={24} color={Colors.textMuted} />}
+                  activeIcon={<LibraryIcon size={24} color={Colors.primaryLight} />}
                   isActive={activeTab === 'library'}
                   onPress={() => setActiveTab('library')}
                 />
@@ -282,53 +281,60 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   bottomNavSafeArea: {
-    backgroundColor: Colors.surfaceHigh,
+    backgroundColor: '#15151A',
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    borderTopWidth: 1,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
+    overflow: 'hidden',
+    elevation: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
   },
   bottomNav: {
-    backgroundColor: Colors.surfaceHigh,
-    height: 65,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: Colors.innerBorder,
+    backgroundColor: 'transparent',
+    paddingTop: 12,
+    paddingBottom: 10,
   },
   navContent: {
-    flex: 1,
     flexDirection: 'row',
     justifyContent: 'space-evenly',
     alignItems: 'center',
+    paddingHorizontal: 20,
   },
   tabButton: {
-    alignItems: 'center',
-    justifyContent: 'center',
     flex: 1,
-    height: '100%',
-  },
-  indicator: {
-    position: 'absolute',
-    top: 0,
-    width: 40,
-    height: 3,
-    borderBottomLeftRadius: 3,
-    borderBottomRightRadius: 3,
-  },
-  tabIconContainer: {
-    marginBottom: 4,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 2,
+  },
+  tabInner: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 48,
+    minWidth: 56,
+    paddingHorizontal: 18,
+  },
+  activePill: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 24,
+    backgroundColor: 'rgba(129, 140, 248, 0.16)',
+  },
+  tabContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   tabLabel: {
-    fontSize: 10,
-    color: Colors.textMuted,
-    fontWeight: Typography.weights.medium,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+    fontSize: 14,
+    color: Colors.primaryLight,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
-  tabLabelActive: {
-    color: Colors.primary,
-    fontWeight: Typography.weights.bold,
-  },
-  // removed activeDot styles
 });
 
 export default App;

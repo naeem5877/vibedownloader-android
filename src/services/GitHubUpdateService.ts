@@ -2,8 +2,8 @@
  * GitHub Update Service - Premium update checking with proper version comparison
  */
 
-// App version - KEEP IN SYNC WITH package.json
-const APP_VERSION = '1.2.0';
+// App version - KEEP IN SYNC WITH package.json / android versionName
+const APP_VERSION = '1.3.0';
 
 const REPO_OWNER = 'naeem5877';
 const REPO_NAME = 'vibedownloader-android';

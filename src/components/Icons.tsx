@@ -39,15 +39,11 @@ export const TikTokIcon: React.FC<IconProps> = ({ size = 24, color }) => (
 );
 
 export const TwitchIcon: React.FC<IconProps> = ({ size = 24, color = Colors.twitch }) => (
-    <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
         <Path
-            fill="#FFFFFF"
-            d="M13 7.5l-2 2H9l-1.75 1.75V9.5H5V2h8v5.5z"
+            fill={color}
+            d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"
         />
-        <G fill={color}>
-            <Path d="M4.5 1L2 3.5v9h3V15l2.5-2.5h2L14 8V1H4.5zM13 7.5l-2 2H9l-1.75 1.75V9.5H5V2h8v5.5z" />
-            <Path d="M11.5 3.75h-1v3h1v-3zM8.75 3.75h-1v3h1v-3z" />
-        </G>
     </Svg>
 );
 
@@ -132,10 +128,25 @@ export const ArrowRightIcon: React.FC<IconProps> = ({ size = 24, color = Colors.
 
 export const DownloadIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPrimary }) => (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        {/* Soft duotone tray */}
         <Path
-            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+            d="M3.5 15h17v1.5a3.5 3.5 0 01-3.5 3.5H7a3.5 3.5 0 01-3.5-3.5V15z"
+            fill={color}
+            fillOpacity={0.22}
+        />
+        {/* Tray outline */}
+        <Path
+            d="M3.5 14.5v2A3.5 3.5 0 007 20h10a3.5 3.5 0 003.5-3.5v-2"
             stroke={color}
-            strokeWidth={2}
+            strokeWidth={1.8}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+        {/* Arrow */}
+        <Path
+            d="M12 3.5v10.5M7.75 10l4.25 4.25L16.25 10"
+            stroke={color}
+            strokeWidth={1.8}
             strokeLinecap="round"
             strokeLinejoin="round"
         />
@@ -614,6 +625,7 @@ const PLATFORM_ICONS: Record<string, React.FC<IconProps>> = {
   facebook: FacebookIcon,
   spotify: SpotifyIcon,
   x: XIcon,
+  twitter: XIcon,
   pinterest: PinterestIcon,
   soundcloud: SoundCloudIcon,
   twitch: TwitchIcon,

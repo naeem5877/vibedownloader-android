@@ -116,7 +116,9 @@ export function filterAndSort(
         if (filters.kind !== 'all' && deriveMediaKind(item.extension) !== filters.kind) {
             return false;
         }
-        if (filters.platform && item.platform !== filters.platform) return false;
+        if (filters.platform && normalizePlatform(item.platform) !== normalizePlatform(filters.platform)) {
+            return false;
+        }
         if (query && !item.name.toLowerCase().includes(query)) return false;
         return true;
     });
@@ -176,11 +178,20 @@ export function groupByDate(items: LibraryItem[], now: number = Date.now()): Dat
     );
 }
 
-/** Every platform present, alphabetically, for the platform filter chips. */
+/** Normalize platform labels so filters don't duplicate (Instagram vs instagram, twitter vs x). */
+export function normalizePlatform(platform: string | null | undefined): string {
+    if (!platform) return '';
+    const p = platform.trim().toLowerCase();
+    if (p === 'twitter' || p === 'x') return 'x';
+    return p;
+}
+
+/** Every platform present (normalized, unique), alphabetically, for the platform filter chips. */
 export function collectPlatforms(items: LibraryItem[]): string[] {
     const set = new Set<string>();
     for (const item of items) {
-        if (item.platform && item.platform !== 'Unknown') set.add(item.platform);
+        const p = normalizePlatform(item.platform);
+        if (p && p !== 'unknown') set.add(p);
     }
     return [...set].sort((a, b) => a.localeCompare(b));
 }

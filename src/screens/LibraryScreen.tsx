@@ -1,8 +1,8 @@
 /**
- * LibraryScreen - a photo-style gallery of everything downloaded.
+ * LibraryScreen - polished gallery of downloaded media.
  *
- * Flat newest-first grid with filter chips, long-press multi-select for bulk
- * delete, and in-app preview for video and images.
+ * Two-column grid with kind/platform chips, search, sort, long-press multi-select,
+ * and in-app preview for video & images.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -44,6 +44,7 @@ import {
     deriveMediaKind,
     formatTileDuration,
     isPreviewable,
+    normalizePlatform,
     SORT_LABELS,
     type KindFilter,
     type LibraryItem,
@@ -54,7 +55,6 @@ interface LibraryScreenProps {
     isFocused?: boolean;
 }
 
-/** Two roomy columns make thumbnails and filenames much easier to scan. */
 const COLUMNS = 2;
 
 const KIND_FILTERS: {
@@ -71,6 +71,20 @@ const KIND_FILTERS: {
 
 const SORT_CYCLE: SortOrder[] = ['newest', 'oldest', 'largest', 'name'];
 
+const PLATFORM_LABELS: Record<string, string> = {
+    youtube: 'YouTube',
+    instagram: 'Instagram',
+    tiktok: 'TikTok',
+    facebook: 'Facebook',
+    twitter: 'X',
+    x: 'X',
+    spotify: 'Spotify',
+    pinterest: 'Pinterest',
+    soundcloud: 'SoundCloud',
+    twitch: 'Twitch',
+    reddit: 'Reddit',
+};
+
 export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }) => {
     const gallery = useLibraryGallery();
     const { width } = useWindowDimensions();
@@ -78,43 +92,32 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
     const [preview, setPreview] = useState<LibraryItem | null>(null);
     const [textViewer, setTextViewer] = useState<SubtitleViewerFile | null>(null);
 
-    // Pull the library when the tab becomes active, matching the old
-    // focus-driven reload so downloads that finished in the background appear.
     useEffect(() => {
         if (isFocused) gallery.reload();
-        // Intentionally keyed on focus only: reloading on every filter change
-        // would restart the listing and undo the user's selection.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isFocused]);
 
-    const gap = Spacing.xs;
-    // Subtract the screen padding and inter-tile gaps before dividing, otherwise
-    // the last column overflows by the accumulated gap width.
-    const tileWidth = Math.floor((width - Spacing.md * 2 - gap * (COLUMNS - 1)) / COLUMNS);
+    const gap = 10;
+    const horizontalPad = 16;
+    const tileWidth = Math.floor((width - horizontalPad * 2 - gap * (COLUMNS - 1)) / COLUMNS);
 
-    const openItem = useCallback(
-        (item: LibraryItem) => {
-            const kind = deriveMediaKind(item.extension);
-            if (kind === 'text') {
-                // Text sidecars have no external app that claims them, so they
-                // always open in the in-app viewer.
-                setTextViewer({
-                    path: item.path,
-                    name: item.name,
-                    platform: item.platform,
-                    size: item.size,
-                });
-                return;
-            }
-            if (!isPreviewable(kind)) {
-                // Audio has no inline stage, so fall back to the system player.
-                YtDlpNative.openFile?.(item.path);
-                return;
-            }
-            setPreview(item);
-        },
-        []
-    );
+    const openItem = useCallback((item: LibraryItem) => {
+        const kind = deriveMediaKind(item.extension);
+        if (kind === 'text') {
+            setTextViewer({
+                path: item.path,
+                name: item.name,
+                platform: item.platform,
+                size: item.size,
+            });
+            return;
+        }
+        if (!isPreviewable(kind)) {
+            YtDlpNative.openFile?.(item.path);
+            return;
+        }
+        setPreview(item);
+    }, []);
 
     const handleDeleteOne = useCallback(
         async (item: LibraryItem) => {
@@ -137,45 +140,39 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                 },
             ]);
         },
-        [gallery]
+        [gallery],
     );
 
     const handleBulkDelete = useCallback(() => {
         const count = gallery.selected.size;
         if (count === 0) return;
-        Alert.alert(
-            `Delete ${count} item${count === 1 ? '' : 's'}?`,
-            'This cannot be undone.',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: async () => {
-                        Haptics.impact();
-                        try {
-                            const result = await gallery.deleteSelected();
-                            if (!result) return;
-                            if (result.failed.length > 0) {
-                                // Name the survivors rather than implying the
-                                // whole batch succeeded.
-                                Haptics.error();
-                                Alert.alert(
-                                    'Partly deleted',
-                                    `${result.deleted.length} deleted, ${result.failed.length} could not be removed.`
-                                );
-                            } else {
-                                Haptics.success();
-                            }
-                            setPreview(null);
-                        } catch (e) {
+        Alert.alert(`Delete ${count} item${count === 1 ? '' : 's'}?`, 'This cannot be undone.', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: async () => {
+                    Haptics.impact();
+                    try {
+                        const result = await gallery.deleteSelected();
+                        if (!result) return;
+                        if (result.failed.length > 0) {
                             Haptics.error();
-                            Alert.alert('Delete failed', e instanceof Error ? e.message : undefined);
+                            Alert.alert(
+                                'Partly deleted',
+                                `${result.deleted.length} deleted, ${result.failed.length} could not be removed.`,
+                            );
+                        } else {
+                            Haptics.success();
                         }
-                    },
+                        setPreview(null);
+                    } catch (e) {
+                        Haptics.error();
+                        Alert.alert('Delete failed', e instanceof Error ? e.message : undefined);
+                    }
                 },
-            ]
-        );
+            },
+        ]);
     }, [gallery]);
 
     const toggleSort = useCallback(() => {
@@ -185,36 +182,41 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
     }, [gallery]);
 
     const platformLabel = useCallback((platform: string) => {
-        const labels: Record<string, string> = {
-            youtube: 'YouTube',
-            instagram: 'Instagram',
-            tiktok: 'TikTok',
-            facebook: 'Facebook',
-            twitter: 'X',
-            x: 'X',
-            reddit: 'Reddit',
-        };
-        return labels[platform.toLowerCase()] ?? platform;
+        const key = normalizePlatform(platform);
+        return PLATFORM_LABELS[key] ?? platform;
     }, []);
 
     const renderTile = useCallback(
         ({ item }: { item: LibraryItem }) => {
             const kind = deriveMediaKind(item.extension);
-            const accent = getPlatformColor(item.platform);
+            const platformKey = normalizePlatform(item.platform);
+            const accent = getPlatformColor(platformKey || item.platform);
             const duration = formatTileDuration(item.duration);
             const poster = gallery.thumbnails[item.path] ?? item.thumbnail ?? null;
             const isSel = gallery.isSelected(item.path);
+            const PlatformIcon = getPlatformIcon(platformKey);
 
-            // Only videos need a generated poster; images and audio already have
-            // a real thumbnail or artwork from the listing.
             if (kind === 'video' && !poster) gallery.requestThumbnail(item.path);
 
             const KindIcon =
-                kind === 'video' ? VideoIcon : kind === 'audio' ? MusicNoteIcon : kind === 'text' ? TypeIcon : ImageIcon;
+                kind === 'video'
+                    ? VideoIcon
+                    : kind === 'audio'
+                      ? MusicNoteIcon
+                      : kind === 'text'
+                        ? TypeIcon
+                        : ImageIcon;
+
+            const displayName = item.name.replace(/\.[^.]+$/, '');
+            const sizeLabel = item.size > 0 ? formatFileSize(item.size) : '—';
+
+            const inSelection = gallery.selectionMode;
 
             return (
                 <Pressable
-                    onPress={() => (gallery.selectionMode ? gallery.toggleSelect(item.path) : openItem(item))}
+                    onPress={() =>
+                        inSelection ? gallery.toggleSelect(item.path) : openItem(item)
+                    }
                     onLongPress={() => {
                         Haptics.impact();
                         gallery.toggleSelect(item.path);
@@ -223,57 +225,91 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                     accessibilityRole="button"
                     accessibilityLabel={item.name}
                     accessibilityState={{ selected: isSel }}
-                    style={[styles.tile, { width: tileWidth }]}
+                    style={[
+                        styles.tile,
+                        { width: tileWidth },
+                        isSel && styles.tileSelected,
+                        inSelection && !isSel && styles.tileDimmed,
+                    ]}
                 >
-                    <View style={[styles.thumb, { backgroundColor: `${accent}1A` }]}>
+                    <View style={[styles.thumb, { backgroundColor: `${accent}18` }]}>
                         {poster ? (
                             <Image source={{ uri: poster }} style={styles.thumbImage} resizeMode="cover" />
                         ) : (
-                            <KindIcon size={30} color={accent} />
+                            <View style={styles.placeholder}>
+                                <View style={[styles.placeholderIcon, { backgroundColor: `${accent}22` }]}>
+                                    <KindIcon size={22} color={accent} />
+                                </View>
+                            </View>
                         )}
 
-                        {/* Scrim keeps the duration and selection ring legible over
-                            a bright frame. */}
                         <View style={styles.scrim} pointerEvents="none" />
 
-                        {duration && kind !== 'image' && (
+                        {/* Soft tint when selected */}
+                        {isSel && (
+                            <View
+                                style={[styles.selOverlay, { backgroundColor: `${accent}33` }]}
+                                pointerEvents="none"
+                            />
+                        )}
+
+                        {/* Platform badge — hide while selected so check is clear */}
+                        {PlatformIcon && !isSel && (
+                            <View style={[styles.platformBadge, { backgroundColor: `${accent}E6` }]}>
+                                <PlatformIcon size={11} color="#FFF" />
+                            </View>
+                        )}
+
+                        {duration && kind !== 'image' && !isSel && (
                             <View style={styles.durationBadge}>
                                 <Text style={styles.durationText}>{duration}</Text>
                             </View>
                         )}
 
-                        {kind === 'video' && poster && (
+                        {kind === 'video' && poster && !isSel && (
                             <View style={styles.playDot} pointerEvents="none">
-                                <PlayIcon size={12} color="#FFF" />
+                                <PlayIcon size={11} color="#FFF" />
                             </View>
                         )}
 
-                        {isSel && (
-                            <View style={[styles.selRing, { borderColor: accent }]}>
-                                <View style={[styles.selDot, { backgroundColor: accent }]}>
-                                    <CheckIcon size={13} color="#FFF" />
-                                </View>
+                        {/* Selection checkbox — always visible in selection mode */}
+                        {inSelection && (
+                            <View
+                                style={[
+                                    styles.checkWrap,
+                                    isSel
+                                        ? { backgroundColor: Colors.primary, borderColor: Colors.primary }
+                                        : styles.checkEmpty,
+                                ]}
+                            >
+                                {isSel && <CheckIcon size={13} color="#FFF" />}
                             </View>
                         )}
                     </View>
 
-                    <Text style={styles.tileTitle} numberOfLines={1}>
-                        {item.name.replace(/\.[^.]+$/, '')}
-                    </Text>
-                    <Text style={styles.tileMeta} numberOfLines={1}>
-                        {formatFileSize(item.size)}
-                    </Text>
+                    <View style={styles.tileBody}>
+                        <Text style={styles.tileTitle} numberOfLines={2}>
+                            {displayName}
+                        </Text>
+                        <View style={styles.tileMetaRow}>
+                            <Text style={[styles.tilePlatform, { color: accent }]} numberOfLines={1}>
+                                {platformLabel(item.platform)}
+                            </Text>
+                            <Text style={styles.tileDot}>·</Text>
+                            <Text style={styles.tileMeta} numberOfLines={1}>
+                                {sizeLabel}
+                            </Text>
+                        </View>
+                    </View>
                 </Pressable>
             );
         },
-        [tileWidth, gallery, openItem]
+        [tileWidth, gallery, openItem, platformLabel],
     );
 
     const header = useMemo(
         () => (
-            <View>
-                {/* Search field, revealed by the magnifier rather than always
-                    taking vertical space from the grid. */}
+            <View style={styles.filtersBlock}>
                 {showSearch && (
                     <View style={styles.searchRow}>
                         <SearchIcon size={16} color={Colors.textMuted} />
@@ -286,13 +322,21 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                             autoCorrect={false}
                             autoCapitalize="none"
                             returnKeyType="search"
+                            autoFocus
                         />
-                        <Pressable onPress={() => { gallery.setQuery(''); setShowSearch(false); }} hitSlop={10}>
+                        <Pressable
+                            onPress={() => {
+                                gallery.setQuery('');
+                                setShowSearch(false);
+                            }}
+                            hitSlop={10}
+                        >
                             <CloseIcon size={16} color={Colors.textMuted} />
                         </Pressable>
                     </View>
                 )}
 
+                {/* Kind filters */}
                 <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
@@ -304,11 +348,17 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                         return (
                             <Pressable
                                 key={key}
-                                onPress={() => { gallery.setKind(key); Haptics.selection(); }}
+                                onPress={() => {
+                                    gallery.setKind(key);
+                                    Haptics.selection();
+                                }}
                                 style={[styles.chip, active && styles.chipActive]}
                             >
                                 {Icon && (
-                                    <Icon size={13} color={active ? Colors.background : Colors.textSecondary} />
+                                    <Icon
+                                        size={13}
+                                        color={active ? '#FFF' : Colors.textSecondary}
+                                    />
                                 )}
                                 <Text style={[styles.chipText, active && styles.chipTextActive]}>
                                     {label}
@@ -319,6 +369,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                     })}
                 </ScrollView>
 
+                {/* Platform filters */}
                 {gallery.platforms.length > 0 && (
                     <ScrollView
                         horizontal
@@ -326,11 +377,19 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                         contentContainerStyle={styles.chipRow}
                     >
                         <Pressable
-                            onPress={() => { gallery.setPlatform(null); Haptics.selection(); }}
+                            onPress={() => {
+                                gallery.setPlatform(null);
+                                Haptics.selection();
+                            }}
                             style={[styles.chip, !gallery.filters.platform && styles.chipActive]}
                         >
-                            <Text style={[styles.chipText, !gallery.filters.platform && styles.chipTextActive]}>
-                                Every platform
+                            <Text
+                                style={[
+                                    styles.chipText,
+                                    !gallery.filters.platform && styles.chipTextActive,
+                                ]}
+                            >
+                                All platforms
                             </Text>
                         </Pressable>
                         {gallery.platforms.map((platform) => {
@@ -347,17 +406,22 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                                     style={[
                                         styles.chip,
                                         styles.platformChip,
-                                        active && { backgroundColor: tint, borderColor: tint },
+                                        active && {
+                                            backgroundColor: tint,
+                                            borderColor: tint,
+                                        },
                                     ]}
                                 >
                                     {PlatformIcon && (
-                                        <PlatformIcon size={14} color={active ? Colors.background : tint} />
+                                        <PlatformIcon
+                                            size={13}
+                                            color={active ? '#FFF' : tint}
+                                        />
                                     )}
                                     <Text
                                         style={[
                                             styles.chipText,
-                                            styles.platformChipText,
-                                            active && { color: Colors.background },
+                                            active && { color: '#FFF', fontWeight: '700' },
                                         ]}
                                     >
                                         {platformLabel(platform)}
@@ -371,7 +435,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                 <View style={styles.statusRow}>
                     <Text style={styles.statusText}>
                         {gallery.visible.length} item{gallery.visible.length === 1 ? '' : 's'}
-                        {gallery.hasActiveFilters ? ' filtered' : ''}
+                        {gallery.hasActiveFilters ? ' · filtered' : ''}
                     </Text>
                     <Pressable onPress={toggleSort} hitSlop={8} style={styles.sortBtn}>
                         <Text style={styles.sortText}>{SORT_LABELS[gallery.filters.sort]}</Text>
@@ -379,40 +443,58 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                 </View>
             </View>
         ),
-        [showSearch, gallery, toggleSort, platformLabel]
+        [showSearch, gallery, toggleSort, platformLabel],
     );
 
     const empty = gallery.loading ? null : gallery.error ? (
-        <EmptyState icon={<RefreshIcon size={44} color={Colors.textMuted} />} title="Library unavailable" subtitle={gallery.error} />
+        <EmptyState
+            icon={<RefreshIcon size={44} color={Colors.textMuted} />}
+            title="Library unavailable"
+            subtitle={gallery.error}
+        />
     ) : gallery.items.length === 0 ? (
-        <EmptyState icon={<ImageIcon size={44} color={Colors.textMuted} />} title="Nothing here yet" subtitle="Downloads you make will appear here" />
+        <EmptyState
+            icon={<ImageIcon size={44} color={Colors.textMuted} />}
+            title="Nothing here yet"
+            subtitle="Downloads you make will appear here"
+        />
     ) : (
-        <EmptyState icon={<SearchIcon size={44} color={Colors.textMuted} />} title="No matches" subtitle="Try a different filter" />
+        <EmptyState
+            icon={<SearchIcon size={44} color={Colors.textMuted} />}
+            title="No matches"
+            subtitle="Try a different filter"
+        />
     );
 
     return (
         <SafeAreaView style={styles.root} edges={['top']}>
             <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
-            {/* The header swaps to a selection bar so the bulk action always has
-                a home and never covers the grid. */}
             {gallery.selectionMode ? (
-                <View style={styles.header}>
-                    <Pressable onPress={gallery.clearSelection} hitSlop={12} style={styles.iconBtn}>
-                        <CloseIcon size={22} color={Colors.textPrimary} />
+                <View style={styles.selHeader}>
+                    <Pressable onPress={gallery.clearSelection} hitSlop={12} style={styles.selHeaderBtn}>
+                        <CloseIcon size={18} color={Colors.textPrimary} />
                     </Pressable>
-                    <Text style={styles.headerTitle}>{gallery.selected.size} selected</Text>
+                    <View style={styles.selHeaderCenter}>
+                        <Text style={styles.selHeaderCount}>{gallery.selected.size}</Text>
+                        <Text style={styles.selHeaderLabel}>
+                            {gallery.selected.size === 1 ? 'item selected' : 'items selected'}
+                        </Text>
+                    </View>
                     <View style={styles.headerActions}>
-                        <Pressable onPress={gallery.selectAll} hitSlop={12} style={styles.iconBtn}>
+                        <Pressable onPress={gallery.selectAll} hitSlop={12} style={styles.selHeaderBtn}>
                             <Text style={styles.selectAllText}>All</Text>
                         </Pressable>
                         <Pressable
                             onPress={handleBulkDelete}
                             hitSlop={12}
-                            disabled={gallery.deleting}
-                            style={[styles.iconBtn, gallery.deleting && styles.iconBtnDisabled]}
+                            disabled={gallery.deleting || gallery.selected.size === 0}
+                            style={[
+                                styles.selDeleteBtn,
+                                (gallery.deleting || gallery.selected.size === 0) && styles.iconBtnDisabled,
+                            ]}
                         >
-                            <TrashIcon size={20} color={Colors.errorLight} />
+                            <TrashIcon size={17} color="#FFF" />
                         </Pressable>
                     </View>
                 </View>
@@ -420,14 +502,30 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                 <View style={styles.header}>
                     <View style={styles.headerTextWrap}>
                         <Text style={styles.headerTitle}>Library</Text>
-                        <Text style={styles.headerSub}>{gallery.items.length} downloads</Text>
+                        <Text style={styles.headerSub}>
+                            {gallery.items.length} download{gallery.items.length === 1 ? '' : 's'}
+                        </Text>
                     </View>
                     <View style={styles.headerActions}>
-                        <Pressable onPress={() => setShowSearch((s) => !s)} hitSlop={12} style={styles.iconBtn}>
-                            <SearchIcon size={20} color={Colors.textPrimary} />
+                        <Pressable
+                            onPress={() => setShowSearch((s) => !s)}
+                            hitSlop={12}
+                            style={[styles.iconBtn, showSearch && styles.iconBtnActive]}
+                        >
+                            <SearchIcon
+                                size={18}
+                                color={showSearch ? Colors.primary : Colors.textPrimary}
+                            />
                         </Pressable>
-                        <Pressable onPress={() => { gallery.reload(); Haptics.impact(); }} hitSlop={12} style={styles.iconBtn}>
-                            <RefreshIcon size={20} color={Colors.textPrimary} />
+                        <Pressable
+                            onPress={() => {
+                                gallery.reload();
+                                Haptics.impact();
+                            }}
+                            hitSlop={12}
+                            style={styles.iconBtn}
+                        >
+                            <RefreshIcon size={18} color={Colors.textPrimary} />
                         </Pressable>
                     </View>
                 </View>
@@ -471,198 +569,332 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                 }
             />
 
-            {textViewer && <SubtitleViewerModal file={textViewer} onClose={() => setTextViewer(null)} />}
+            {textViewer && (
+                <SubtitleViewerModal file={textViewer} onClose={() => setTextViewer(null)} />
+            )}
         </SafeAreaView>
     );
 };
 
 const styles = StyleSheet.create({
     root: { flex: 1, backgroundColor: Colors.background },
+
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: Spacing.md,
-        paddingTop: Spacing.md,
-        paddingBottom: Spacing.sm,
-        gap: Spacing.sm,
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        paddingBottom: 8,
+        gap: 10,
     },
     headerTextWrap: { flex: 1 },
     headerTitle: {
         color: Colors.textPrimary,
-        fontSize: Typography.sizes['2xl'],
-        fontWeight: Typography.weights.bold,
-        letterSpacing: Typography.letterSpacing.tight,
+        fontSize: 28,
+        fontWeight: '800',
+        letterSpacing: -0.6,
     },
     headerSub: {
         color: Colors.textMuted,
-        fontSize: Typography.sizes.xs,
+        fontSize: 12,
         marginTop: 2,
-        fontWeight: Typography.weights.medium,
+        fontWeight: '500',
     },
-    headerActions: { flexDirection: 'row', gap: Spacing.xs, alignItems: 'center' },
+    headerActions: { flexDirection: 'row', gap: 8, alignItems: 'center' },
     iconBtn: {
-        width: 42,
-        height: 42,
-        borderRadius: BorderRadius.md,
+        width: 40,
+        height: 40,
+        borderRadius: 12,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: Colors.surface,
+        backgroundColor: Colors.surfaceMedium,
         borderWidth: 1,
         borderColor: Colors.innerBorderLight,
+    },
+    iconBtnActive: {
+        borderColor: `${Colors.primary}55`,
+        backgroundColor: `${Colors.primary}18`,
     },
     iconBtnDisabled: { opacity: 0.4 },
     selectAllText: {
         color: Colors.primary,
-        fontSize: Typography.sizes.sm,
-        fontWeight: Typography.weights.semibold,
+        fontSize: 13,
+        fontWeight: '700',
+    },
+
+    /* Selection mode top bar */
+    selHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 14,
+        paddingTop: 10,
+        paddingBottom: 10,
+        gap: 10,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: Colors.innerBorder,
+        backgroundColor: Colors.surfaceLow,
+    },
+    selHeaderBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.surfaceMedium,
+        borderWidth: 1,
+        borderColor: Colors.innerBorderLight,
+    },
+    selHeaderCenter: {
+        flex: 1,
+    },
+    selHeaderCount: {
+        color: Colors.textPrimary,
+        fontSize: 20,
+        fontWeight: '800',
+        letterSpacing: -0.3,
+    },
+    selHeaderLabel: {
+        color: Colors.textMuted,
+        fontSize: 12,
+        fontWeight: '500',
+        marginTop: 1,
+    },
+    selDeleteBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.error,
+    },
+
+    filtersBlock: {
+        paddingBottom: 4,
     },
     searchRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.sm,
-        marginHorizontal: Spacing.md,
-        marginBottom: Spacing.sm,
-        paddingHorizontal: Spacing.md,
+        gap: 10,
+        marginHorizontal: 16,
+        marginBottom: 10,
+        paddingHorizontal: 14,
         height: 44,
-        borderRadius: BorderRadius.md,
+        borderRadius: 14,
         backgroundColor: Colors.surfaceMedium,
         borderWidth: 1,
         borderColor: Colors.innerBorderLight,
     },
-    searchInput: { flex: 1, color: Colors.textPrimary, fontSize: Typography.sizes.base, padding: 0 },
-    chipRow: { gap: Spacing.sm, paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs },
+    searchInput: {
+        flex: 1,
+        color: Colors.textPrimary,
+        fontSize: 15,
+        padding: 0,
+    },
+
+    chipRow: {
+        gap: 8,
+        paddingHorizontal: 16,
+        paddingVertical: 5,
+    },
     chip: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.xs,
-        paddingHorizontal: Spacing.md,
-        paddingVertical: 9,
-        borderRadius: BorderRadius.round,
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 20,
         backgroundColor: Colors.surfaceMedium,
         borderWidth: 1,
         borderColor: Colors.innerBorderLight,
     },
-    chipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+    chipActive: {
+        backgroundColor: Colors.primary,
+        borderColor: Colors.primary,
+    },
     chipText: {
         color: Colors.textSecondary,
-        fontSize: Typography.sizes.xs,
-        fontWeight: Typography.weights.medium,
+        fontSize: 12,
+        fontWeight: '600',
     },
-    chipTextActive: { color: Colors.background, fontWeight: Typography.weights.semibold },
-    platformChip: { paddingLeft: 9, gap: 6 },
-    platformChipText: { fontWeight: Typography.weights.semibold },
+    chipTextActive: {
+        color: '#FFF',
+        fontWeight: '700',
+    },
+    platformChip: {
+        paddingLeft: 10,
+    },
+
     statusRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: Spacing.md,
-        paddingTop: Spacing.md,
-        paddingBottom: Spacing.sm,
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        paddingBottom: 6,
     },
     statusText: {
         color: Colors.textMuted,
-        fontSize: Typography.sizes.xs,
-        fontWeight: Typography.weights.medium,
+        fontSize: 12,
+        fontWeight: '500',
     },
     sortBtn: {
-        paddingHorizontal: Spacing.md,
-        paddingVertical: 7,
-        borderRadius: BorderRadius.round,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 14,
         backgroundColor: Colors.surfaceMedium,
         borderWidth: 1,
         borderColor: Colors.innerBorderLight,
     },
     sortText: {
         color: Colors.textSecondary,
-        fontSize: Typography.sizes.xs,
-        fontWeight: Typography.weights.semibold,
+        fontSize: 12,
+        fontWeight: '700',
     },
-    listContent: { paddingHorizontal: Spacing.md, paddingBottom: Spacing.xxl, gap: Spacing.lg },
-    row: { gap: Spacing.sm, alignItems: 'flex-start' },
+
+    listContent: {
+        paddingHorizontal: 16,
+        paddingBottom: 100,
+    },
+    row: {
+        gap: 10,
+        alignItems: 'flex-start',
+        marginBottom: 10,
+    },
+
     tile: {
-        marginBottom: Spacing.sm,
-        paddingBottom: Spacing.sm,
-        borderRadius: BorderRadius.lg,
+        borderRadius: 16,
         backgroundColor: Colors.surfaceMedium,
         borderWidth: 1,
         borderColor: Colors.innerBorder,
         overflow: 'hidden',
     },
+    tileSelected: {
+        borderColor: Colors.primary,
+        borderWidth: 2,
+        backgroundColor: `${Colors.primary}12`,
+    },
+    tileDimmed: {
+        opacity: 0.45,
+    },
     thumb: {
         width: '100%',
-        aspectRatio: 1.45,
-        borderRadius: BorderRadius.lg,
+        aspectRatio: 1.35,
         overflow: 'hidden',
         alignItems: 'center',
         justifyContent: 'center',
     },
     thumbImage: { width: '100%', height: '100%' },
+    placeholder: {
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    placeholderIcon: {
+        width: 48,
+        height: 48,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     scrim: {
         position: 'absolute',
         left: 0,
         right: 0,
         bottom: 0,
-        height: '38%',
-        backgroundColor: 'rgba(0,0,0,0.25)',
+        height: '40%',
+        backgroundColor: 'rgba(0,0,0,0.28)',
+    },
+    selOverlay: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    platformBadge: {
+        position: 'absolute',
+        top: 8,
+        left: 8,
+        width: 24,
+        height: 24,
+        borderRadius: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     durationBadge: {
         position: 'absolute',
-        right: Spacing.sm,
-        bottom: Spacing.sm,
-        paddingHorizontal: 7,
+        right: 8,
+        bottom: 8,
+        paddingHorizontal: 6,
         paddingVertical: 3,
-        borderRadius: BorderRadius.sm,
-        backgroundColor: 'rgba(0,0,0,0.68)',
+        borderRadius: 6,
+        backgroundColor: 'rgba(0,0,0,0.72)',
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.12)',
+        borderColor: 'rgba(255,255,255,0.1)',
     },
     durationText: {
         color: '#FFF',
-        fontSize: Typography.sizes.xxs,
-        fontWeight: Typography.weights.semibold,
+        fontSize: 10,
+        fontWeight: '700',
         fontVariant: ['tabular-nums'],
     },
     playDot: {
         position: 'absolute',
-        left: Spacing.sm,
-        bottom: Spacing.sm,
-        width: 28,
-        height: 28,
-        borderRadius: 14,
+        left: 8,
+        bottom: 8,
+        width: 26,
+        height: 26,
+        borderRadius: 13,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(0,0,0,0.62)',
+        backgroundColor: 'rgba(0,0,0,0.65)',
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.18)',
+        borderColor: 'rgba(255,255,255,0.15)',
     },
-    selRing: {
-        ...StyleSheet.absoluteFillObject,
-        borderRadius: BorderRadius.md,
-        borderWidth: 2.5,
-    },
-    selDot: {
+    checkWrap: {
         position: 'absolute',
-        top: 4,
-        right: 4,
-        width: 20,
-        height: 20,
-        borderRadius: 10,
+        top: 8,
+        right: 8,
+        width: 24,
+        height: 24,
+        borderRadius: 12,
         alignItems: 'center',
         justifyContent: 'center',
+        borderWidth: 2,
+        zIndex: 5,
+    },
+    checkEmpty: {
+        backgroundColor: 'rgba(0,0,0,0.35)',
+        borderColor: 'rgba(255,255,255,0.55)',
+    },
+
+    tileBody: {
+        paddingHorizontal: 10,
+        paddingTop: 8,
+        paddingBottom: 10,
     },
     tileTitle: {
         color: Colors.textPrimary,
-        fontSize: Typography.sizes.sm,
-        marginTop: Spacing.sm,
-        paddingHorizontal: Spacing.sm,
-        fontWeight: Typography.weights.semibold,
-        letterSpacing: Typography.letterSpacing.normal,
+        fontSize: 13,
+        fontWeight: '700',
+        letterSpacing: -0.2,
+        lineHeight: 17,
+    },
+    tileMetaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 4,
+        gap: 4,
+    },
+    tilePlatform: {
+        fontSize: 11,
+        fontWeight: '700',
+        flexShrink: 1,
+    },
+    tileDot: {
+        color: Colors.textMuted,
+        fontSize: 11,
     },
     tileMeta: {
         color: Colors.textMuted,
-        fontSize: Typography.sizes.xxs,
-        marginTop: 2,
-        paddingHorizontal: Spacing.sm,
+        fontSize: 11,
+        fontWeight: '500',
+        flexShrink: 0,
     },
 });
 

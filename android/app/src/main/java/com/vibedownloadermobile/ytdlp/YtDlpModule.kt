@@ -1223,12 +1223,17 @@ if (options?.hasKey("cookies") == true) {
 
                 var responseJson: String? = null
                 var lastError: Exception? = null
+                // The client that actually produced the format list. Format ids are
+                // client-specific, so the download has to reuse this exact client or
+                // the id the user picked does not exist over there.
+                var usedPlayerClient: String? = null
 
                 for (clients in clientSets) {
                     try {
                         responseJson = YoutubeDL.getInstance()
                             .execute(buildRequest(clients), processId = null, callback = null)
                             .out
+                        usedPlayerClient = clients
                         break
                     } catch (e: Exception) {
                         val message = e.message ?: ""
@@ -1262,6 +1267,9 @@ if (options?.hasKey("cookies") == true) {
 putString("extractor", raw.str("extractor"))
   putString("url", url)
   putString("platform", platform)
+  // Handed back so download() can re-select the same client that produced
+  // these format ids.
+  putString("playerClient", usedPlayerClient)
   // Live broadcasts have no known duration (0 or absent) and report a
   // live_status. Twitch reports "is_live"; treat any non-"not_live"/absent
   // status as live so recording is not treated as an unbounded VOD.
@@ -1922,6 +1930,13 @@ private fun publishSidecarFile(
                 val forcedTitle          = if (options?.hasKey("title")         == true) options.getString("title")         else null
                 val forcedArtist         = if (options?.hasKey("artist")        == true) options.getString("artist")        else null
                 val forcedPlatform       = if (options?.hasKey("platform")      == true) options.getString("platform")      else null
+                // YouTube format ids only mean anything for the player client that
+                // produced them. fetchInfo reports which client won, because
+                // web_embedded often fails and the list then comes from android -
+                // asking for web_embedded here would make every id unavailable.
+                val requestedPlayerClient = if (options?.hasKey("playerClient") == true) {
+                    options.getString("playerClient")
+                } else null
                 // Optional path to a pre-downloaded high-res album art file.
                 // When set, yt-dlp uses this file as the embedded thumbnail instead
                 // of fetching whatever thumbnail is linked in the video metadata.
@@ -2131,9 +2146,12 @@ val isCutDownload = requestedCutStart != null && requestedCutEnd != null &&
 else -> {
       // Video format - ensure MP4 container
       if (url.contains("youtube.com") || url.contains("youtu.be")) {
-        // tv_embedded is skipped by yt-dlp and web is SABR-only;
-        // web_embedded is the one that resolves.
-        request.addOption("--extractor-args", "youtube:player_client=web_embedded")
+        // Reuse the client that produced the format list. Defaulting to
+        // web_embedded is only right when that client is also the one that
+        // answered fetchInfo; when fetchInfo fell back to android, every id
+        // here is rejected with "Requested format is not available".
+        val playerClient = requestedPlayerClient?.takeIf { it.isNotBlank() } ?: "web_embedded"
+        request.addOption("--extractor-args", "youtube:player_client=$playerClient")
       }
       if (isTwitch) {
         // Twitch quality ids are bare names ("1080p60", "720p60", "audio_only")

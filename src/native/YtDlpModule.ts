@@ -72,6 +72,11 @@ export interface VideoInfo {
     extractor: string; // youtube, instagram, etc
     url: string;
     platform: string;
+    /**
+     * The YouTube player client that produced `formats`. Format ids are
+     * client-specific, so a download has to request this same client.
+     */
+    playerClient?: string | null;
     formats: Format[];
     /** Caption tracks, empty when the source publishes none. */
     subtitles?: SubtitleTrack[];
@@ -193,7 +198,7 @@ export interface YtDlpNativeModule {
      * `maxDurationSeconds` caps a live recording so it stops after that long
      * instead of following the stream forever. Requires ffmpeg as well.
      */
-    download(url: string, formatId: string | null, processId: string, options?: { title?: string; artist?: string; platform?: string; cookies?: string; thumbnailPath?: string; audioFormatId?: string; cutStart?: number; cutEnd?: number; maxDurationSeconds?: number }): Promise<DownloadResult>;
+    download(url: string, formatId: string | null, processId: string, options?: { title?: string; artist?: string; platform?: string; cookies?: string; thumbnailPath?: string; audioFormatId?: string; playerClient?: string; cutStart?: number; cutEnd?: number; maxDurationSeconds?: number }): Promise<DownloadResult>;
     /**
      * Downloads one caption track and publishes it to
      * Download/VibeDownloader/<Platform>/Subtitles.

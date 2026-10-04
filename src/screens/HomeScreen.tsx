@@ -1190,10 +1190,11 @@ let isStoryFetch = false;
                         artist:        state.videoInfo.uploader || 'Unknown',
                         platform:      resolvedPlatform || 'Unknown',
                         cookies:       cookiesPath || undefined,
-                        thumbnailPath: thumbnailPath,
-                        audioFormatId: selectedAudioFormatId ?? undefined,
-                    }
-                );
+thumbnailPath: thumbnailPath,
+      audioFormatId: selectedAudioFormatId ?? undefined,
+      playerClient:   state.videoInfo.playerClient ?? undefined,
+      }
+    );
             }
         } catch (error: any) {
             console.error('Download error:', error);
@@ -1227,9 +1228,10 @@ let isStoryFetch = false;
                     title: state.videoInfo.title,
                     artist: state.videoInfo.uploader || 'Unknown',
                     platform: resolvedPlatform || 'Unknown',
-                    cookies: cookiesPath || undefined,
-                    audioFormatId: selectedAudioFormatId ?? undefined,
-                    cutStart: selection.start,
+cookies: cookiesPath || undefined,
+    audioFormatId: selectedAudioFormatId ?? undefined,
+    playerClient: state.videoInfo.playerClient ?? undefined,
+    cutStart: selection.start,
                     cutEnd: selection.end,
                 });
             } catch (error: any) {
@@ -1389,9 +1391,12 @@ let isStoryFetch = false;
                             )}
                         </View>
                     </View>
-                    <Text style={[styles.tagline, { color: platformColor, opacity: 0.9 }]}>
-                        Download from any platform, instantly ⚡
-                    </Text>
+                    <View style={styles.taglineRow}>
+                        <View style={[styles.taglineDot, { backgroundColor: platformColor }]} />
+                        <Text style={styles.tagline}>
+                            Download from any platform, instantly
+                        </Text>
+                    </View>
                 </Animated.View>
 
                 {/* Platform Selector */}
@@ -1820,7 +1825,8 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     scrollContent: {
-        paddingBottom: Spacing.xxl,
+        // extra room so content isn't hidden under the floating bottom nav
+        paddingBottom: 120,
     },
     // ── Modern Header ──
     header: {
@@ -1842,20 +1848,20 @@ const styles = StyleSheet.create({
 
 
     logo: {
-        fontSize: 28,
-        fontWeight: '900',
+        fontSize: 26,
+        fontWeight: '800',
         color: Colors.textPrimary,
-        letterSpacing: -1.5,
+        letterSpacing: -1,
     },
     headerActions: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: 8,
     },
     headerBtn: {
-        width: 42,
-        height: 42,
-        borderRadius: 14,
+        width: 40,
+        height: 40,
+        borderRadius: 12,
         backgroundColor: '#161618',
         justifyContent: 'center',
         alignItems: 'center',
@@ -1908,13 +1914,22 @@ const styles = StyleSheet.create({
         fontWeight: '800',
         letterSpacing: 0.6,
     },
+    taglineRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginTop: 6,
+    },
+    taglineDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+    },
     tagline: {
         color: Colors.textMuted,
-        fontSize: 14,
+        fontSize: 13.5,
         fontWeight: '500',
-        marginTop: 6,
-        letterSpacing: -0.2,
-        opacity: 0.8,
+        letterSpacing: -0.1,
     },
     // ── Input Section ──
     inputSection: {

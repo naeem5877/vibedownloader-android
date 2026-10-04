@@ -281,6 +281,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   bottomNavSafeArea: {
+    // Float over the screens so the rounded corners show the content
+    // behind them instead of the black container background.
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: '#15151A',
     borderTopLeftRadius: 30,
     borderTopRightRadius: 30,

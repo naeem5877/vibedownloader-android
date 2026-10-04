@@ -33,6 +33,11 @@ export interface QueueItem {
     type: 'youtube' | 'spotify' | string;
     searchQuery?: string;
     formatId: string | null;
+    /**
+     * The YouTube player client that produced `formatId`. Format ids are
+     * client-specific, so the native download has to request the same one.
+     */
+    playerClient?: string;
     status: QueueItemStatus;
     progress: number;
     eta: number;
@@ -238,6 +243,7 @@ export const useDownloadQueue = (): UseDownloadQueueReturn => {
                     platform: item.type,
                     cookies: item.cookies || undefined,
                     thumbnailPath,
+                    playerClient: item.playerClient || undefined,
                 } as any);
             }
 

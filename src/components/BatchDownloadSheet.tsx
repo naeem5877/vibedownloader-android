@@ -22,9 +22,11 @@ export interface BatchResolvedItem {
     author: string;
     url: string;
     type: string;
-    thumbnail?: string;
-    cookies?: string;
-}
+thumbnail?: string;
+        cookies?: string;
+        /** Player client that produced this item's format ids, so the download matches. */
+        playerClient?: string;
+    }
 
 interface BatchDownloadSheetProps {
     visible: boolean;
@@ -108,6 +110,7 @@ export const BatchDownloadSheet: React.FC<BatchDownloadSheetProps> = ({ visible,
                     type: detectTypeFromUrl(url),
                     thumbnail: info.thumbnail,
                     cookies: cookies || undefined,
+                    playerClient: info.playerClient || undefined,
                 });
             } catch {
                 failures.push(url);

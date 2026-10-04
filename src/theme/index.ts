@@ -185,6 +185,15 @@ export const BorderRadius = {
 };
 
 export const Typography = {
+    // One type scale: five sizes, used by the Library, Settings and result cards.
+    // Spread into a style: `...Typography.scale.body`. Keep new screens on these.
+    scale: {
+        display: { fontSize: 28, lineHeight: 34, fontWeight: '800', letterSpacing: -0.6 },
+        title: { fontSize: 18, lineHeight: 24, fontWeight: '700', letterSpacing: -0.3 },
+        body: { fontSize: 14, lineHeight: 20, fontWeight: '600', letterSpacing: -0.1 },
+        caption: { fontSize: 12, lineHeight: 16, fontWeight: '500', letterSpacing: 0 },
+        label: { fontSize: 10, lineHeight: 12, fontWeight: '800', letterSpacing: 1.2 },
+    } as const,
     sizes: {
         xxs: 10,
         xs: 12,

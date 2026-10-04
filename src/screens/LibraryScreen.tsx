@@ -232,74 +232,75 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                         inSelection && !isSel && styles.tileDimmed,
                     ]}
                 >
-                    <View style={[styles.thumb, { backgroundColor: `${accent}18` }]}>
-                        {poster ? (
-                            <Image source={{ uri: poster }} style={styles.thumbImage} resizeMode="cover" />
+                    {/* Full-bleed media */}
+                    {poster ? (
+                        <Image source={{ uri: poster }} style={styles.thumbImage} resizeMode="cover" />
+                    ) : (
+                        <View style={[styles.placeholder, { backgroundColor: `${accent}22` }]}>
+                            <KindIcon size={28} color={accent} />
+                        </View>
+                    )}
+
+                    {/* Bottom gradient fade for text legibility */}
+                    <View style={styles.fadeLayer1} pointerEvents="none" />
+                    <View style={styles.fadeLayer2} pointerEvents="none" />
+                    <View style={styles.fadeLayer3} pointerEvents="none" />
+
+                    {isSel && (
+                        <View
+                            style={[styles.selOverlay, { backgroundColor: `${Colors.primary}40` }]}
+                            pointerEvents="none"
+                        />
+                    )}
+
+                    {/* Top row: platform + duration / check */}
+                    <View style={styles.topRow} pointerEvents="none">
+                        {PlatformIcon && !isSel ? (
+                            <View style={[styles.platformBadge, { backgroundColor: 'rgba(0,0,0,0.45)' }]}>
+                                <PlatformIcon size={12} color="#FFF" />
+                            </View>
                         ) : (
-                            <View style={styles.placeholder}>
-                                <View style={[styles.placeholderIcon, { backgroundColor: `${accent}22` }]}>
-                                    <KindIcon size={22} color={accent} />
-                                </View>
-                            </View>
+                            <View />
                         )}
-
-                        <View style={styles.scrim} pointerEvents="none" />
-
-                        {/* Soft tint when selected */}
-                        {isSel && (
-                            <View
-                                style={[styles.selOverlay, { backgroundColor: `${accent}33` }]}
-                                pointerEvents="none"
-                            />
-                        )}
-
-                        {/* Platform badge — hide while selected so check is clear */}
-                        {PlatformIcon && !isSel && (
-                            <View style={[styles.platformBadge, { backgroundColor: `${accent}E6` }]}>
-                                <PlatformIcon size={11} color="#FFF" />
-                            </View>
-                        )}
-
-                        {duration && kind !== 'image' && !isSel && (
-                            <View style={styles.durationBadge}>
-                                <Text style={styles.durationText}>{duration}</Text>
-                            </View>
-                        )}
-
-                        {kind === 'video' && poster && !isSel && (
-                            <View style={styles.playDot} pointerEvents="none">
-                                <PlayIcon size={11} color="#FFF" />
-                            </View>
-                        )}
-
-                        {/* Selection checkbox — always visible in selection mode */}
-                        {inSelection && (
+                        {inSelection ? (
                             <View
                                 style={[
                                     styles.checkWrap,
                                     isSel
-                                        ? { backgroundColor: Colors.primary, borderColor: Colors.primary }
+                                        ? {
+                                              backgroundColor: Colors.primary,
+                                              borderColor: Colors.primary,
+                                          }
                                         : styles.checkEmpty,
                                 ]}
                             >
                                 {isSel && <CheckIcon size={13} color="#FFF" />}
                             </View>
-                        )}
+                        ) : duration && kind !== 'image' ? (
+                            <View style={styles.durationBadge}>
+                                <Text style={styles.durationText}>{duration}</Text>
+                            </View>
+                        ) : null}
                     </View>
 
-                    <View style={styles.tileBody}>
+                    {/* Play hint for videos with poster */}
+                    {kind === 'video' && poster && !isSel && !inSelection && (
+                        <View style={styles.playWrap} pointerEvents="none">
+                            <View style={styles.playDot}>
+                                <PlayIcon size={12} color="#FFF" />
+                            </View>
+                        </View>
+                    )}
+
+                    {/* Title + meta overlaid on the fade */}
+                    <View style={styles.overlayBody}>
                         <Text style={styles.tileTitle} numberOfLines={2}>
                             {displayName}
                         </Text>
-                        <View style={styles.tileMetaRow}>
-                            <Text style={[styles.tilePlatform, { color: accent }]} numberOfLines={1}>
-                                {platformLabel(item.platform)}
-                            </Text>
-                            <Text style={styles.tileDot}>·</Text>
-                            <Text style={styles.tileMeta} numberOfLines={1}>
-                                {sizeLabel}
-                            </Text>
-                        </View>
+                        <Text style={styles.tileMeta} numberOfLines={1}>
+                            {platformLabel(item.platform)}
+                            {sizeLabel !== '—' ? `  ·  ${sizeLabel}` : ''}
+                        </Text>
                     </View>
                 </Pressable>
             );
@@ -336,13 +337,9 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                     </View>
                 )}
 
-                {/* Kind filters */}
-                <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.chipRow}
-                >
-                    {KIND_FILTERS.map(({ key, label, Icon }) => {
+                {/* Kind filters – segmented control */}
+                <View style={styles.segment}>
+                    {KIND_FILTERS.map(({ key, label }) => {
                         const active = gallery.filters.kind === key;
                         const count = gallery.kindCounts[key];
                         return (
@@ -352,41 +349,41 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                                     gallery.setKind(key);
                                     Haptics.selection();
                                 }}
-                                style={[styles.chip, active && styles.chipActive]}
+                                style={[styles.segmentItem, active && styles.segmentItemActive]}
                             >
-                                {Icon && (
-                                    <Icon
-                                        size={13}
-                                        color={active ? '#FFF' : Colors.textSecondary}
-                                    />
-                                )}
-                                <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                                <Text
+                                    style={[styles.segmentText, active && styles.segmentTextActive]}
+                                    numberOfLines={1}
+                                >
                                     {label}
-                                    {count > 0 ? ` ${count}` : ''}
                                 </Text>
+                                {active && count > 0 && (
+                                    <Text style={styles.segmentCount}>{count}</Text>
+                                )}
                             </Pressable>
                         );
                     })}
-                </ScrollView>
+                </View>
 
                 {/* Platform filters */}
                 {gallery.platforms.length > 0 && (
                     <ScrollView
                         horizontal
                         showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={styles.chipRow}
+                        style={styles.pRowScroll}
+                        contentContainerStyle={styles.pRow}
                     >
                         <Pressable
                             onPress={() => {
                                 gallery.setPlatform(null);
                                 Haptics.selection();
                             }}
-                            style={[styles.chip, !gallery.filters.platform && styles.chipActive]}
+                            style={[styles.pChip, !gallery.filters.platform && styles.pChipActive]}
                         >
                             <Text
                                 style={[
-                                    styles.chipText,
-                                    !gallery.filters.platform && styles.chipTextActive,
+                                    styles.pChipText,
+                                    !gallery.filters.platform && styles.pChipTextActive,
                                 ]}
                             >
                                 All platforms
@@ -404,24 +401,20 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                                         Haptics.selection();
                                     }}
                                     style={[
-                                        styles.chip,
-                                        styles.platformChip,
+                                        styles.pChip,
                                         active && {
-                                            backgroundColor: tint,
-                                            borderColor: tint,
+                                            backgroundColor: `${tint}26`,
+                                            borderColor: `${tint}66`,
                                         },
                                     ]}
                                 >
                                     {PlatformIcon && (
-                                        <PlatformIcon
-                                            size={13}
-                                            color={active ? '#FFF' : tint}
-                                        />
+                                        <PlatformIcon size={12} color={tint} />
                                     )}
                                     <Text
                                         style={[
-                                            styles.chipText,
-                                            active && { color: '#FFF', fontWeight: '700' },
+                                            styles.pChipText,
+                                            active && { color: Colors.textPrimary, fontWeight: '700' },
                                         ]}
                                     >
                                         {platformLabel(platform)}
@@ -555,19 +548,17 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                 windowSize={7}
             />
 
-            <MediaPreviewModal
-                item={preview}
-                onClose={() => setPreview(null)}
-                onDelete={
-                    preview
-                        ? () => {
-                              const target = preview;
-                              setPreview(null);
-                              handleDeleteOne(target);
-                          }
-                        : undefined
-                }
-            />
+            {preview ? (
+                <MediaPreviewModal
+                    item={preview}
+                    onClose={() => setPreview(null)}
+                    onDelete={() => {
+                        const target = preview;
+                        setPreview(null);
+                        handleDeleteOne(target);
+                    }}
+                />
+            ) : null}
 
             {textViewer && (
                 <SubtitleViewerModal file={textViewer} onClose={() => setTextViewer(null)} />
@@ -669,14 +660,14 @@ const styles = StyleSheet.create({
     },
 
     filtersBlock: {
+        paddingTop: 4,
         paddingBottom: 4,
     },
     searchRow: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 10,
-        marginHorizontal: 16,
-        marginBottom: 10,
+        marginBottom: 12,
         paddingHorizontal: 14,
         height: 44,
         borderRadius: 14,
@@ -691,46 +682,82 @@ const styles = StyleSheet.create({
         padding: 0,
     },
 
-    chipRow: {
-        gap: 8,
-        paddingHorizontal: 16,
-        paddingVertical: 5,
-    },
-    chip: {
+    /* Kind filter – segmented control */
+    segment: {
         flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 20,
+        padding: 4,
+        borderRadius: 14,
         backgroundColor: Colors.surfaceMedium,
         borderWidth: 1,
-        borderColor: Colors.innerBorderLight,
+        borderColor: Colors.innerBorder,
     },
-    chipActive: {
+    segmentItem: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 4,
+        height: 34,
+        borderRadius: 10,
+    },
+    segmentItemActive: {
         backgroundColor: Colors.primary,
-        borderColor: Colors.primary,
     },
-    chipText: {
+    segmentText: {
         color: Colors.textSecondary,
         fontSize: 12,
         fontWeight: '600',
     },
-    chipTextActive: {
+    segmentTextActive: {
         color: '#FFF',
         fontWeight: '700',
     },
-    platformChip: {
-        paddingLeft: 10,
+    segmentCount: {
+        color: 'rgba(255,255,255,0.7)',
+        fontSize: 11,
+        fontWeight: '700',
+    },
+
+    /* Platform filter – light chips that bleed to the screen edges */
+    pRowScroll: {
+        marginHorizontal: -16,
+        marginTop: 12,
+    },
+    pRow: {
+        gap: 8,
+        paddingHorizontal: 16,
+    },
+    pChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 12,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: 'transparent',
+        borderWidth: 1,
+        borderColor: Colors.innerBorder,
+    },
+    pChipActive: {
+        backgroundColor: `${Colors.primary}26`,
+        borderColor: `${Colors.primary}66`,
+    },
+    pChipText: {
+        color: Colors.textMuted,
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    pChipTextActive: {
+        color: Colors.textPrimary,
+        fontWeight: '700',
     },
 
     statusRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingTop: 12,
-        paddingBottom: 6,
+        paddingTop: 14,
+        paddingBottom: 10,
     },
     statusText: {
         color: Colors.textMuted,
@@ -762,68 +789,81 @@ const styles = StyleSheet.create({
     },
 
     tile: {
-        borderRadius: 16,
-        backgroundColor: Colors.surfaceMedium,
-        borderWidth: 1,
-        borderColor: Colors.innerBorder,
+        borderRadius: 18,
         overflow: 'hidden',
+        backgroundColor: Colors.surfaceMedium,
+        aspectRatio: 0.85,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.06)',
     },
     tileSelected: {
         borderColor: Colors.primary,
         borderWidth: 2,
-        backgroundColor: `${Colors.primary}12`,
     },
     tileDimmed: {
-        opacity: 0.45,
+        opacity: 0.4,
     },
-    thumb: {
+    thumbImage: {
+        ...StyleSheet.absoluteFillObject,
         width: '100%',
-        aspectRatio: 1.35,
-        overflow: 'hidden',
-        alignItems: 'center',
-        justifyContent: 'center',
+        height: '100%',
     },
-    thumbImage: { width: '100%', height: '100%' },
     placeholder: {
+        ...StyleSheet.absoluteFillObject,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    placeholderIcon: {
-        width: 48,
-        height: 48,
-        borderRadius: 14,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    scrim: {
+    fadeLayer1: {
         position: 'absolute',
         left: 0,
         right: 0,
         bottom: 0,
-        height: '40%',
-        backgroundColor: 'rgba(0,0,0,0.28)',
+        height: '62%',
+        backgroundColor: 'rgba(0,0,0,0.15)',
+    },
+    fadeLayer2: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        height: '42%',
+        backgroundColor: 'rgba(0,0,0,0.4)',
+    },
+    fadeLayer3: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        height: '28%',
+        backgroundColor: 'rgba(0,0,0,0.65)',
     },
     selOverlay: {
         ...StyleSheet.absoluteFillObject,
     },
-    platformBadge: {
+    topRow: {
         position: 'absolute',
-        top: 8,
-        left: 8,
-        width: 24,
-        height: 24,
-        borderRadius: 8,
+        top: 10,
+        left: 10,
+        right: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        zIndex: 4,
+    },
+    platformBadge: {
+        width: 26,
+        height: 26,
+        borderRadius: 9,
         alignItems: 'center',
         justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
     },
     durationBadge: {
-        position: 'absolute',
-        right: 8,
-        bottom: 8,
-        paddingHorizontal: 6,
+        paddingHorizontal: 7,
         paddingVertical: 3,
-        borderRadius: 6,
-        backgroundColor: 'rgba(0,0,0,0.72)',
+        borderRadius: 8,
+        backgroundColor: 'rgba(0,0,0,0.55)',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.1)',
     },
@@ -833,68 +873,61 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         fontVariant: ['tabular-nums'],
     },
-    playDot: {
-        position: 'absolute',
-        left: 8,
-        bottom: 8,
-        width: 26,
-        height: 26,
-        borderRadius: 13,
+    playWrap: {
+        ...StyleSheet.absoluteFillObject,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(0,0,0,0.65)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.15)',
+        zIndex: 3,
+        paddingBottom: 20,
+    },
+    playDot: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0,0,0,0.45)',
+        borderWidth: 1.5,
+        borderColor: 'rgba(255,255,255,0.25)',
     },
     checkWrap: {
-        position: 'absolute',
-        top: 8,
-        right: 8,
         width: 24,
         height: 24,
         borderRadius: 12,
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 2,
-        zIndex: 5,
     },
     checkEmpty: {
-        backgroundColor: 'rgba(0,0,0,0.35)',
-        borderColor: 'rgba(255,255,255,0.55)',
+        backgroundColor: 'rgba(0,0,0,0.3)',
+        borderColor: 'rgba(255,255,255,0.6)',
     },
-
-    tileBody: {
-        paddingHorizontal: 10,
-        paddingTop: 8,
-        paddingBottom: 10,
+    overlayBody: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        paddingHorizontal: 12,
+        paddingBottom: 12,
+        paddingTop: 28,
+        zIndex: 3,
     },
     tileTitle: {
-        color: Colors.textPrimary,
-        fontSize: 13,
-        fontWeight: '700',
-        letterSpacing: -0.2,
-        lineHeight: 17,
-    },
-    tileMetaRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginTop: 4,
-        gap: 4,
-    },
-    tilePlatform: {
-        fontSize: 11,
-        fontWeight: '700',
-        flexShrink: 1,
-    },
-    tileDot: {
-        color: Colors.textMuted,
-        fontSize: 11,
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '800',
+        letterSpacing: -0.3,
+        lineHeight: 18,
+        textShadowColor: 'rgba(0,0,0,0.5)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 4,
     },
     tileMeta: {
-        color: Colors.textMuted,
+        color: 'rgba(255,255,255,0.7)',
         fontSize: 11,
-        fontWeight: '500',
-        flexShrink: 0,
+        fontWeight: '600',
+        marginTop: 3,
+        letterSpacing: 0.1,
     },
 });
 

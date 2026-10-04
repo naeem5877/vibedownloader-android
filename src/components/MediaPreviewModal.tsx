@@ -1,32 +1,50 @@
 /**
- * Full-screen preview for a single library item.
+ * Full-screen immersive preview for a library item.
  *
- * Videos play in-app through react-native-video instead of being handed to
- * another app, so previewing no longer leaves the library. Images use a plain
- * local URI, which needs no save step.
+ * Videos use react-native-video with native controls; images fill the stage.
  */
 
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Dimensions,
     Image,
     Modal,
     Pressable,
-    ScrollView,
     StyleSheet,
     Text,
     View,
 } from 'react-native';
 import Video, { type VideoRef } from 'react-native-video';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Spacing, Typography, BorderRadius, getPlatformColor } from '../theme';
-import { CloseIcon, ShareIcon, TrashIcon, VideoIcon, MusicNoteIcon, TypeIcon } from './Icons';
+import { Colors, getPlatformColor } from '../theme';
+import {
+    CloseIcon,
+    ShareIcon,
+    TrashIcon,
+    VideoIcon,
+    MusicNoteIcon,
+    TypeIcon,
+    getPlatformIcon,
+} from './Icons';
 import { formatFileSize, YtDlpNative } from '../native/YtDlpModule';
-import { deriveMediaKind, formatTileDuration } from '../utils/libraryMedia';
+import { deriveMediaKind, formatTileDuration, normalizePlatform } from '../utils/libraryMedia';
 import { Haptics } from '../utils/haptics';
 
-const { width: SCREEN_W } = Dimensions.get('window');
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+
+const PLATFORM_LABELS: Record<string, string> = {
+    youtube: 'YouTube',
+    instagram: 'Instagram',
+    tiktok: 'TikTok',
+    facebook: 'Facebook',
+    twitter: 'X',
+    x: 'X',
+    spotify: 'Spotify',
+    pinterest: 'Pinterest',
+    soundcloud: 'SoundCloud',
+    twitch: 'Twitch',
+};
 
 export interface PreviewItem {
     name: string;
@@ -40,251 +58,394 @@ export interface PreviewItem {
 }
 
 interface MediaPreviewModalProps {
-    item: PreviewItem | null;
+    item: PreviewItem;
     onClose: () => void;
     onDelete?: () => void;
 }
 
-export const MediaPreviewModal: React.FC<MediaPreviewModalProps> = ({
-    item,
-    onClose,
-    onDelete,
-}) => {
+function MediaPreviewModal({ item, onClose, onDelete }: MediaPreviewModalProps) {
     const videoRef = useRef<VideoRef>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [showInfo, setShowInfo] = useState(true);
 
-    const kind = item ? deriveMediaKind(item.extension) : 'image';
-    const accent = item ? getPlatformColor(item.platform) : Colors.primary;
-    const duration = item ? formatTileDuration(item.duration) : null;
+    useEffect(() => {
+        setLoading(true);
+        setError(null);
+        setShowInfo(true);
+    }, [item.path]);
+
+    const kind = deriveMediaKind(item.extension);
+    const platformKey = normalizePlatform(item.platform);
+    const accent = getPlatformColor(platformKey || item.platform);
+    const duration = formatTileDuration(item.duration);
+    const PlatformIcon = getPlatformIcon(platformKey);
+    const platformName = PLATFORM_LABELS[platformKey] ?? item.platform;
 
     const handleShare = useCallback(() => {
-        if (!item) return;
         Haptics.impact();
         YtDlpNative.shareFile?.(item.path);
-    }, [item]);
-
-    if (!item) return null;
+    }, [item.path]);
 
     const isVideo = kind === 'video';
     const isImage = kind === 'image';
+    const displayName = item.name.replace(/\.[^.]+$/, '');
 
     return (
-        <Modal visible animationType="fade" transparent onRequestClose={onClose} statusBarTranslucent>
+        <Modal
+            visible
+            animationType="fade"
+            transparent
+            onRequestClose={onClose}
+            statusBarTranslucent
+        >
             <View style={styles.backdrop}>
-                <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-                    <View style={styles.header}>
+                <View style={styles.stage}>
+                    {isVideo && (
+                        <>
+                            <Video
+                                ref={videoRef}
+                                source={{ uri: `file://${item.path}` }}
+                                style={StyleSheet.absoluteFill}
+                                resizeMode="contain"
+                                controls
+                                paused={false}
+                                onLoad={() => setLoading(false)}
+                                onError={(e) => {
+                                    setLoading(false);
+                                    setError(
+                                        e?.error?.errorString ??
+                                            'This video could not be played on this device',
+                                    );
+                                }}
+                            />
+                            {loading && !error && (
+                                <View style={styles.stageOverlay} pointerEvents="none">
+                                    <ActivityIndicator color="#FFF" size="large" />
+                                </View>
+                            )}
+                            {error && (
+                                <View style={styles.stageOverlay}>
+                                    <VideoIcon size={48} color="rgba(255,255,255,0.45)" />
+                                    <Text style={styles.errorText}>{error}</Text>
+                                </View>
+                            )}
+                        </>
+                    )}
+
+                    {isImage && (
+                        <Image
+                            source={{ uri: `file://${item.path}` }}
+                            style={styles.image}
+                            resizeMode="contain"
+                        />
+                    )}
+
+                    {!isVideo && !isImage && (
+                        <View style={styles.staticStage}>
+                            <View style={[styles.staticIconWrap, { backgroundColor: `${accent}22` }]}>
+                                {kind === 'audio' ? (
+                                    <MusicNoteIcon size={40} color={accent} />
+                                ) : (
+                                    <TypeIcon size={40} color={accent} />
+                                )}
+                            </View>
+                            <Text style={styles.staticLabel}>
+                                {kind === 'audio' ? 'Audio file' : 'Text file'}
+                            </Text>
+                            <Text style={styles.staticHint}>
+                                {kind === 'audio'
+                                    ? 'Open with your system player via Share'
+                                    : 'Opens in the text viewer'}
+                            </Text>
+                        </View>
+                    )}
+                </View>
+
+                <SafeAreaView style={styles.chrome} edges={['top', 'bottom']} pointerEvents="box-none">
+                    <View style={styles.topBar}>
                         <Pressable
                             onPress={onClose}
                             hitSlop={12}
                             accessibilityRole="button"
                             accessibilityLabel="Close preview"
-                            style={styles.iconBtn}
+                            style={styles.glassBtn}
                         >
-                            <CloseIcon size={22} color="#FFF" />
+                            <CloseIcon size={18} color="#FFF" />
                         </Pressable>
 
-                        <View style={styles.headerText}>
-                            <Text style={styles.title} numberOfLines={1}>
-                                {item.name}
-                            </Text>
-                            <Text style={styles.subtitle} numberOfLines={1}>
-                                {[item.platform, duration, formatFileSize(item.size)]
-                                    .filter(Boolean)
-                                    .join('  ·  ')}
-                            </Text>
-                        </View>
-
-                        <View style={styles.headerActions}>
+                        <View style={styles.topBarActions}>
                             <Pressable
                                 onPress={handleShare}
                                 hitSlop={10}
                                 accessibilityRole="button"
                                 accessibilityLabel="Share"
-                                style={styles.iconBtn}
+                                style={styles.glassBtn}
                             >
-                                <ShareIcon size={20} color="#FFF" />
+                                <ShareIcon size={18} color="#FFF" />
                             </Pressable>
-                            {onDelete && (
+                            {onDelete ? (
                                 <Pressable
                                     onPress={onDelete}
                                     hitSlop={10}
                                     accessibilityRole="button"
                                     accessibilityLabel="Delete"
-                                    style={styles.iconBtn}
+                                    style={[styles.glassBtn, styles.deleteBtn]}
                                 >
-                                    <TrashIcon size={20} color={Colors.errorLight} />
+                                    <TrashIcon size={18} color="#FFF" />
                                 </Pressable>
-                            )}
+                            ) : null}
                         </View>
                     </View>
 
-                    <ScrollView
-                        contentContainerStyle={styles.body}
-                        showsVerticalScrollIndicator={false}
-                    >
-                        {isVideo && (
-                            <View style={styles.stage}>
-                                <Video
-                                    ref={videoRef}
-                                    source={{ uri: `file://${item.path}` }}
-                                    style={StyleSheet.absoluteFill}
-                                    resizeMode="contain"
-                                    controls
-                                    paused={false}
-                                    onLoad={() => setLoading(false)}
-                                    onError={(e) => {
-                                        setLoading(false);
-                                        setError(
-                                            e?.error?.errorString ??
-                                                'This video could not be played on this device'
-                                        );
-                                    }}
-                                />
-                                {loading && !error && (
-                                    <View style={styles.stageOverlay} pointerEvents="none">
-                                        <ActivityIndicator color="#FFF" />
+                    <View style={styles.flexSpacer} pointerEvents="none" />
+
+                    {showInfo ? (
+                        <Pressable
+                            style={styles.infoCard}
+                            onPress={() => setShowInfo(false)}
+                            accessibilityRole="button"
+                            accessibilityLabel="Hide info"
+                        >
+                            <View style={styles.infoHandle} />
+
+                            <View style={styles.infoHeader}>
+                                {PlatformIcon ? (
+                                    <View
+                                        style={[
+                                            styles.platformChip,
+                                            { backgroundColor: `${accent}30` },
+                                        ]}
+                                    >
+                                        <PlatformIcon size={14} color={accent} />
                                     </View>
-                                )}
-                                {error && (
-                                    <View style={styles.stageOverlay}>
-                                        <VideoIcon size={40} color="rgba(255,255,255,0.5)" />
-                                        <Text style={styles.errorText}>{error}</Text>
-                                    </View>
-                                )}
+                                ) : null}
+                                <View style={styles.infoText}>
+                                    <Text style={styles.infoTitle} numberOfLines={2}>
+                                        {displayName}
+                                    </Text>
+                                    <Text style={styles.infoSub} numberOfLines={1}>
+                                        {[platformName, duration, formatFileSize(item.size)]
+                                            .filter(Boolean)
+                                            .join('  ·  ')}
+                                    </Text>
+                                </View>
                             </View>
-                        )}
 
-                        {isImage && (
-                            <View style={styles.stage}>
-                                <Image
-                                    source={{ uri: `file://${item.path}` }}
-                                    style={styles.image}
-                                    resizeMode="contain"
+                            <View style={styles.metaGrid}>
+                                <MetaPill
+                                    label="Type"
+                                    value={(item.mimeType || item.extension).toUpperCase()}
                                 />
+                                <MetaPill label="Size" value={formatFileSize(item.size)} />
+                                {duration ? <MetaPill label="Length" value={duration} /> : null}
+                                <MetaPill label="Source" value={platformName || '—'} />
                             </View>
-                        )}
-
-                        {/* Audio and text have no inline stage, so lead with the
-                            type badge rather than leaving a blank area. */}
-                        {!isVideo && !isImage && (
-                            <View style={[styles.stage, styles.staticStage]}>
-                                {kind === 'audio' ? (
-                                    <MusicNoteIcon size={56} color={accent} />
-                                ) : (
-                                    <TypeIcon size={56} color={accent} />
-                                )}
-                                <Text style={styles.staticLabel}>
-                                    {kind === 'audio' ? 'Audio file' : 'Text file'}
-                                </Text>
-                                <Text style={styles.staticHint}>
-                                    {kind === 'audio'
-                                        ? 'Use the controls below to play'
-                                        : 'Opens in the text viewer'}
-                                </Text>
-                            </View>
-                        )}
-
-                        <View style={styles.metaCard}>
-                            <MetaRow label="Type" value={item.mimeType || item.extension.toUpperCase()} />
-                            <MetaRow label="Size" value={formatFileSize(item.size)} />
-                            <MetaRow label="Platform" value={item.platform} />
-                            {duration && <MetaRow label="Duration" value={duration} />}
-                            <Text style={styles.path} numberOfLines={2} selectable>
-                                {item.path}
-                            </Text>
-                        </View>
-                    </ScrollView>
+                        </Pressable>
+                    ) : (
+                        <Pressable
+                            style={styles.showInfoBtn}
+                            onPress={() => setShowInfo(true)}
+                            hitSlop={12}
+                        >
+                            <Text style={styles.showInfoText}>Details</Text>
+                        </Pressable>
+                    )}
                 </SafeAreaView>
             </View>
         </Modal>
     );
-};
+}
 
-const MetaRow: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-    <View style={styles.metaRow}>
-        <Text style={styles.metaLabel}>{label}</Text>
-        <Text style={styles.metaValue} numberOfLines={1}>
-            {value}
-        </Text>
-    </View>
-);
+function MetaPill({ label, value }: { label: string; value: string }) {
+    return (
+        <View style={styles.metaPill}>
+            <Text style={styles.metaPillLabel}>{label}</Text>
+            <Text style={styles.metaPillValue} numberOfLines={1}>
+                {value}
+            </Text>
+        </View>
+    );
+}
 
 const styles = StyleSheet.create({
-    backdrop: { flex: 1, backgroundColor: '#000' },
-    root: { flex: 1 },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: Spacing.sm,
-        paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.sm,
+    backdrop: {
+        flex: 1,
+        backgroundColor: '#000',
     },
-    iconBtn: {
-        width: 38,
-        height: 38,
-        borderRadius: BorderRadius.round,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(255,255,255,0.12)',
-    },
-    headerText: { flex: 1 },
-    headerActions: { flexDirection: 'row', gap: Spacing.xs },
-    title: {
-        color: '#FFF',
-        fontSize: Typography.sizes.base,
-        fontWeight: Typography.weights.semibold,
-    },
-    subtitle: {
-        color: 'rgba(255,255,255,0.6)',
-        fontSize: Typography.sizes.xs,
-        marginTop: 1,
-    },
-    body: { padding: Spacing.md, paddingBottom: Spacing.xl },
     stage: {
-        width: SCREEN_W - Spacing.md * 2,
-        aspectRatio: 16 / 9,
-        borderRadius: BorderRadius.lg,
-        overflow: 'hidden',
-        backgroundColor: '#0B0B0D',
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: '#000',
         alignItems: 'center',
         justifyContent: 'center',
     },
-    staticStage: { gap: Spacing.sm, padding: Spacing.lg },
-    staticLabel: {
-        color: '#FFF',
-        fontSize: Typography.sizes.base,
-        fontWeight: Typography.weights.semibold,
+    image: {
+        width: SCREEN_W,
+        height: SCREEN_H,
     },
-    staticHint: { color: 'rgba(255,255,255,0.5)', fontSize: Typography.sizes.sm },
-    image: { width: '100%', height: '100%' },
     stageOverlay: {
         ...StyleSheet.absoluteFillObject,
         alignItems: 'center',
         justifyContent: 'center',
-        gap: Spacing.sm,
-        paddingHorizontal: Spacing.lg,
+        gap: 12,
+        paddingHorizontal: 32,
+        backgroundColor: 'rgba(0,0,0,0.35)',
     },
     errorText: {
         color: 'rgba(255,255,255,0.75)',
-        fontSize: Typography.sizes.sm,
+        fontSize: 14,
+        textAlign: 'center',
+        lineHeight: 20,
+    },
+    staticStage: {
+        alignItems: 'center',
+        gap: 12,
+        padding: 32,
+    },
+    staticIconWrap: {
+        width: 80,
+        height: 80,
+        borderRadius: 24,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 4,
+    },
+    staticLabel: {
+        color: '#FFF',
+        fontSize: 17,
+        fontWeight: '700',
+    },
+    staticHint: {
+        color: 'rgba(255,255,255,0.5)',
+        fontSize: 13,
         textAlign: 'center',
     },
-    metaCard: {
-        marginTop: Spacing.lg,
-        borderRadius: BorderRadius.lg,
-        backgroundColor: 'rgba(255,255,255,0.06)',
+    chrome: {
+        ...StyleSheet.absoluteFillObject,
+        justifyContent: 'space-between',
+    },
+    topBar: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 14,
+        paddingTop: 6,
+        paddingBottom: 8,
+    },
+    topBarActions: {
+        flexDirection: 'row',
+        gap: 10,
+    },
+    glassBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0,0,0,0.45)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
+    },
+    deleteBtn: {
+        backgroundColor: 'rgba(239,68,68,0.55)',
+        borderColor: 'rgba(239,68,68,0.35)',
+    },
+    flexSpacer: {
+        flex: 1,
+    },
+    infoCard: {
+        marginHorizontal: 14,
+        marginBottom: 8,
+        borderRadius: 20,
+        backgroundColor: 'rgba(18,18,22,0.92)',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.08)',
-        padding: Spacing.md,
-        gap: Spacing.xs,
+        paddingHorizontal: 16,
+        paddingTop: 10,
+        paddingBottom: 16,
     },
-    metaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    metaLabel: { color: 'rgba(255,255,255,0.5)', fontSize: Typography.sizes.sm },
-    metaValue: { color: '#FFF', fontSize: Typography.sizes.sm, fontWeight: Typography.weights.medium },
-    path: {
-        marginTop: Spacing.xs,
+    infoHandle: {
+        alignSelf: 'center',
+        width: 36,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: 'rgba(255,255,255,0.18)',
+        marginBottom: 12,
+    },
+    infoHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        marginBottom: 14,
+    },
+    platformChip: {
+        width: 36,
+        height: 36,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    infoText: {
+        flex: 1,
+        minWidth: 0,
+    },
+    infoTitle: {
+        color: '#FFF',
+        fontSize: 16,
+        fontWeight: '800',
+        letterSpacing: -0.3,
+        lineHeight: 20,
+    },
+    infoSub: {
+        color: 'rgba(255,255,255,0.55)',
+        fontSize: 12,
+        fontWeight: '500',
+        marginTop: 3,
+    },
+    metaGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    metaPill: {
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.06)',
+        minWidth: '46%',
+        flexGrow: 1,
+    },
+    metaPillLabel: {
         color: 'rgba(255,255,255,0.4)',
-        fontSize: Typography.sizes.xxs,
+        fontSize: 10,
+        fontWeight: '600',
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
+        marginBottom: 2,
+    },
+    metaPillValue: {
+        color: '#FFF',
+        fontSize: 13,
+        fontWeight: '700',
+    },
+    showInfoBtn: {
+        alignSelf: 'center',
+        marginBottom: 12,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 20,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
+    },
+    showInfoText: {
+        color: 'rgba(255,255,255,0.8)',
+        fontSize: 12,
+        fontWeight: '700',
     },
 });
+
+export { MediaPreviewModal };
+export default MediaPreviewModal;

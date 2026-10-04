@@ -34,6 +34,11 @@ export interface YtDlpDownloadOptions {
     cookies?: string;
     thumbnailPath?: string;
     audioFormatId?: string;
+    /**
+     * The YouTube player client that produced the format list. Format ids are
+     * client-specific, so the download has to ask for the same one.
+     */
+    playerClient?: string;
     /** In-point in seconds; requires `cutEnd`. Cut to `[cutStart, cutEnd)`. */
     cutStart?: number;
     /** Out-point in seconds; requires `cutStart > 0` or an explicit in-point. */

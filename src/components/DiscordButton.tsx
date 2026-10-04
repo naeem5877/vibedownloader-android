@@ -37,15 +37,13 @@ export const DiscordButton: React.FC<DiscordButtonProps> = ({ compact = false })
 
     if (compact) {
         return (
-            <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-                <TouchableOpacity
-                    onPress={handlePress}
-                    activeOpacity={0.7}
-                    style={styles.compactButton}
-                >
-                    <DiscordIcon size={20} color="#FFF" />
-                </TouchableOpacity>
-            </Animated.View>
+            <TouchableOpacity
+                onPress={handlePress}
+                activeOpacity={0.7}
+                style={styles.compactButton}
+            >
+                <DiscordIcon size={19} color="#8C97FF" />
+            </TouchableOpacity>
         );
     }
 
@@ -95,17 +93,14 @@ const styles = StyleSheet.create({
         letterSpacing: 0.2,
     },
     compactButton: {
-        width: 38,
-        height: 38,
+        width: 40,
+        height: 40,
         borderRadius: 12,
-        backgroundColor: '#5865F2',
+        backgroundColor: 'rgba(88, 101, 242, 0.16)',
+        borderWidth: 1,
+        borderColor: 'rgba(88, 101, 242, 0.4)',
         justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: '#5865F2',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.3,
-        shadowRadius: 6,
-        elevation: 4,
     },
 });
 

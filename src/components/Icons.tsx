@@ -41,13 +41,13 @@ export const TikTokIcon: React.FC<IconProps> = ({ size = 24, color }) => (
 export const TwitchIcon: React.FC<IconProps> = ({ size = 24, color = Colors.twitch }) => (
     <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
         <Path
-            d="M4.5 1L2 3.5v9h3V15l2.5-2.5h2L14 8V1H4.5zM13 7.5l-2 2H9l-1.75 1.75V9.5H5V2h8v5.5z"
-            fill={color}
-        />
-        <Path
-            d="M13 7.5l-2 2H9l-1.75 1.75V9.5H5V2h8v5.5z"
             fill="#FFFFFF"
+            d="M13 7.5l-2 2H9l-1.75 1.75V9.5H5V2h8v5.5z"
         />
+        <G fill={color}>
+            <Path d="M4.5 1L2 3.5v9h3V15l2.5-2.5h2L14 8V1H4.5zM13 7.5l-2 2H9l-1.75 1.75V9.5H5V2h8v5.5z" />
+            <Path d="M11.5 3.75h-1v3h1v-3zM8.75 3.75h-1v3h1v-3z" />
+        </G>
     </Svg>
 );
 

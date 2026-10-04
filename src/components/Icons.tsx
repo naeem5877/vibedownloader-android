@@ -38,6 +38,19 @@ export const TikTokIcon: React.FC<IconProps> = ({ size = 24, color }) => (
     </Svg>
 );
 
+export const TwitchIcon: React.FC<IconProps> = ({ size = 24, color = Colors.twitch }) => (
+    <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+        <Path
+            d="M4.5 1L2 3.5v9h3V15l2.5-2.5h2L14 8V1H4.5zM13 7.5l-2 2H9l-1.75 1.75V9.5H5V2h8v5.5z"
+            fill={color}
+        />
+        <Path
+            d="M13 7.5l-2 2H9l-1.75 1.75V9.5H5V2h8v5.5z"
+            fill="#FFFFFF"
+        />
+    </Svg>
+);
+
 export const FacebookIcon: React.FC<IconProps> = ({ size = 24, color = Colors.facebook }) => (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
         <Path
@@ -554,6 +567,7 @@ export default {
     XIcon,
     PinterestIcon,
     SoundCloudIcon,
+    TwitchIcon,
     SearchIcon,
     CloseIcon,
     ArrowRightIcon,
@@ -588,6 +602,27 @@ export default {
     LanguagesIcon,
 ChevronDownIcon,
       SpinnerIcon,
-      ScissorsIcon,
+ScissorsIcon,
       WarningIcon,
-  };
+};
+
+/** Platform name (as stored in library folder names) to its brand icon. */
+const PLATFORM_ICONS: Record<string, React.FC<IconProps>> = {
+  youtube: YouTubeIcon,
+  instagram: InstagramIcon,
+  tiktok: TikTokIcon,
+  facebook: FacebookIcon,
+  spotify: SpotifyIcon,
+  x: XIcon,
+  pinterest: PinterestIcon,
+  soundcloud: SoundCloudIcon,
+  twitch: TwitchIcon,
+};
+
+/** Resolves a platform label to its icon, or null when the platform has none. */
+export const getPlatformIcon = (
+  platform: string | null | undefined,
+): React.FC<IconProps> | null => {
+  if (!platform) return null;
+  return PLATFORM_ICONS[platform.trim().toLowerCase()] ?? null;
+};

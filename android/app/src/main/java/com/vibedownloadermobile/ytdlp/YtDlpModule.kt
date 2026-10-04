@@ -2718,21 +2718,27 @@ platform.equals("Spotify", ignoreCase = true) ||
                 val thumbDir = File(reactApplicationContext.filesDir, "thumbnails")
                 val filesArray = WritableNativeArray()
                 
-                // Scan all VibeDownloader directories (Movies, Music, Pictures)
-                val directories = listOf(
+                // getOrganizedOutputDir writes downloads to the app-specific external
+                // dir, so that is the location that actually holds new media; the
+                // public VibeDownloader folders are legacy roots kept for older files.
+                val scanRoots = listOfNotNull(
+                    File(reactApplicationContext.getExternalFilesDir(null), "vibedownloader"),
+                    File(reactApplicationContext.filesDir, "vibedownloader")
+                ) + listOf(
                     Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
                     Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
                     Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
                     Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                )
-                
-                for (baseDir in directories) {
-                    val vibeDir = File(baseDir, "VibeDownloader")
+                ).map { File(it, "VibeDownloader") }
+
+                val seenPaths = HashSet<String>()
+
+                for (vibeDir in scanRoots) {
                     if (!vibeDir.exists()) continue
                     
                     // Recursively find all files in the vibedownloader directory
                     vibeDir.walkTopDown().forEach { file ->
-                        if (file.isFile && !file.isHidden) {
+                        if (file.isFile && !file.isHidden && seenPaths.add(file.absolutePath)) {
                             // Extract platform and content type from path
                             // Path format: VibeDownloader/[Platform]/[ContentType]/filename.ext
                             val relativePath = file.absolutePath.removePrefix(vibeDir.absolutePath + "/")
@@ -2740,9 +2746,9 @@ platform.equals("Spotify", ignoreCase = true) ||
                             
                             val platform = if (pathParts.size >= 2) pathParts[0] else "Unknown"
                             val contentType = when {
-                                baseDir.absolutePath.contains("Music") -> "Music"
-                                baseDir.absolutePath.contains("Pictures") -> if (pathParts.size >= 3) pathParts[1] else "Images"
-                                baseDir.absolutePath.contains("Movies") -> if (pathParts.size >= 3) pathParts[1] else "Videos"
+                                vibeDir.absolutePath.contains("Music") -> "Music"
+                                vibeDir.absolutePath.contains("Pictures") -> if (pathParts.size >= 3) pathParts[1] else "Images"
+                                vibeDir.absolutePath.contains("Movies") -> if (pathParts.size >= 3) pathParts[1] else "Videos"
                                 pathParts.size >= 3 -> {
                                     // Handle cases where files might be in subfolders like "Shorts" or "Reels"
                                     val type = pathParts[1]

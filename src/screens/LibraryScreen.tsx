@@ -32,6 +32,7 @@ import {
     TrashIcon,
     TypeIcon,
     VideoIcon,
+    getPlatformIcon,
 } from '../components/Icons';
 import { EmptyState } from '../components/EmptyState';
 import { MediaPreviewModal } from '../components/MediaPreviewModal';
@@ -53,8 +54,8 @@ interface LibraryScreenProps {
     isFocused?: boolean;
 }
 
-/** Tiles per row. 3 matches Google Photos and keeps titles readable. */
-const COLUMNS = 3;
+/** Two roomy columns make thumbnails and filenames much easier to scan. */
+const COLUMNS = 2;
 
 const KIND_FILTERS: {
     key: KindFilter;
@@ -183,6 +184,19 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
         Haptics.selection();
     }, [gallery]);
 
+    const platformLabel = useCallback((platform: string) => {
+        const labels: Record<string, string> = {
+            youtube: 'YouTube',
+            instagram: 'Instagram',
+            tiktok: 'TikTok',
+            facebook: 'Facebook',
+            twitter: 'X',
+            x: 'X',
+            reddit: 'Reddit',
+        };
+        return labels[platform.toLowerCase()] ?? platform;
+    }, []);
+
     const renderTile = useCallback(
         ({ item }: { item: LibraryItem }) => {
             const kind = deriveMediaKind(item.extension);
@@ -305,7 +319,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                     })}
                 </ScrollView>
 
-                {gallery.platforms.length > 1 && (
+                {gallery.platforms.length > 0 && (
                     <ScrollView
                         horizontal
                         showsHorizontalScrollIndicator={false}
@@ -315,17 +329,14 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                             onPress={() => { gallery.setPlatform(null); Haptics.selection(); }}
                             style={[styles.chip, !gallery.filters.platform && styles.chipActive]}
                         >
-                            <Text
-                                style={[
-                                    styles.chipText,
-                                    !gallery.filters.platform && styles.chipTextActive,
-                                ]}
-                            >
+                            <Text style={[styles.chipText, !gallery.filters.platform && styles.chipTextActive]}>
                                 Every platform
                             </Text>
                         </Pressable>
                         {gallery.platforms.map((platform) => {
                             const active = gallery.filters.platform === platform;
+                            const PlatformIcon = getPlatformIcon(platform);
+                            const tint = getPlatformColor(platform);
                             return (
                                 <Pressable
                                     key={platform}
@@ -335,11 +346,21 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                                     }}
                                     style={[
                                         styles.chip,
-                                        active && { backgroundColor: getPlatformColor(platform), borderColor: getPlatformColor(platform) },
+                                        styles.platformChip,
+                                        active && { backgroundColor: tint, borderColor: tint },
                                     ]}
                                 >
-                                    <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                                        {platform}
+                                    {PlatformIcon && (
+                                        <PlatformIcon size={14} color={active ? Colors.background : tint} />
+                                    )}
+                                    <Text
+                                        style={[
+                                            styles.chipText,
+                                            styles.platformChipText,
+                                            active && { color: Colors.background },
+                                        ]}
+                                    >
+                                        {platformLabel(platform)}
                                     </Text>
                                 </Pressable>
                             );
@@ -358,7 +379,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
                 </View>
             </View>
         ),
-        [showSearch, gallery, toggleSort]
+        [showSearch, gallery, toggleSort, platformLabel]
     );
 
     const empty = gallery.loading ? null : gallery.error ? (
@@ -461,24 +482,33 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.sm,
+        paddingTop: Spacing.md,
+        paddingBottom: Spacing.sm,
         gap: Spacing.sm,
     },
     headerTextWrap: { flex: 1 },
     headerTitle: {
         color: Colors.textPrimary,
-        fontSize: Typography.sizes.xl,
+        fontSize: Typography.sizes['2xl'],
         fontWeight: Typography.weights.bold,
+        letterSpacing: Typography.letterSpacing.tight,
     },
-    headerSub: { color: Colors.textMuted, fontSize: Typography.sizes.xs, marginTop: 1 },
+    headerSub: {
+        color: Colors.textMuted,
+        fontSize: Typography.sizes.xs,
+        marginTop: 2,
+        fontWeight: Typography.weights.medium,
+    },
     headerActions: { flexDirection: 'row', gap: Spacing.xs, alignItems: 'center' },
     iconBtn: {
-        width: 38,
-        height: 38,
-        borderRadius: BorderRadius.round,
+        width: 42,
+        height: 42,
+        borderRadius: BorderRadius.md,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: Colors.surface,
+        borderWidth: 1,
+        borderColor: Colors.innerBorderLight,
     },
     iconBtnDisabled: { opacity: 0.4 },
     selectAllText: {
@@ -493,24 +523,24 @@ const styles = StyleSheet.create({
         marginHorizontal: Spacing.md,
         marginBottom: Spacing.sm,
         paddingHorizontal: Spacing.md,
-        height: 40,
+        height: 44,
         borderRadius: BorderRadius.md,
-        backgroundColor: Colors.surface,
+        backgroundColor: Colors.surfaceMedium,
         borderWidth: 1,
-        borderColor: Colors.border,
+        borderColor: Colors.innerBorderLight,
     },
     searchInput: { flex: 1, color: Colors.textPrimary, fontSize: Typography.sizes.base, padding: 0 },
-    chipRow: { gap: Spacing.xs, paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs },
+    chipRow: { gap: Spacing.sm, paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs },
     chip: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: Spacing.xs,
         paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.sm,
+        paddingVertical: 9,
         borderRadius: BorderRadius.round,
-        backgroundColor: Colors.surface,
+        backgroundColor: Colors.surfaceMedium,
         borderWidth: 1,
-        borderColor: Colors.border,
+        borderColor: Colors.innerBorderLight,
     },
     chipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
     chipText: {
@@ -519,32 +549,49 @@ const styles = StyleSheet.create({
         fontWeight: Typography.weights.medium,
     },
     chipTextActive: { color: Colors.background, fontWeight: Typography.weights.semibold },
+    platformChip: { paddingLeft: 9, gap: 6 },
+    platformChipText: { fontWeight: Typography.weights.semibold },
     statusRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: Spacing.md,
-        paddingTop: Spacing.sm,
+        paddingTop: Spacing.md,
+        paddingBottom: Spacing.sm,
     },
-    statusText: { color: Colors.textMuted, fontSize: Typography.sizes.xs },
+    statusText: {
+        color: Colors.textMuted,
+        fontSize: Typography.sizes.xs,
+        fontWeight: Typography.weights.medium,
+    },
     sortBtn: {
         paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.xs,
+        paddingVertical: 7,
         borderRadius: BorderRadius.round,
-        backgroundColor: Colors.surface,
+        backgroundColor: Colors.surfaceMedium,
+        borderWidth: 1,
+        borderColor: Colors.innerBorderLight,
     },
     sortText: {
         color: Colors.textSecondary,
         fontSize: Typography.sizes.xs,
         fontWeight: Typography.weights.semibold,
     },
-    listContent: { paddingHorizontal: Spacing.md, paddingBottom: Spacing.xxl, gap: Spacing.md },
-    row: { gap: Spacing.xs },
-    tile: { marginBottom: Spacing.xs },
+    listContent: { paddingHorizontal: Spacing.md, paddingBottom: Spacing.xxl, gap: Spacing.lg },
+    row: { gap: Spacing.sm, alignItems: 'flex-start' },
+    tile: {
+        marginBottom: Spacing.sm,
+        paddingBottom: Spacing.sm,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.surfaceMedium,
+        borderWidth: 1,
+        borderColor: Colors.innerBorder,
+        overflow: 'hidden',
+    },
     thumb: {
         width: '100%',
-        aspectRatio: 1,
-        borderRadius: BorderRadius.md,
+        aspectRatio: 1.45,
+        borderRadius: BorderRadius.lg,
         overflow: 'hidden',
         alignItems: 'center',
         justifyContent: 'center',
@@ -560,12 +607,14 @@ const styles = StyleSheet.create({
     },
     durationBadge: {
         position: 'absolute',
-        right: 4,
-        bottom: 4,
-        paddingHorizontal: 5,
-        paddingVertical: 1,
-        borderRadius: 4,
-        backgroundColor: 'rgba(0,0,0,0.65)',
+        right: Spacing.sm,
+        bottom: Spacing.sm,
+        paddingHorizontal: 7,
+        paddingVertical: 3,
+        borderRadius: BorderRadius.sm,
+        backgroundColor: 'rgba(0,0,0,0.68)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
     },
     durationText: {
         color: '#FFF',
@@ -575,14 +624,16 @@ const styles = StyleSheet.create({
     },
     playDot: {
         position: 'absolute',
-        left: 4,
-        bottom: 4,
-        width: 20,
-        height: 20,
-        borderRadius: 10,
+        left: Spacing.sm,
+        bottom: Spacing.sm,
+        width: 28,
+        height: 28,
+        borderRadius: 14,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(0,0,0,0.55)',
+        backgroundColor: 'rgba(0,0,0,0.62)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.18)',
     },
     selRing: {
         ...StyleSheet.absoluteFillObject,
@@ -601,11 +652,18 @@ const styles = StyleSheet.create({
     },
     tileTitle: {
         color: Colors.textPrimary,
-        fontSize: Typography.sizes.xs,
-        marginTop: Spacing.xs,
-        fontWeight: Typography.weights.medium,
+        fontSize: Typography.sizes.sm,
+        marginTop: Spacing.sm,
+        paddingHorizontal: Spacing.sm,
+        fontWeight: Typography.weights.semibold,
+        letterSpacing: Typography.letterSpacing.normal,
     },
-    tileMeta: { color: Colors.textMuted, fontSize: Typography.sizes.xxs },
+    tileMeta: {
+        color: Colors.textMuted,
+        fontSize: Typography.sizes.xxs,
+        marginTop: 2,
+        paddingHorizontal: Spacing.sm,
+    },
 });
 
 export default LibraryScreen;

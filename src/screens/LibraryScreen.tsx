@@ -34,8 +34,13 @@ import {
     VideoIcon,
     MusicIcon,
     ImageIcon,
+    CaptionsIcon,
+    MusicNoteIcon,
 } from '../components/Icons';
 import { EmptyState } from '../components/EmptyState';
+import SubtitleViewerModal, {
+    type SubtitleViewerFile,
+} from '../components/SubtitleViewerModal';
 import { YtDlpNative, formatFileSize } from '../native/YtDlpModule';
 import { Haptics } from '../utils/haptics';
 
@@ -266,11 +271,15 @@ const FileCard: React.FC<{
     const isAudio = ['mp3', 'm4a', 'wav', 'aac', 'flac'].includes(file.extension.toLowerCase());
     const isImage = ['jpg', 'jpeg', 'png', 'webp'].includes(file.extension.toLowerCase());
     const isLossless = file.extension.toLowerCase() === 'flac';
+    const isLyrics = file.extension.toLowerCase() === 'lrc';
+    const isSubtitle = ['srt', 'vtt', 'ttml'].includes(file.extension.toLowerCase());
 
     const getIcon = () => {
         if (isVideo) return <VideoIcon size={20} color={Colors.textSecondary} />;
         if (isAudio) return <MusicIcon size={20} color={Colors.textSecondary} />;
         if (isImage) return <ImageIcon size={20} color={Colors.textSecondary} />;
+        if (isLyrics) return <MusicNoteIcon size={20} color={Colors.textSecondary} />;
+        if (isSubtitle) return <CaptionsIcon size={20} color={Colors.textSecondary} />;
         return <DownloadIcon size={20} color={Colors.textSecondary} />;
     };
 
@@ -319,13 +328,19 @@ const FileDetailModal: React.FC<{
     onPlay: () => void;
     onShare: () => void;
     onDelete: () => void;
-}> = ({ visible, file, onClose, onPlay, onShare, onDelete }) => {
+    onOpenText: () => void;
+}> = ({ visible, file, onClose, onPlay, onShare, onDelete, onOpenText }) => {
     if (!file) return null;
 
     const platformColor = getPlatformColor(file.platform);
     const isVideo = ['mp4', 'webm', 'mkv'].includes(file.extension.toLowerCase());
     const isAudio = ['mp3', 'm4a', 'wav', 'aac', 'flac'].includes(file.extension.toLowerCase());
     const isLossless = file.extension.toLowerCase() === 'flac';
+    const isLyrics = file.extension.toLowerCase() === 'lrc';
+    const isSubtitle = ['srt', 'vtt', 'ttml'].includes(file.extension.toLowerCase());
+    // Lyrics/subtitles open in the in-app viewer rather than an external player,
+    // which has no handler for them.
+    const isText = isLyrics || isSubtitle || file.extension.toLowerCase() === 'txt';
 
     return (
         <Modal
@@ -357,6 +372,10 @@ const FileDetailModal: React.FC<{
                                     <VideoIcon size={48} color={platformColor} />
                                 ) : isAudio ? (
                                     <MusicIcon size={48} color={isLossless ? Colors.lossless : platformColor} />
+                                ) : isLyrics ? (
+                                    <MusicNoteIcon size={48} color={platformColor} />
+                                ) : isSubtitle || isText ? (
+                                    <CaptionsIcon size={48} color={platformColor} />
                                 ) : (
                                     <DownloadIcon size={48} color={platformColor} />
                                 )}
@@ -408,6 +427,21 @@ const FileDetailModal: React.FC<{
                             >
                                 <PlayIcon size={20} color={Colors.textPrimary} />
                                 <Text style={styles.actionButtonText}>Play</Text>
+                            </TouchableOpacity>
+                        )}
+                        {isText && (
+                            <TouchableOpacity
+                                style={[styles.actionButton, { backgroundColor: platformColor }]}
+                                onPress={onOpenText}
+                            >
+                                {isLyrics ? (
+                                    <MusicNoteIcon size={20} color={Colors.textPrimary} />
+                                ) : (
+                                    <CaptionsIcon size={20} color={Colors.textPrimary} />
+                                )}
+                                <Text style={styles.actionButtonText}>
+                                    {isLyrics ? 'Lyrics' : 'Subtitles'}
+                                </Text>
                             </TouchableOpacity>
                         )}
                         <TouchableOpacity
@@ -512,6 +546,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = false 
     const [basePath, setBasePath] = useState<string>('');
     const [selectedFile, setSelectedFile] = useState<DownloadedFile | null>(null);
     const [showFileModal, setShowFileModal] = useState(false);
+    const [viewerFile, setViewerFile] = useState<SubtitleViewerFile | null>(null);
     const [showStorageInfo, setShowStorageInfo] = useState(false);
     // Keeping isEmpty as it was not explicitly removed in the instruction's state list,
     // but the instruction's `loadFiles` was a placeholder.
@@ -648,6 +683,19 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = false 
         } catch (error) {
             ToastAndroid.show('Unable to play file', ToastAndroid.SHORT);
         }
+        setShowFileModal(false);
+    };
+
+    // Lyrics and subtitles have no external handler on Android, so they open in
+    // the in-app viewer instead of being handed to a player that cannot read them.
+    const handleOpenText = () => {
+        if (!selectedFile) return;
+        setViewerFile({
+            path: selectedFile.path,
+            name: selectedFile.name,
+            platform: selectedFile.platform,
+            size: selectedFile.size,
+        });
         setShowFileModal(false);
     };
 
@@ -798,7 +846,11 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = false 
                 onPlay={handlePlay}
                 onShare={handleShare}
                 onDelete={handleDelete}
+                onOpenText={handleOpenText}
             />
+
+            {/* Lyrics / Subtitle Viewer */}
+            <SubtitleViewerModal file={viewerFile} onClose={() => setViewerFile(null)} />
 
             {/* Storage Info Modal */}
             <StorageInfoModal

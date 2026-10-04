@@ -20,6 +20,7 @@ import {
     AppStateStatus,
     Share,
     Dimensions,
+    ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -34,6 +35,10 @@ import {
     UpdateModal,
     EmptyState,
     SettingsModal,
+    LyricsPanel,
+    SubtitlePicker,
+    AudioTrackSelector,
+    FormatsSkeleton,
 } from '../components';
 import { CookieManagerService } from '../services/CookieManagerService';
 import { LocalDB } from '../services/LocalDB';
@@ -44,6 +49,7 @@ import { DiscordButton } from '../components/DiscordButton';
 // BatchDownloadProgress removed in favor of useDownloadQueue
 import { useYtDlp } from '../hooks/useYtDlp';
 import { VideoFormat, ytDlpEventEmitter, YtDlpNative } from '../native/YtDlpModule';
+import { StoryNative } from '../native/StoryModule';
 import { WebViewLoginNative } from '../native/WebViewLoginModule';
 import { DownloadIcon, SparkleIcon, WaveformIcon, LibraryIcon, CloseIcon, SettingsIcon } from '../components/Icons';
 import { useDownloadQueue } from '../hooks/useDownloadQueue';
@@ -51,7 +57,10 @@ import { DownloadQueuePanel } from '../components/DownloadQueuePanel';
 import { checkForUpdates, UpdateInfo } from '../services/GitHubUpdateService';
 import { getSpotifyPlaylist, extractSpotifyId, getTrackInfo, buildYouTubeSearchQuery, formatTrackMetadata } from '../services/SpotifyService';
 
-import { getYouTubeMusicAlbumArt, isYouTubeMusicUrl, extractYouTubeVideoId } from '../services/YouTubeMusicService';
+import { getYouTubeMusicAlbumArt, isYouTubeMusicUrl, isYouTubeUrl, extractYouTubeVideoId } from '../services/YouTubeMusicService';
+import { lookupLyrics } from '../services/LyricsService';
+import type { LyricsResult } from '../services/lyrics/types';
+import type { AudioTrack, SubtitleTrack } from '../native/YtDlpModule';
 import { detectPlatform } from '../utils/platform';
 import { Haptics } from '../utils/haptics';
 
@@ -107,6 +116,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
     // so both the preview card and the embedded ID3 tag use it.
     const [ytMusicAlbumArtUrl, setYtMusicAlbumArtUrl] = useState<string | null>(null);
 
+    // ── Lyrics / subtitles / audio-language selection ──
+    // All three reset when the fetched video changes, otherwise a selection made
+    // for one track would silently apply to the next.
+    const [lyrics, setLyrics] = useState<LyricsResult | null>(null);
+    const [lyricsLoading, setLyricsLoading] = useState(false);
+    const [selectedAudioFormatId, setSelectedAudioFormatId] = useState<string | null>(null);
+    const [downloadingSubtitleKey, setDownloadingSubtitleKey] = useState<string | null>(null);
+    const [downloadedSubtitleKey, setDownloadedSubtitleKey] = useState<string | null>(null);
+    /** True once the last download tap asked for audio only, for the selector hint. */
+    const [audioOnlyIntent, setAudioOnlyIntent] = useState(false);
+
     const [state, actions] = useYtDlp();
 
     const [queuePanelVisible, setQueuePanelVisible] = useState(false);
@@ -124,6 +144,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
 
     // Animation refs
     const playlistCheckTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    /**
+     * URL already auto-fetched from a share.
+     *
+     * The share intent is not consumed by the native side, so `checkShareIntent`
+     * sees the same payload from both the mount timer and the AppState
+     * 'active' listener - and `onShareReceived` can fire as well. Without this
+     * guard one share started up to three extractions, each spawning its own
+     * Python interpreter.
+     */
+    const consumedShareRef = useRef<string | null>(null);
 
     const [loginModalVisible, setLoginModalVisible] = useState(false);
     const [loggedInPlatforms, setLoggedInPlatforms] = useState<Record<string, boolean>>({});
@@ -163,22 +194,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
         setPlaylistTitle('');
         setPlaylistImage(undefined);
 
-        // ── 0. YouTube Music — fetch real album art before/alongside normal fetch ──
-        if (isYouTubeMusicUrl(text)) {
+        // ── 0. YouTube / YouTube Music — fetch real album art before/alongside normal fetch ──
+        if (isYouTubeUrl(text)) {
             setYtMusicAlbumArtUrl(null); // clear stale art from previous track
-            // Fire off the art fetch in parallel — don't block the main fetch
             getYouTubeMusicAlbumArt(text)
                 .then((result) => {
-                    if (result) {
+                    if (result && result.isRealAlbumArt) {
                         console.log(
                             `[HomeScreen] YT Music album art (${result.isRealAlbumArt ? 'real' : 'fallback'}): ${result.url.slice(0, 60)}`
                         );
                         setYtMusicAlbumArtUrl(result.url);
-                        // Patch the thumbnail in videoInfo once art arrives
-                        // so the preview card shows the actual album cover.
-                        // We use a functional setState via actions.setVideoInfo only
-                        // if info is already loaded.
-                        // HomeScreen re-renders automatically via the state update.
                     }
                 })
                 .catch((e) => console.warn('[HomeScreen] YT Music art fetch failed:', e));
@@ -270,25 +295,46 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
         const igHighlightRegex = /(?:https?:\/\/)?(?:www\.)?instagram\.com\/stories\/highlights\/([0-9]+)\/?/;
         const fbRegex = /(?:https?:\/\/)?(?:www\.)?facebook\.com\/([a-zA-Z0-9._-]+)\/?$/;
         
-        let isStoryFetch = false;
+let isStoryFetch = false;
         let storyUrl = '';
         let platformName = '';
-        
+        // SnapSave resolves stories from a handle for Instagram but from a full
+        // permalink for Facebook, so the original input is kept intact here.
+        let storyUsername = '';
+
         const inputStr = text.trim();
+        const fullIgStoryRegex = /(?:https?:\/\/)?(?:www\.)?instagram\.com\/stories\/([a-zA-Z0-9._]+)\/(\d+)\/?/;
+        const fullFbStoryRegex = /(?:https?:\/\/)?(?:www\.)?facebook\.com\/([a-zA-Z0-9._-]+)\/stories\/(\d+)\/?/;
         let match = inputStr.match(igRegex);
         if (match && match[1] && !['stories', 'p', 'reel', 'tv'].includes(match[1].toLowerCase())) {
             isStoryFetch = true;
+            storyUsername = match[1];
             storyUrl = `https://instagram.com/stories/${match[1]}/`;
             platformName = 'instagram';
         } else {
+            const igStory = inputStr.match(fullIgStoryRegex);
+            const fbStory = inputStr.match(fullFbStoryRegex);
+            if (igStory) {
+                isStoryFetch = true;
+                platformName = 'instagram';
+                storyUsername = igStory[1];
+                storyUrl = `https://www.instagram.com/stories/${igStory[1]}/${igStory[2]}/`;
+            } else if (fbStory) {
+                isStoryFetch = true;
+                platformName = 'facebook';
+                storyUsername = `${fbStory[1]}/${fbStory[2]}`;
+                storyUrl = `https://www.facebook.com/${fbStory[1]}/stories/${fbStory[2]}/`;
+            } else {
             match = inputStr.match(fbRegex);
             if (match && match[1] && !['stories', 'watch', 'groups', 'events'].includes(match[1].toLowerCase())) {
                 isStoryFetch = true;
+                storyUsername = match[1];
                 storyUrl = `https://www.facebook.com/${match[1]}/stories/`;
             platformName = 'facebook';
         } else if (inputStr.startsWith('@')) {
                 isStoryFetch = true;
                 const username = inputStr.substring(1);
+                storyUsername = username;
                 platformName = detectedPlatform?.toLowerCase() === 'facebook' ? 'facebook' : 'instagram';
                 if (platformName === 'facebook') {
                     storyUrl = `https://www.facebook.com/${username}/stories/`;
@@ -299,21 +345,48 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 isStoryFetch = true;
                 platformName = detectedPlatform.toLowerCase();
                 const username = inputStr;
+                storyUsername = username;
                 if (platformName === 'facebook') {
                     storyUrl = `https://www.facebook.com/${username}/stories/`;
                 } else {
                     storyUrl = `https://instagram.com/stories/${username}/`;
                 }
             }
+            }
         }
 
         if (isStoryFetch) {
+            const platformLabel = platformName.charAt(0).toUpperCase() + platformName.slice(1);
             ToastAndroid.show(`Fetching ${platformName} stories...`, ToastAndroid.SHORT);
             setIsPlaylistLoading(true);
             setPlaylistModalVisible(true);
             try {
-                // Fetch using Playlist extractor natively
-                if (YtDlpNative && YtDlpNative.getPlaylistInfo) {
+                if (StoryNative) {
+                    // SnapSave path: works for public accounts without a login.
+                    const stories = await StoryNative.fetchStories(platformName, storyUsername);
+
+                    if (stories.length === 0) {
+                        ToastAndroid.show('No stories found or account is private.', ToastAndroid.SHORT);
+                        setPlaylistModalVisible(false);
+                    } else {
+                        setPlaylistTitle(`${platformLabel} Stories`);
+                        setPlaylistImage(stories[0]?.thumbnail);
+
+                        setPlaylistItems(
+                            stories.map((story, index) => ({
+                                id: story.id || `story-${index}`,
+                                title: story.title || `Story ${index + 1}`,
+                                author: story.username || storyUsername,
+                                duration: undefined,
+                                url: story.url,
+                                thumbnail: story.thumbnail,
+                                type: platformName,
+                                storyType: story.type,
+                                isReel: false,
+                            }))
+                        );
+                    }
+                } else if (YtDlpNative && YtDlpNative.getPlaylistInfo) {
                      const cookiesPath = await CookieManagerService.getCookiesForPlatform(platformName);
                      
                      // No longer using extractor args for highlights
@@ -331,7 +404,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                      const sanitizedJson = playlistJson.substring(jsonStart);
                      
                      const data = JSON.parse(sanitizedJson);
-                     setPlaylistTitle(data.title || `${platformName.charAt(0).toUpperCase() + platformName.slice(1)} Stories`);
+                     setPlaylistTitle(data.title || `${platformLabel} Stories`);
                      setPlaylistImage(data.thumbnails?.[0]?.url || data.thumbnail);
                      
                      const storyUsername = match?.[1] || data.uploader_id || data.title || '';
@@ -377,15 +450,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 }
             } catch (error: any) {
                 console.warn('Story fetch error:', error);
-                let msg = error?.message || 'Unknown error';
+                let msg = error?.message || error?.userInfo?.message || 'Unknown error';
                 
                 // Clean up raw python/yt-dlp scraping errors
                 if (msg.includes('SSL') || msg.includes('Unable to download webpage') || msg.toLowerCase().includes('login') || msg.includes('401') || msg.includes('403')) {
-                     const platformLabel = platformName.charAt(0).toUpperCase() + platformName.slice(1);
                      msg = `${platformLabel} requires login. Tap the ${platformLabel} icon and log in first.`;
                 } else if (msg.length > 50) {
-                     // Truncate other extremely long ugly python logs
-                     msg = msg.substring(0, 50) + '...';
+                    // Truncate other extremely long ugly python logs
+                    msg = msg.substring(0, 50) + '...';
                 }
 
                 ToastAndroid.show(`Failed to fetch stories: ${msg}`, ToastAndroid.LONG);
@@ -465,7 +537,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 }
 
                 // Auto-fetch if specified
-                if (autoFetch) {
+                if (autoFetch && consumedShareRef.current !== sharedUrl) {
+                    consumedShareRef.current = sharedUrl;
                     // Delay fetch slightly to ensure UI is updated
                     setTimeout(() => handleFetch(sharedUrl), 400);
                 }
@@ -482,7 +555,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                     // Auto-detect platform and fetch
                     const detected = detectPlatform(sharedUrl);
                     if (detected !== 'YouTube') setDetectedPlatform(detected);
-                    setTimeout(() => handleFetch(sharedUrl), 500);
+                    if (consumedShareRef.current !== sharedUrl) {
+                        consumedShareRef.current = sharedUrl;
+                        setTimeout(() => handleFetch(sharedUrl), 500);
+                    }
                 }
                 return;
             }
@@ -546,6 +622,157 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
             ToastAndroid.show('Failed to save thumbnail', ToastAndroid.SHORT);
         }
     }, [state.videoInfo, actions]);
+
+    // Whether the loaded item is a music track (YouTube Music, category Music, -Topic, or Spotify)
+    const isMusicTrack = useMemo(() => {
+        const info = state.videoInfo;
+        if (!info) return false;
+        return Boolean(
+            info.isMusic ||
+            detectedPlatform === 'spotify' ||
+            detectedPlatform === 'soundcloud' ||
+            isYouTubeMusicUrl(info.url || '') ||
+            info.uploader?.endsWith('-Topic') ||
+            (info.categories && info.categories.some((c: string) => String(c).toLowerCase() === 'music'))
+        );
+    }, [state.videoInfo?.isMusic, state.videoInfo?.url, state.videoInfo?.uploader, state.videoInfo?.categories, detectedPlatform]);
+
+    // Lyrics lookup identity. Keyed on the track identity rather than re-running
+    // on every render, and guarded by a cancel flag so a slow response cannot
+    // overwrite the current one. Matches desktop Downloader.tsx lyricsTarget.
+    const lyricsTarget = useMemo(() => {
+        const info = state.videoInfo;
+        // Only attempt for non-partial (full) info — partial info lacks categories/artist
+        // which causes isMusicTrack to be false then flip to true, triggering a double lookup.
+        if (!info || info.partial) return null;
+
+        const title = String(info.track || info.title || '').trim();
+        const artist = String(info.artist || info.uploader || '')
+            .replace(/\s*[–—-]\s*Topic\s*$/i, '')
+            .trim();
+
+        if (!title) return null;
+        // Use stable server-side isMusic field; fall back to dash/artist heuristic
+        const isMusic = Boolean(info.isMusic);
+        if (!isMusic && !artist && !title.includes(' - ') && !title.includes(' – ')) return null;
+
+        const targetId = `${info.id || info.url}|${title}|${artist}`;
+        return {
+            id: targetId,
+            title,
+            artist: artist || title,
+            uploader: info.uploader,
+            duration: info.duration,
+            platform: info.platform,
+        };
+    }, [
+        state.videoInfo?.id,
+        state.videoInfo?.url,
+        state.videoInfo?.title,
+        state.videoInfo?.track,
+        state.videoInfo?.artist,
+        state.videoInfo?.uploader,
+        state.videoInfo?.isMusic,
+        state.videoInfo?.partial,
+    ]);
+
+    // Reset per-track selections when video changes
+    useEffect(() => {
+        const info = state.videoInfo;
+        if (!info) {
+            setSelectedAudioFormatId(null);
+            setDownloadedSubtitleKey(null);
+            setDownloadingSubtitleKey(null);
+            setAudioOnlyIntent(false);
+            return;
+        }
+
+        const original = info.audioTracks?.find((t) => t.isOriginal);
+        setSelectedAudioFormatId(original?.formatId ?? null);
+        setDownloadingSubtitleKey(null);
+        setDownloadedSubtitleKey(null);
+        setAudioOnlyIntent(false);
+    }, [state.videoInfo?.id]);
+
+    // Lookup lyrics on lyricsTarget identity change
+    useEffect(() => {
+        if (!lyricsTarget) {
+            setLyrics(null);
+            setLyricsLoading(false);
+            return;
+        }
+
+        let cancelled = false;
+        setLyricsLoading(true);
+
+        lookupLyrics({
+            title: lyricsTarget.title,
+            uploader: lyricsTarget.uploader || '',
+            artist: lyricsTarget.artist,
+            isMusic: true,
+            duration: lyricsTarget.duration,
+            platform: lyricsTarget.platform,
+        })
+            .then((result) => {
+                if (cancelled) return;
+                setLyricsLoading(false);
+                if (result) {
+                    setLyrics(result);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) setLyricsLoading(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [lyricsTarget?.id]);
+
+    const handleSelectAudioTrack = useCallback((track: AudioTrack) => {
+        setSelectedAudioFormatId((prev) => (prev === track.formatId ? null : track.formatId));
+    }, []);
+
+    const handleDownloadSubtitles = useCallback(
+        async (track: SubtitleTrack, format: 'srt' | 'vtt') => {
+            const info = state.videoInfo;
+            if (!info || downloadingSubtitleKey) return;
+
+            setDownloadingSubtitleKey(track.key);
+
+            try {
+                const resolvedPlatform = detectedPlatform || info.platform || null;
+                const cookiesPath = resolvedPlatform
+                    ? await CookieManagerService.getCookiesForPlatform(resolvedPlatform)
+                    : null;
+
+                const saved = await YtDlpNative.downloadSubtitles(info.url, {
+                    lang: track.lang,
+                    isAuto: track.isAuto,
+                    format,
+                    platform: resolvedPlatform || undefined,
+                    cookies: cookiesPath || undefined,
+                    title: info.title,
+                });
+
+                setDownloadedSubtitleKey(track.key);
+                ToastAndroid.show(
+                    `Saved ${track.langLabel} · ${format.toUpperCase()}`,
+                    ToastAndroid.SHORT
+                );
+                console.log('[Subtitles] Saved:', saved.filePath);
+            } catch (e: any) {
+                console.error('Subtitle download error:', e);
+                ToastAndroid.show(
+                    e?.message || 'Subtitle download failed',
+                    ToastAndroid.LONG
+                );
+            } finally {
+                setDownloadingSubtitleKey(null);
+            }
+        },
+        [state.videoInfo, detectedPlatform, downloadingSubtitleKey]
+    );
 
     const handleCancelDownload = useCallback(async () => {
         Alert.alert(
@@ -740,7 +967,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 if (platform && platform !== 'Unknown') {
                     ToastAndroid.show(`📥 ${platform} shared`, ToastAndroid.SHORT);
                 }
-                if (autoFetch) {
+                if (autoFetch && consumedShareRef.current !== sharedUrl) {
+                    consumedShareRef.current = sharedUrl;
                     handleFetch(sharedUrl);
                 }
             }
@@ -846,7 +1074,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                 searchQuery: item.searchQuery,
                 formatId,
                 cookies: cookiesPath || undefined,
-                album: item.rawTrack?.album?.name || 'Unknown'
+                album: item.rawTrack?.album?.name || 'Unknown',
+                storyType: item.storyType
             };
         }));
         addToQueue(items, formatId);
@@ -858,6 +1087,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
 
     const handleDownload = useCallback(async (format: VideoFormat | string, forceTitle?: string, platform?: string) => {
         if (!state.videoInfo) return;
+
+        // Recorded so the audio-language selector can say what the choice will
+        // affect: an extracted audio track, or a track merged into a video.
+        setAudioOnlyIntent(
+            typeof format === 'string' ? format.startsWith('audio') : format.vcodec === 'none'
+        );
 
         ToastAndroid.show('Starting download...', ToastAndroid.SHORT);
 
@@ -906,6 +1141,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                         platform:      resolvedPlatform || 'Unknown',
                         cookies:       cookiesPath || undefined,
                         thumbnailPath: thumbnailPath,
+                        audioFormatId: selectedAudioFormatId ?? undefined,
                     }
                 );
             }
@@ -913,7 +1149,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
             console.error('Download error:', error);
             ToastAndroid.show(error?.message || 'Download failed', ToastAndroid.LONG);
         }
-    }, [state.videoInfo, actions, detectedPlatform, ytMusicAlbumArtUrl]);
+    }, [state.videoInfo, actions, detectedPlatform, ytMusicAlbumArtUrl, selectedAudioFormatId]);
 
     const handleOpenLogin = useCallback(async () => {
         if (!detectedPlatform) return;
@@ -1174,15 +1410,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
 
                 {/* New Queue-based Batch Download is handled via handleBatchDownload -> addToQueue */}
 
-                {/* Skeleton Loading */}
-                {state.isLoading && (
+                {/* Skeleton Loading - only while nothing at all is known yet */}
+                {state.isLoading && !state.videoInfo && (
                     <View style={styles.videoSection}>
                         <SkeletonCard />
                     </View>
                 )}
 
                 {/* Video Info & Downloads */}
-                {state.videoInfo && !state.isLoading && !state.isDownloading && (
+                {state.videoInfo && !state.isDownloading && (
                     <>
                         {/* ... Info Card ... */}
                         <View style={styles.videoSection}>
@@ -1195,6 +1431,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                                         : state.videoInfo
                                 }
                                 onSaveThumbnail={handleSaveThumbnail}
+                                isMusic={isMusicTrack}
                             />
                             {ytMusicAlbumArtUrl && (
                                 <View style={styles.albumArtBadge}>
@@ -1205,38 +1442,83 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
                             )}
                         </View>
 
+                        {/* Lyrics — loading shimmer while the lookup is in-flight, matching desktop Downloader */}
+                        {lyricsLoading ? (
+                            <View style={styles.lyricsLoadingCard}>
+                                <View style={styles.lyricsLoadingIconWrap}>
+                                    <ActivityIndicator size="small" color="#A78BFA" />
+                                </View>
+                                <View style={styles.lyricsLoadingContent}>
+                                    <Text style={styles.lyricsLoadingTitle}>Finding synchronized lyrics…</Text>
+                                    <Text style={styles.lyricsLoadingSubtitle}>Looking up LRCLIB & NetEase</Text>
+                                </View>
+                            </View>
+                        ) : null}
 
-
-                        {/* Quick Action - Platform Auto-Detect */}
-                        <View style={styles.quickActionContainer}>
-                            <TouchableOpacity
-                                style={[styles.quickDownloadBtn, { backgroundColor: platformColor }]}
-                                onPress={() => {
-                                    // YouTube Music and other audio platforms default to MP3
-                                    const isAudioPlatform =
-                                        detectedPlatform === 'spotify' ||
-                                        detectedPlatform === 'soundcloud' ||
-                                        isYouTubeMusicUrl(state.videoInfo?.url ?? '');
-                                    handleDownload(isAudioPlatform ? 'audio_mp3' : 'best');
+                        {/* Lyrics - rendered once a provider returned something */}
+                        {lyrics ? (
+                            <LyricsPanel
+                                lyrics={lyrics}
+                                defaultCollapsed={true}
+                                metadata={{
+                                    title: state.videoInfo.title,
+                                    uploader: state.videoInfo.uploader || '',
+                                    artist: state.videoInfo.artist || state.videoInfo.uploader || undefined,
+                                    isMusic: isMusicTrack,
+                                    duration: state.videoInfo.duration,
+                                    platform: state.videoInfo.platform ?? undefined,
                                 }}
-                            >
-                                <DownloadIcon size={20} color="#FFF" />
-                                <Text style={styles.quickDownloadText}>
-                                    Quick Download
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
+                            />
+                        ) : null}
 
-                        <View style={styles.downloadHeader}>
-                            <DownloadIcon size={16} color={Colors.textMuted} />
-                            <Text style={styles.downloadHeaderText}>ALL FORMATS</Text>
-                        </View>
-
-                        <FormatList
-                            formats={state.videoInfo.formats}
-                            onSelectFormat={handleDownload}
-                            platformColor={platformColor}
+                        {/* Subtitles — shown at top above formats, matching desktop Downloader */}
+                        <SubtitlePicker
+                            tracks={state.videoInfo.subtitles ?? []}
+                            onDownload={handleDownloadSubtitles}
+                            downloadingKey={downloadingSubtitleKey}
+                            downloadedKey={downloadedSubtitleKey}
                         />
+
+                        {/* Animated Skeleton Loading while formats are being resolved */}
+                        {state.videoInfo.partial ? (
+                            <FormatsSkeleton />
+                        ) : (
+                            <>
+
+                                {/* Quick Action - Platform Auto-Detect */}
+                                <View style={styles.quickActionContainer}>
+                                    <TouchableOpacity
+                                        style={[styles.quickDownloadBtn, { backgroundColor: platformColor }]}
+                                        onPress={() => {
+                                            // YouTube Music and other audio platforms default to MP3
+                                            const isAudioPlatform =
+                                                detectedPlatform === 'spotify' ||
+                                                detectedPlatform === 'soundcloud' ||
+                                                isYouTubeMusicUrl(state.videoInfo?.url ?? '');
+                                            handleDownload(isAudioPlatform ? 'audio_mp3' : 'best');
+                                        }}
+                                    >
+                                        <DownloadIcon size={20} color="#FFF" />
+                                        <Text style={styles.quickDownloadText}>
+                                            Quick Download
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+
+                                <AudioTrackSelector
+                                    tracks={state.videoInfo.audioTracks ?? []}
+                                    selectedId={selectedAudioFormatId}
+                                    onSelect={handleSelectAudioTrack}
+                                    isAudioOnly={audioOnlyIntent}
+                                />
+
+                                <FormatList
+                                    formats={state.videoInfo.formats}
+                                    onSelectFormat={handleDownload}
+                                    platformColor={platformColor}
+                                />
+                            </>
+                        )}
                     </>
                 )}
 
@@ -1420,6 +1702,41 @@ const styles = StyleSheet.create({
     videoSection: {
         marginTop: Spacing.xl,
         marginHorizontal: Spacing.md,
+    },
+    lyricsLoadingCard: {
+        marginHorizontal: Spacing.md,
+        marginTop: Spacing.md,
+        padding: Spacing.md,
+        borderRadius: BorderRadius.xl,
+        backgroundColor: 'rgba(139, 92, 246, 0.10)',
+        borderWidth: 1,
+        borderColor: 'rgba(167, 139, 250, 0.28)',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.md,
+    },
+    lyricsLoadingIconWrap: {
+        width: 34,
+        height: 34,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: 'rgba(167, 139, 250, 0.18)',
+        borderWidth: 1,
+        borderColor: 'rgba(167, 139, 250, 0.35)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    lyricsLoadingContent: {
+        flex: 1,
+        gap: 2,
+    },
+    lyricsLoadingTitle: {
+        color: '#E9D5FF',
+        fontSize: 13,
+        fontWeight: '700',
+    },
+    lyricsLoadingSubtitle: {
+        color: 'rgba(233, 213, 255, 0.6)',
+        fontSize: 11,
     },
     // ── Downloads ──
     downloadHeader: {

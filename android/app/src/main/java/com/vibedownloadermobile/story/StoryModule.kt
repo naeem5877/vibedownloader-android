@@ -4,6 +4,7 @@ import android.util.Log
 import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.vibedownloadermobile.cookie.CookieModule
+import com.vibedownloadermobile.storage.MediaStorePublisher
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.*
@@ -14,11 +15,12 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * StoryModule - Fetches and downloads Instagram & Facebook stories by username
- * Strategy:
- * 1. Use yt-dlp with cookies to fetch story list from profile URL
- * 2. If yt-dlp fails (common for stories), fall back to direct HTTP scraping
- * 3. Download each story (image/video) using yt-dlp with cookies
+ * StoryModule - fetches and downloads Instagram & Facebook stories.
+ *
+ * Story media comes from SnapSave (see [SnapSaveClient]) because Instagram's
+ * own endpoints need a login and yt-dlp no longer resolves stories for most
+ * public accounts. yt-dlp is still used for anything SnapSave hands back as a
+ * page rather than a file.
  */
 class StoryModule(
     reactContext: ReactApplicationContext,
@@ -28,6 +30,10 @@ class StoryModule(
     companion object {
         const val NAME = "StoryModule"
         const val TAG = "StoryModule"
+
+        private const val MOBILE_UA =
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 " +
+                "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -41,49 +47,76 @@ class StoryModule(
     }
 
     /**
-     * Fetch stories for a platform username
-     * Returns a list of story items (type, url, thumbnail, timestamp)
+     * Fetch stories for a platform username.
+     *
+     * Stories go through SnapSave, which is the only source that still returns
+     * media for public accounts without a login. Cookies are passed along when
+     * present (they are what make private accounts work) but are no longer
+     * required. yt-dlp is kept as a fallback because it occasionally resolves
+     * accounts SnapSave rejects.
      */
     @ReactMethod
     fun fetchStories(platform: String, username: String, promise: Promise) {
         scope.launch {
             try {
                 Log.d(TAG, "Fetching stories for $platform: $username")
-                
+
                 val cookiePath = cookieModule.getCookieFilePath(platform.lowercase())
                 val hasCookies = File(cookiePath).exists() && File(cookiePath).length() > 100
-                
-                if (!hasCookies) {
+                val cookies = if (hasCookies) {
+                    buildCookieHeaderFromFile(cookiePath, platform.lowercase())
+                } else {
+                    null
+                }
+
+                val target = buildStoryTargetUrl(platform, username)
+                val result = SnapSaveClient.fetch(target, cookies)
+
+                val stories = when (result) {
+                    is SnapSaveResult.Ok -> result.items.mapIndexed { index, media ->
+                        JSONObject().apply {
+                            put("id", media.id)
+                            // The download goes through SnapSave's CDN, not Instagram's.
+                            put("url", media.downloadUrl)
+                            put("thumbnail", media.thumbnailUrl)
+                            put("type", if (media.isImage) "image" else "video")
+                            put("username", username)
+                            put("platform", platform)
+                            put("title", storyTitle(platform, username, media, index))
+                        }
+                    }
+
+                    is SnapSaveResult.Failed -> {
+                        Log.w(TAG, "SnapSave refused $target: ${result.message} (${result.code})")
+                        emptyList()
+                    }
+                }
+
+                if (stories.isEmpty()) {
+                    val fallback = try {
+                        when (platform.lowercase()) {
+                            "instagram" -> if (hasCookies) fetchInstagramStories(username, cookiePath) else emptyList()
+                            "facebook" -> if (hasCookies) fetchFacebookStories(username, cookiePath) else emptyList()
+                            else -> emptyList()
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "fallback failed", e)
+                        emptyList()
+                    }
+                    if (fallback.isNotEmpty()) {
+                        withContext(Dispatchers.Main) { promise.resolve(toNativeArray(fallback, platform, username)) }
+                        return@launch
+                    }
+                    val detail = (result as? SnapSaveResult.Failed)?.message
+                        ?: "No stories are available for $username right now."
                     withContext(Dispatchers.Main) {
-                        promise.reject("NO_COOKIES", "Please log in to $platform first to fetch stories")
+                        promise.reject("NO_STORIES", detail)
                     }
                     return@launch
                 }
 
-                val stories = when (platform.lowercase()) {
-                    "instagram" -> fetchInstagramStories(username, cookiePath)
-                    "facebook" -> fetchFacebookStories(username, cookiePath)
-                    else -> throw Exception("Story fetching not supported for $platform")
-                }
-
-                val result = WritableNativeArray()
-                for (story in stories) {
-                    val storyMap = WritableNativeMap().apply {
-                        putString("id", story.optString("id", ""))
-                        putString("url", story.optString("url", ""))
-                        putString("thumbnail", story.optString("thumbnail", ""))
-                        putString("type", story.optString("type", "video")) // image or video
-                        putDouble("timestamp", story.optDouble("timestamp", 0.0))
-                        putString("username", username)
-                        putString("platform", platform)
-                        putDouble("duration", story.optDouble("duration", 0.0))
-                        putString("title", story.optString("title", "Story"))
-                    }
-                    result.pushMap(storyMap)
-                }
-
                 withContext(Dispatchers.Main) {
-                    promise.resolve(result)
+                    promise.resolve(toNativeArray(stories, platform, username))
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to fetch stories", e)
@@ -92,6 +125,65 @@ class StoryModule(
                 }
             }
         }
+    }
+
+    private fun toNativeArray(
+        stories: List<JSONObject>,
+        platform: String,
+        username: String,
+    ): WritableNativeArray {
+        val result = WritableNativeArray()
+        for (story in stories) {
+            val storyMap = WritableNativeMap().apply {
+                putString("id", story.optString("id", ""))
+                putString("url", story.optString("url", ""))
+                putString("thumbnail", story.optString("thumbnail", ""))
+                putString("type", story.optString("type", "video"))
+                putDouble("timestamp", story.optDouble("timestamp", 0.0))
+                putString("username", username)
+                putString("platform", platform)
+                putDouble("duration", story.optDouble("duration", 0.0))
+                putString("title", story.optString("title", "Story"))
+            }
+            result.pushMap(storyMap)
+        }
+        return result
+    }
+
+    /**
+     * Builds the page SnapSave is asked to read. Instagram accepts a bare
+     * handle; Facebook needs the full story permalink, so an id is required
+     * there and a bare profile name is rejected up front with a clear message.
+     */
+    private fun buildStoryTargetUrl(platform: String, username: String): String {
+        val clean = username.trim().trimEnd('/')
+        val lastSegment = clean.substringAfterLast('/')
+        val storyId = lastSegment.substringAfter('-', "")
+
+        return when (platform.lowercase()) {
+            "instagram" -> "https://www.instagram.com/stories/${lastSegment}/"
+            "facebook" -> when {
+                clean.contains("/stories/") -> "https://www.facebook.com/$clean/"
+                storyId.isNotBlank() ->
+                    "https://www.facebook.com/${clean.substringBeforeLast('/')}/stories/$storyId/"
+                else -> throw IllegalArgumentException(
+                    "Facebook stories need a full story link, for example " +
+                        "facebook.com/username/stories/1234567890/"
+                )
+            }
+            else -> throw IllegalArgumentException("Story fetching is not supported for $platform")
+        }
+    }
+
+    private fun storyTitle(
+        platform: String,
+        username: String,
+        media: StoryMedia,
+        index: Int,
+    ): String {
+        val kind = if (media.isImage) "Photo" else "Video"
+        val safe = username.trim().trimEnd('/').substringAfterLast('/')
+        return "$safe $kind ${index + 1}"
     }
 
     private fun fetchInstagramStories(username: String, cookiePath: String): List<JSONObject> {
@@ -337,6 +429,14 @@ class StoryModule(
     /**
      * Download a single story item
      */
+    /**
+     * Downloads one story.
+     *
+     * Items fetched through SnapSave arrive as a CDN url carrying a signed
+     * token, so they are streamed straight to public storage: yt-dlp cannot
+     * read that url and would only add a dependency it does not need. Any other
+     * url (a plain Instagram permalink, say) still falls back to yt-dlp.
+     */
     @ReactMethod
     fun downloadStory(
         storyUrl: String,
@@ -348,86 +448,148 @@ class StoryModule(
     ) {
         scope.launch {
             try {
-                val cookiePath = cookieModule.getCookieFilePath(platform.lowercase())
-                val hasCookies = File(cookiePath).exists() && File(cookiePath).length() > 100
-
-                val cacheDir = File(reactApplicationContext.cacheDir, "story_download_$processId")
-                if (!cacheDir.exists()) cacheDir.mkdirs()
-
-                val outputTemplate = "${cacheDir.absolutePath}/%(title).50s_%(id)s.%(ext)s"
-
-                val request = YoutubeDLRequest(storyUrl)
-                request.addOption("-o", outputTemplate)
-                request.addOption("--no-playlist")
-                request.addOption("--no-check-certificate")
-                request.addOption("--force-ipv4")
-                request.addOption("--socket-timeout", "30")
-
-                if (hasCookies) {
-                    request.addOption("--cookies", cookiePath)
-                }
-
-                if (storyType == "image") {
-                    // For image stories, just download the file directly
-                    request.addOption("-f", "best")
-                } else {
-                    request.addOption("-f", "best[ext=mp4]/best")
-                    request.addOption("--merge-output-format", "mp4")
-                }
-
-                request.addOption("--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
-
-                YoutubeDL.getInstance().execute(request, processId) { progress, _, line ->
-                    val params = WritableNativeMap().apply {
-                        putString("processId", processId)
-                        putDouble("progress", progress.toDouble())
-                        putString("line", line ?: "Downloading...")
-                    }
-                    sendEvent("onStoryDownloadProgress", params)
-                }
-
-                val downloadedFile = cacheDir.listFiles()
-                    ?.filter { it.isFile && !it.name.endsWith(".part") }
-                    ?.maxByOrNull { it.lastModified() }
-                    ?: throw Exception("Downloaded file not found")
-
-                // Move to public storage
-                val baseDir = reactApplicationContext.getExternalFilesDir(null)
-                val storyDir = File(baseDir, "vibedownloader/$platform/Stories/$username")
-                if (!storyDir.exists()) storyDir.mkdirs()
-
-                val destFile = File(storyDir, downloadedFile.name)
-                downloadedFile.copyTo(destFile, overwrite = true)
-                downloadedFile.delete()
-                cacheDir.deleteRecursively()
-
-                // Scan to gallery
-                android.media.MediaScannerConnection.scanFile(
-                    reactApplicationContext,
-                    arrayOf(destFile.absolutePath),
-                    null,
-                    null
-                )
-
+                val published = saveStory(storyUrl, platform, username, storyType, processId)
                 withContext(Dispatchers.Main) {
-                    val result = WritableNativeMap().apply {
-                        putString("processId", processId)
-                        putString("filePath", destFile.absolutePath)
-                        putString("fileName", destFile.name)
-                        putString("platform", platform)
-                        putInt("exitCode", 0)
-                    }
-                    promise.resolve(result)
+                    promise.resolve(
+                        WritableNativeMap().apply {
+                            putString("processId", processId)
+                            putString("filePath", published)
+                            putString("fileName", published.substringAfterLast('/'))
+                            putString("platform", platform)
+                            putInt("exitCode", 0)
+                        }
+                    )
                 }
             } catch (e: Exception) {
-                val cacheDir = File(reactApplicationContext.cacheDir, "story_download_$processId")
-                if (cacheDir.exists()) cacheDir.deleteRecursively()
-
+                Log.e(TAG, "Story download failed", e)
                 withContext(Dispatchers.Main) {
                     promise.reject("DOWNLOAD_ERROR", "Story download failed: ${e.message}")
                 }
             }
         }
+    }
+
+    /**
+     * Saves one story to public storage and returns the resulting path.
+     *
+     * Items fetched through SnapSave arrive as a CDN url carrying a signed
+     * token, so they are streamed straight to storage: yt-dlp cannot read that
+     * url and would only add a dependency it does not need. Anything else (a
+     * plain Instagram permalink, say) still falls back to yt-dlp.
+     */
+    private suspend fun saveStory(
+        storyUrl: String,
+        platform: String,
+        username: String,
+        storyType: String,
+        processId: String,
+    ): String {
+        val cacheDir = File(reactApplicationContext.cacheDir, "story_download_$processId")
+        return try {
+            if (isDirectMediaUrl(storyUrl)) {
+                val isImage = storyType.equals("image", ignoreCase = true)
+                val fileName = buildStoryFileName(username, processId, isImage)
+
+                cacheDir.mkdirs()
+                val temp = File(cacheDir, fileName)
+                sendProgress(processId, 0.0, "Downloading story...")
+                if (!SnapSaveClient.download(directMedia(storyUrl), temp)) {
+                    throw IllegalStateException("SnapSave could not deliver the file")
+                }
+
+                MediaStorePublisher.publish(
+                    context = reactApplicationContext,
+                    source = temp,
+                    platform = platform.lowercase(),
+                    subfolder = "Stories",
+                    mimeType = if (isImage) "image/jpeg" else "video/mp4",
+                    displayName = fileName,
+                ) ?: throw IllegalStateException("Could not save the file to public storage")
+            } else {
+                Log.d(TAG, "Not a direct url, falling back to yt-dlp: $storyUrl")
+                downloadViaYtDlp(storyUrl, platform, storyType, processId, cacheDir)
+            }.also {
+                cacheDir.deleteRecursively()
+            }
+        } catch (e: Exception) {
+            cacheDir.deleteRecursively()
+            throw e
+        }
+    }
+
+    /** SnapSave CDN urls are the only ones we can stream without yt-dlp. */
+    private fun isDirectMediaUrl(url: String) = url.contains("d.rapidcdn.app/")
+
+    private fun directMedia(url: String) = StoryMedia(
+        id = url,
+        downloadUrl = url,
+        thumbnailUrl = "",
+        realUrl = url,
+        filename = url.substringBefore('?').substringAfterLast('/'),
+        userAgent = SnapSaveClient.DEFAULT_USER_AGENT,
+        isImage = false,
+    )
+
+    private fun buildStoryFileName(safeUser: String, processId: String, isImage: Boolean): String {
+        val stamp = System.currentTimeMillis()
+        val unique = processId.replace(Regex("""[^A-Za-z0-9]"""), "").take(6).ifBlank { "st" }
+        return "$safeUser-${unique}${stamp % 100_000}.${if (isImage) "jpg" else "mp4"}"
+    }
+
+    private fun sendProgress(processId: String, progress: Double, line: String) {
+        val params = WritableNativeMap().apply {
+            putString("processId", processId)
+            putDouble("progress", progress)
+            putString("line", line)
+        }
+        sendEvent("onStoryDownloadProgress", params)
+    }
+
+    private suspend fun downloadViaYtDlp(
+        storyUrl: String,
+        platform: String,
+        storyType: String,
+        processId: String,
+        cacheDir: File,
+    ): String {
+        val cookiePath = cookieModule.getCookieFilePath(platform.lowercase())
+        val hasCookies = File(cookiePath).exists() && File(cookiePath).length() > 100
+        val outputTemplate = "${cacheDir.absolutePath}/%(title).50s_%(id)s.%(ext)s"
+
+        val request = YoutubeDLRequest(storyUrl)
+        request.addOption("-o", outputTemplate)
+        request.addOption("--no-playlist")
+        request.addOption("--no-check-certificate")
+        request.addOption("--force-ipv4")
+        request.addOption("--socket-timeout", "30")
+
+        if (hasCookies) {
+            request.addOption("--cookies", cookiePath)
+        }
+        if (storyType.equals("image", ignoreCase = true)) {
+            request.addOption("-f", "best")
+        } else {
+            request.addOption("-f", "best[ext=mp4]/best")
+            request.addOption("--merge-output-format", "mp4")
+        }
+        request.addOption("--user-agent", MOBILE_UA)
+
+        YoutubeDL.getInstance().execute(request, processId) { progress, _, line ->
+            sendProgress(processId, progress.toDouble(), line ?: "Downloading...")
+        }
+
+        val downloadedFile = cacheDir.listFiles()
+            ?.filter { it.isFile && !it.name.endsWith(".part") }
+            ?.maxByOrNull { it.lastModified() }
+            ?: throw IllegalStateException("Downloaded file not found")
+
+        return MediaStorePublisher.publish(
+            context = reactApplicationContext,
+            source = downloadedFile,
+            platform = platform.lowercase(),
+            subfolder = "Stories",
+            mimeType = if (storyType.equals("image", ignoreCase = true)) "image/jpeg" else "video/mp4",
+        ) ?: throw IllegalStateException("Could not save the file to public storage")
     }
 
     /**
@@ -452,55 +614,19 @@ class StoryModule(
                     val type = story.optString("type", "video")
                     val processId = "story_${System.currentTimeMillis()}_$i"
 
-                    // Send progress event
-                    val progressParams = WritableNativeMap().apply {
-                        putString("processId", "batch_stories")
-                        putInt("current", i + 1)
-                        putInt("total", storiesArray.length())
-                        putString("status", "Downloading story ${i + 1}/${storiesArray.length()}...")
-                    }
-                    sendEvent("onBatchStoryProgress", progressParams)
+                    sendEvent(
+                        "onBatchStoryProgress",
+                        WritableNativeMap().apply {
+                            putString("processId", "batch_stories")
+                            putInt("current", i + 1)
+                            putInt("total", storiesArray.length())
+                            putString("status", "Downloading story ${i + 1}/${storiesArray.length()}...")
+                        }
+                    )
 
                     try {
-                        val cookiePath = cookieModule.getCookieFilePath(platform.lowercase())
-
-                        val cacheDir = File(reactApplicationContext.cacheDir, "story_dl_$processId")
-                        if (!cacheDir.exists()) cacheDir.mkdirs()
-
-                        val request = YoutubeDLRequest(url)
-                        request.addOption("-o", "${cacheDir.absolutePath}/%(title).50s.%(ext)s")
-                        request.addOption("--no-check-certificate")
-                        request.addOption("--force-ipv4")
-                        request.addOption("--no-playlist")
-
-                        if (File(cookiePath).exists()) {
-                            request.addOption("--cookies", cookiePath)
-                        }
-
-                        if (type == "image") {
-                            request.addOption("-f", "best")
-                        } else {
-                            request.addOption("-f", "best[ext=mp4]/best")
-                            request.addOption("--merge-output-format", "mp4")
-                        }
-
-                        request.addOption("--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15")
-
-                        YoutubeDL.getInstance().execute(request, processId)
-
-                        val downloaded = cacheDir.listFiles()?.firstOrNull { it.isFile }
-                        if (downloaded != null) {
-                            val baseDir = reactApplicationContext.getExternalFilesDir(null)
-                            val storyDir = File(baseDir, "vibedownloader/$platform/Stories/$username")
-                            if (!storyDir.exists()) storyDir.mkdirs()
-                            val dest = File(storyDir, downloaded.name)
-                            downloaded.copyTo(dest, overwrite = true)
-                            android.media.MediaScannerConnection.scanFile(
-                                reactApplicationContext, arrayOf(dest.absolutePath), null, null
-                            )
-                            successCount++
-                        }
-                        cacheDir.deleteRecursively()
+                        saveStory(url, platform, username, type, processId)
+                        successCount++
                     } catch (e: Exception) {
                         failCount++
                         Log.w(TAG, "Failed to download story ${i + 1}: ${e.message}")

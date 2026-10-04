@@ -149,6 +149,7 @@ dependencies {
     
     // Gson for JSON parsing
     implementation("com.google.code.gson:gson:2.10.1")
-    // JAudioTagger - pure Java audio tag editor (MP3/M4A/FLAC album art embedding)
+    // JAudioTagger - pure Java audio tag editor. Only used for MP3/AIFF album art:
+    // its MP4 implementation has no 'covr' atom, so m4a artwork needs ffmpeg.
     implementation("net.jthink:jaudiotagger:3.0.1")
 }

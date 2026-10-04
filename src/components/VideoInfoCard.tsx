@@ -19,19 +19,26 @@ import { PlayIcon, ImageIcon } from './Icons';
 interface VideoInfoCardProps {
     videoInfo: VideoInfo;
     onSaveThumbnail?: () => void;
+    /** When true, hides the resolution quality badge (audio streams report 320p etc.) */
+    isMusic?: boolean;
 }
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - Spacing.md * 2;
-const THUMBNAIL_HEIGHT = (CARD_WIDTH) * (9 / 16);
+const THUMBNAIL_HEIGHT_VIDEO = CARD_WIDTH * (9 / 16); // 16:9 for regular video
+const THUMBNAIL_HEIGHT_MUSIC = CARD_WIDTH;              // 1:1 square for music/album art
 
-export const VideoInfoCard: React.FC<VideoInfoCardProps> = ({ videoInfo, onSaveThumbnail }) => {
+export const VideoInfoCard: React.FC<VideoInfoCardProps> = ({ videoInfo, onSaveThumbnail, isMusic = false }) => {
     const platformColor = getPlatformColor(videoInfo.platform);
     const height = videoInfo.height ?? 0;
-    const hasResolution = height > 0;
+    // Hide quality badge for music tracks — audio streams falsely report a height (e.g. 320)
+    const hasResolution = height > 0 && !isMusic;
     const is4K = height >= 2160;
     const is2K = height >= 1440 && height < 2160;
     const isHD = height >= 720 && height < 1440;
+
+    // Use square container for music tracks with album art (lh3/yt3 art is 1:1)
+    const thumbnailHeight = isMusic ? THUMBNAIL_HEIGHT_MUSIC : THUMBNAIL_HEIGHT_VIDEO;
 
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const slideAnim = useRef(new Animated.Value(30)).current;
@@ -84,11 +91,11 @@ export const VideoInfoCard: React.FC<VideoInfoCardProps> = ({ videoInfo, onSaveT
                 {videoInfo.thumbnail ? (
                     <Image
                         source={{ uri: videoInfo.thumbnail }}
-                        style={styles.thumbnail}
-                        resizeMode="cover"
+                        style={[styles.thumbnail, { height: thumbnailHeight }]}
+                        resizeMode={isMusic ? 'cover' : 'cover'}
                     />
                 ) : (
-                    <View style={[styles.thumbnail, styles.thumbnailPlaceholder]}>
+                    <View style={[styles.thumbnail, { height: thumbnailHeight }, styles.thumbnailPlaceholder]}>
                         <PlayIcon size={48} color={Colors.textMuted} />
                     </View>
                 )}
@@ -204,7 +211,7 @@ const styles = StyleSheet.create({
     },
     thumbnail: {
         width: '100%',
-        height: THUMBNAIL_HEIGHT,
+        height: THUMBNAIL_HEIGHT_VIDEO, // overridden inline via thumbnailHeight
         backgroundColor: Colors.surfaceLow,
     },
     thumbnailPlaceholder: {

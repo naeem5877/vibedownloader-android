@@ -1,8 +1,12 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { YtDlpNative, ytDlpEventEmitter } from '../native/YtDlpModule';
+import { StoryNative } from '../native/StoryModule';
 import { isYouTubeMusicUrl, getYouTubeMusicAlbumArt } from '../services/YouTubeMusicService';
 
 export type QueueItemStatus = 'waiting' | 'downloading' | 'done' | 'failed' | 'cancelled';
+
+/** SnapSave resolves stories to its own CDN; yt-dlp cannot read those urls. */
+const isSnapSaveUrl = (url: string) => url.includes('d.rapidcdn.app/');
 
 export interface QueueItem {
     id: string;
@@ -19,6 +23,8 @@ export interface QueueItem {
     errorMessage?: string;
     cookies?: string;
     album?: string;
+    /** 'image' | 'video' for stories, so the native side can pick a container. */
+    storyType?: 'image' | 'video';
 }
 
 interface UseDownloadQueueReturn {
@@ -101,6 +107,15 @@ export const useDownloadQueue = (): UseDownloadQueueReturn => {
                             nextItem.author,
                             nextItem.album || 'Unknown',
                             nextItem.thumbnail || null,
+                            processId
+                        );
+                    } else if (StoryNative && isSnapSaveUrl(nextItem.url)) {
+                        // SnapSave stories stream straight to public storage.
+                        await StoryNative.downloadStory(
+                            nextItem.url,
+                            nextItem.type,
+                            nextItem.author || '',
+                            nextItem.storyType || 'video',
                             processId
                         );
                     } else {

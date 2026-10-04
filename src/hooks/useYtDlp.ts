@@ -9,6 +9,7 @@ import {
     ytDlpEventEmitter,
 } from '../native/YtDlpModule';
 
+
 interface UseYtDlpState {
     isLoading: boolean;
     isDownloading: boolean;
@@ -22,7 +23,7 @@ interface UseYtDlpState {
 
 export interface UseYtDlpActions {
     fetchInfo: (url: string, options?: { cookies?: string; args?: string[] }) => Promise<void>;
-    download: (url: string, formatId: string | null, options?: { title?: string; artist?: string; platform?: string; cookies?: string; thumbnailPath?: string }) => Promise<DownloadResult | null>;
+    download: (url: string, formatId: string | null, options?: { title?: string; artist?: string; platform?: string; cookies?: string; thumbnailPath?: string; audioFormatId?: string }) => Promise<DownloadResult | null>;
     downloadSpotifyTrack: (searchQuery: string, title: string, artist: string, album: string, thumbnail: string | null) => Promise<DownloadResult | null>;
     cancelDownload: () => Promise<void>;
     validateUrl: (url: string) => Promise<ValidationResult>;
@@ -45,6 +46,13 @@ const initialState: UseYtDlpState = {
     fetchError: null,
     downloadError: null,
 };
+
+// A refetch of the same URL (duplicate share intents, going back and forward)
+// should not pay for extraction again. Small TTL so changes that yt-dlp can now
+// handle still get picked up. Module scope so it survives re-renders.
+const infoCache = new Map<string, { at: number; info: VideoInfo }>();
+const INFO_CACHE_TTL_MS = 5 * 60 * 1000;
+const INFO_CACHE_MAX = 20;
 
 export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
     const [state, setState] = useState<UseYtDlpState>(initialState);
@@ -126,6 +134,23 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
     const generateProcessId = () => Math.random().toString(36).substring(7);
 
     const fetchInfo = useCallback(async (url: string, options?: { cookies?: string; args?: string[] }) => {
+        // Cookies and extractor args change what yt-dlp returns (age gates, private
+        // videos, geo blocks), so they have to be part of the key - otherwise a
+        // refetch after signing in would serve the signed-out result from cache.
+        const cacheKey = options?.cookies || options?.args?.length
+            ? `${url}\u0000${options.cookies ?? ''}\u0000${options.args?.join('') ?? ''}`
+            : url;
+        const cached = infoCache.get(cacheKey);
+        if (cached && Date.now() - cached.at < INFO_CACHE_TTL_MS) {
+            setState((prev) => ({
+                ...prev,
+                isLoading: false,
+                fetchError: null,
+                videoInfo: cached.info,
+            }));
+            return;
+        }
+
         setState((prev) => ({
             ...prev,
             isLoading: true,
@@ -133,6 +158,38 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
             videoInfo: null,
             downloadError: null
         }));
+
+        // Paint the card from the cheap oEmbed lookup while the real extraction
+        // runs; it can take tens of seconds because YouTube's player handshake is
+        // slow, and there is no point showing a blank screen for that long.
+        const quickInfo = YtDlpNative?.fetchQuickInfo
+            ? await YtDlpNative.fetchQuickInfo(url).catch(() => null)
+            : null;
+
+        if (quickInfo?.title) {
+            setState((prev) => (prev.isLoading
+                ? {
+                    ...prev,
+                    videoInfo: {
+                        id: '',
+                        title: quickInfo.title,
+                        description: '',
+                        thumbnail: quickInfo.thumbnail,
+                        uploader: quickInfo.uploader,
+                        uploaderUrl: '',
+                        duration: 0,
+                        viewCount: 0,
+                        likeCount: 0,
+                        uploadDate: '',
+                        extractor: quickInfo.platform,
+                        url,
+                        platform: quickInfo.platform,
+                        formats: [],
+                        partial: true,
+                    },
+                }
+                : prev));
+        }
 
         try {
             // Check if native module is available
@@ -144,6 +201,12 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
 
             if (!info) {
                 throw new Error('No video information found');
+            }
+
+            infoCache.set(cacheKey, { at: Date.now(), info });
+            if (infoCache.size > INFO_CACHE_MAX) {
+                const oldest = infoCache.keys().next().value;
+                if (oldest) infoCache.delete(oldest);
             }
 
             setState((prev) => ({
@@ -158,13 +221,16 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
             setState((prev) => ({
                 ...prev,
                 isLoading: false,
+                // Keep the quick card visible; it still tells the user which video
+                // failed instead of dropping back to a blank screen.
+                videoInfo: prev.videoInfo?.partial ? null : prev.videoInfo,
                 fetchError: errorMessage,
             }));
         }
     }, []);
 
     const download = useCallback(
-        async (url: string, formatId: string | null, options?: { title?: string; artist?: string; platform?: string; cookies?: string; thumbnailPath?: string }) => {
+        async (url: string, formatId: string | null, options?: { title?: string; artist?: string; platform?: string; cookies?: string; thumbnailPath?: string; audioFormatId?: string }) => {
             const processId = generateProcessId();
             processIdRef.current = processId;
 

@@ -409,6 +409,83 @@ export const LinkIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPr
     </Svg>
 );
 
+/** Captions / subtitles. */
+export const CaptionsIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPrimary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Rect
+            x={2.5}
+            y={5}
+            width={19}
+            height={14}
+            rx={3}
+            stroke={color}
+            strokeWidth={2}
+        />
+        <Path
+            d="M6.5 14.5h4M13.5 14.5h4M6.5 10.75h3M12.5 10.75h5"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+        />
+    </Svg>
+);
+
+/** Plain-text tab marker. */
+export const TypeIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPrimary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path d="M4 6.5V4.5h16v2M12 4.5v15M9 19.5h6" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+);
+
+/** Line-synced tab marker. */
+export const AlignLeftIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPrimary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path d="M4 6h16M4 11h11M4 16h16M4 21h8" stroke={color} strokeWidth={2} strokeLinecap="round" />
+    </Svg>
+);
+
+/** Translation tab marker. */
+export const LanguagesIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPrimary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+            d="M3 5.5h9M7.5 3.5v2M10 5.5c0 4-3 7.5-7 8.5M6 9.5c1 2.5 3 4.5 5.5 5.5"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+        <Path
+            d="M12.5 20.5l4-9 4 9M14 17.5h5"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+    </Svg>
+);
+
+/** Chevron pointing down; rotate 180deg to point up. */
+export const ChevronDownIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textSecondary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path d="M5.5 9l6.5 6.5L18.5 9" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+);
+
+/** Partial ring used as a busy indicator. Rotated by the caller to animate. */
+export const SpinnerIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPrimary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Circle
+            cx={12}
+            cy={12}
+            r={9}
+            stroke={color}
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            strokeDasharray="42 14"
+        />
+    </Svg>
+);
+
 export default {
     YouTubeIcon,
     InstagramIcon,
@@ -446,4 +523,10 @@ export default {
     WaveformIcon,
     GlobeIcon,
     LinkIcon,
+    CaptionsIcon,
+    TypeIcon,
+    AlignLeftIcon,
+    LanguagesIcon,
+    ChevronDownIcon,
+    SpinnerIcon,
 };

@@ -1,5 +1,6 @@
 /**
- * Premium FormatList - Download options with modern card design
+ * Premium FormatList - Desktop Parity Download Options
+ * Matches the clean, modern card design from VibeDownloader Desktop
  */
 import React, { useRef, useEffect, useMemo } from 'react';
 import {
@@ -9,8 +10,8 @@ import {
     StyleSheet,
     Animated,
 } from 'react-native';
-import { Colors, Spacing, BorderRadius, Typography, Shadows } from '../theme';
-import { DownloadIcon, MusicNoteIcon, VideoIcon, CheckIcon, SparkleIcon } from './Icons';
+import { Colors, Spacing, BorderRadius, Typography } from '../theme';
+import { DownloadIcon, MusicNoteIcon, VideoIcon } from './Icons';
 import { VideoFormat } from '../native/YtDlpModule';
 
 interface FormatListProps {
@@ -24,41 +25,55 @@ interface FormatCardProps {
     title: string;
     subtitle: string;
     badge?: string;
-    badgeColor?: string;
+    badgeStyle?: {
+        bg: string;
+        text: string;
+        border: string;
+    };
+    extraBadge?: string;
+    extraBadgeStyle?: {
+        bg: string;
+        text: string;
+        border: string;
+    };
     icon: React.ReactNode;
+    iconBg?: string;
+    iconBorder?: string;
     onPress: () => void;
     delay: number;
-    isBest?: boolean;
-    platformColor: string;
+    cardBorder?: string;
 }
 
 const FormatCard: React.FC<FormatCardProps> = ({
     title,
     subtitle,
     badge,
-    badgeColor = Colors.primary,
+    badgeStyle,
+    extraBadge,
+    extraBadgeStyle,
     icon,
+    iconBg = 'rgba(255, 255, 255, 0.05)',
+    iconBorder = 'rgba(255, 255, 255, 0.08)',
     onPress,
     delay,
-    isBest,
-    platformColor,
+    cardBorder = 'rgba(255, 255, 255, 0.07)',
 }) => {
     const fadeAnim = useRef(new Animated.Value(0)).current;
-    const slideAnim = useRef(new Animated.Value(20)).current;
+    const slideAnim = useRef(new Animated.Value(15)).current;
     const scaleAnim = useRef(new Animated.Value(1)).current;
 
     useEffect(() => {
         Animated.parallel([
             Animated.timing(fadeAnim, {
                 toValue: 1,
-                duration: 300,
+                duration: 250,
                 delay,
                 useNativeDriver: true,
             }),
             Animated.spring(slideAnim, {
                 toValue: 0,
-                tension: 50,
-                friction: 8,
+                tension: 60,
+                friction: 9,
                 delay,
                 useNativeDriver: true,
             }),
@@ -94,42 +109,39 @@ const FormatCard: React.FC<FormatCardProps> = ({
             <TouchableOpacity
                 style={[
                     styles.formatCard,
-                    isBest && { borderColor: platformColor, borderWidth: 1.5 },
+                    { borderColor: cardBorder },
                 ]}
                 onPress={onPress}
                 onPressIn={handlePressIn}
                 onPressOut={handlePressOut}
-                activeOpacity={0.9}
+                activeOpacity={0.85}
             >
-                {/* Best Indicator */}
-                {isBest && (
-                    <View style={[styles.bestIndicator, { backgroundColor: platformColor }]}>
-                        <SparkleIcon size={10} color="#FFF" />
-                        <Text style={styles.bestText}>BEST</Text>
-                    </View>
-                )}
-
-                {/* Icon Container */}
-                <View style={[styles.iconContainer, { backgroundColor: `${badgeColor}15` }]}>
+                {/* Left Icon */}
+                <View style={[styles.iconContainer, { backgroundColor: iconBg, borderColor: iconBorder }]}>
                     {icon}
                 </View>
 
-                {/* Info */}
+                {/* Info Text & Badges */}
                 <View style={styles.formatInfo}>
-                    <Text style={styles.formatTitle}>{title}</Text>
-                    <Text style={styles.formatSubtitle}>{subtitle}</Text>
+                    <View style={styles.titleRow}>
+                        <Text style={styles.formatTitle}>{title}</Text>
+                        {extraBadge && extraBadgeStyle && (
+                            <View style={[styles.badge, { backgroundColor: extraBadgeStyle.bg, borderColor: extraBadgeStyle.border }]}>
+                                <Text style={[styles.badgeText, { color: extraBadgeStyle.text }]}>{extraBadge}</Text>
+                            </View>
+                        )}
+                        {badge && badgeStyle && (
+                            <View style={[styles.badge, { backgroundColor: badgeStyle.bg, borderColor: badgeStyle.border }]}>
+                                <Text style={[styles.badgeText, { color: badgeStyle.text }]}>{badge}</Text>
+                            </View>
+                        )}
+                    </View>
+                    <Text style={styles.formatSubtitle} numberOfLines={1}>{subtitle}</Text>
                 </View>
 
-                {/* Badge */}
-                {badge && (
-                    <View style={[styles.badge, { backgroundColor: `${badgeColor}20` }]}>
-                        <Text style={[styles.badgeText, { color: badgeColor }]}>{badge}</Text>
-                    </View>
-                )}
-
-                {/* Download Icon */}
+                {/* Right Download Button */}
                 <View style={styles.downloadButton}>
-                    <DownloadIcon size={18} color={Colors.textSecondary} />
+                    <DownloadIcon size={16} color="rgba(255, 255, 255, 0.7)" />
                 </View>
             </TouchableOpacity>
         </Animated.View>
@@ -139,12 +151,9 @@ const FormatCard: React.FC<FormatCardProps> = ({
 export const FormatList: React.FC<FormatListProps> = ({
     formats,
     onSelectFormat,
-    onDownloadThumbnail,
-    platformColor = Colors.primary,
 }) => {
-    // Process formats: Filter unique, prioritize MP4, sort by quality
+    // Process formats: Filter unique heights, prioritize MP4, sort by quality desc
     const videoFormats = useMemo(() => {
-        // Extension priority (MP4 preferred over WEBM)
         const extPriority: Record<string, number> = {
             'mp4': 1,
             'm4v': 2,
@@ -159,7 +168,7 @@ export const FormatList: React.FC<FormatListProps> = ({
         };
 
         const unique = formats
-            .filter((f) => f.vcodec !== 'none' && f.height && f.height >= 360)
+            .filter((f) => f.vcodec !== 'none' && f.height && f.height >= 144)
             .reduce((acc, current) => {
                 const existing = acc.find(
                     (item) => item.height === current.height
@@ -167,15 +176,12 @@ export const FormatList: React.FC<FormatListProps> = ({
                 if (!existing) {
                     return acc.concat([current]);
                 } else {
-                    // Prioritize MP4 over other formats
                     const curExtPriority = getExtPriority(current.ext);
                     const existingExtPriority = getExtPriority(existing.ext);
 
                     if (curExtPriority < existingExtPriority) {
-                        // Current has better extension (MP4 preferred)
                         return acc.map(i => i === existing ? current : i);
                     } else if (curExtPriority === existingExtPriority && (current.filesize || 0) > (existing.filesize || 0)) {
-                        // Same extension, pick larger file
                         return acc.map(i => i === existing ? current : i);
                     }
                     return acc;
@@ -183,119 +189,165 @@ export const FormatList: React.FC<FormatListProps> = ({
             }, [] as VideoFormat[])
             .sort((a, b) => (b.height || 0) - (a.height || 0));
 
-        return unique.slice(0, 5);
+        return unique.slice(0, 7);
     }, [formats]);
-
-    const formatFileSize = (bytes: number): string => {
-        if (!bytes) return '';
-        const mb = bytes / (1024 * 1024);
-        if (mb > 1024) return `${(mb / 1024).toFixed(1)} GB`;
-        return `${mb.toFixed(1)} MB`;
-    };
 
     let animationDelay = 0;
 
     return (
         <View style={styles.container}>
-            {/* Section Header - Audio */}
-            <View style={styles.sectionHeader}>
-                <MusicNoteIcon size={16} color={Colors.textMuted} />
-                <Text style={styles.sectionTitle}>AUDIO ONLY</Text>
+            {/* Top Header - Desktop Parity */}
+            <View style={styles.topHeader}>
+                <Text style={styles.topHeaderTitle}>DOWNLOAD OPTIONS</Text>
+                <Text style={styles.topHeaderSubtitle}>Select format & quality</Text>
             </View>
 
-            {/* Audio Options - Desktop Parity */}
+            {/* Section Header - Audio Only */}
+            <View style={styles.sectionHeaderRow}>
+                <View style={styles.sectionHeaderLeft}>
+                    <MusicNoteIcon size={14} color="#10B981" />
+                    <Text style={[styles.sectionTitle, { color: '#10B981' }]}>AUDIO ONLY</Text>
+                </View>
+            </View>
+
+            {/* 1. Audio (WAV) - Uncompressed */}
             <FormatCard
-                title="Best Quality MP3"
-                subtitle="High Quality • 320kbps"
-                badge="BEST"
-                badgeColor={Colors.success}
-                icon={<MusicNoteIcon size={20} color={Colors.success} />}
+                title="Audio (WAV)"
+                subtitle="Uncompressed PCM • Full artist, album & year tags • No cover art"
+                badge="UNCOMPRESSED"
+                badgeStyle={{
+                    bg: 'rgba(14, 165, 233, 0.15)',
+                    border: 'rgba(14, 165, 233, 0.3)',
+                    text: '#38BDF8',
+                }}
+                icon={<MusicNoteIcon size={18} color="#38BDF8" />}
+                iconBg="rgba(14, 165, 233, 0.15)"
+                iconBorder="rgba(14, 165, 233, 0.25)"
+                cardBorder="rgba(14, 165, 233, 0.2)"
+                onPress={() => onSelectFormat('audio_wav')}
+                delay={animationDelay += 40}
+            />
+
+            {/* 2. Audio (Best Quality) - 320kbps MP3 */}
+            <FormatCard
+                title="Audio (Best Quality)"
+                subtitle="~320kbps • Studio Grade High Bitrate MP3"
+                badge="320KBPS MP3"
+                badgeStyle={{
+                    bg: 'rgba(16, 185, 129, 0.18)',
+                    border: 'rgba(16, 185, 129, 0.35)',
+                    text: '#34D399',
+                }}
+                icon={<MusicNoteIcon size={18} color="#10B981" />}
+                iconBg="rgba(16, 185, 129, 0.15)"
+                iconBorder="rgba(16, 185, 129, 0.25)"
+                cardBorder="rgba(16, 185, 129, 0.2)"
                 onPress={() => onSelectFormat('audio_best')}
-                delay={animationDelay += 50}
-                platformColor={platformColor}
+                delay={animationDelay += 40}
             />
 
+            {/* 3. Audio (Standard) - 128kbps */}
             <FormatCard
-                title="Standard MP3"
-                subtitle="Balanced Quality • 192kbps"
-                badge="MP3"
-                badgeColor={Colors.info}
-                icon={<MusicNoteIcon size={20} color={Colors.info} />}
+                title="Audio (Standard)"
+                subtitle="~128kbps • Balanced Size & Quality"
+                badge="128KBPS"
+                badgeStyle={{
+                    bg: 'rgba(20, 184, 166, 0.15)',
+                    border: 'rgba(20, 184, 166, 0.25)',
+                    text: '#2DD4BF',
+                }}
+                icon={<MusicNoteIcon size={18} color="#2DD4BF" />}
+                iconBg="rgba(20, 184, 166, 0.12)"
+                iconBorder="rgba(20, 184, 166, 0.2)"
                 onPress={() => onSelectFormat('audio_standard')}
-                delay={animationDelay += 50}
-                platformColor={platformColor}
+                delay={animationDelay += 40}
             />
 
+            {/* 4. Audio (Low) - 64kbps */}
             <FormatCard
-                title="Low Quality MP3"
-                subtitle="Faster Download • 128kbps"
-                badge="LOW"
-                badgeColor={Colors.textMuted}
-                icon={<MusicNoteIcon size={20} color={Colors.textMuted} />}
+                title="Audio (Low)"
+                subtitle="~64kbps • Save Data & Storage"
+                badge="64KBPS"
+                badgeStyle={{
+                    bg: 'rgba(245, 158, 11, 0.15)',
+                    border: 'rgba(245, 158, 11, 0.25)',
+                    text: '#FBBF24',
+                }}
+                icon={<MusicNoteIcon size={18} color="#FBBF24" />}
+                iconBg="rgba(245, 158, 11, 0.12)"
+                iconBorder="rgba(245, 158, 11, 0.2)"
                 onPress={() => onSelectFormat('audio_low')}
-                delay={animationDelay += 50}
-                platformColor={platformColor}
+                delay={animationDelay += 40}
             />
 
-            {/* Section Header - Video */}
-            <View style={[styles.sectionHeader, { marginTop: Spacing.xl }]}>
-                <VideoIcon size={16} color={Colors.textMuted} />
-                <Text style={styles.sectionTitle}>VIDEO QUALITY</Text>
-            </View>
+            {/* Section Header - Video Quality */}
+            {videoFormats.length > 0 && (
+                <>
+                    <View style={[styles.sectionHeaderRow, { marginTop: Spacing.lg }]}>
+                        <View style={styles.sectionHeaderLeft}>
+                            <VideoIcon size={14} color="#3B82F6" />
+                            <Text style={[styles.sectionTitle, { color: '#3B82F6' }]}>VIDEO QUALITY</Text>
+                        </View>
+                        <Text style={styles.sectionHeaderRight}>{videoFormats.length} OPTIONS</Text>
+                    </View>
 
-            {/* Auto Best Quality - First Option */}
-            <FormatCard
-                title="Auto Best Quality"
-                subtitle="Highest available MP4 + Audio"
-                badge="BEST"
-                badgeColor={platformColor}
-                icon={<SparkleIcon size={20} color={platformColor} />}
-                onPress={() => onSelectFormat('best')}
-                delay={animationDelay += 50}
-                isBest={true}
-                platformColor={platformColor}
-            />
+                    {videoFormats.map((format, index) => {
+                        const h = format.height || 0;
+                        const is4K = h >= 2160;
+                        const is2K = h >= 1440 && h < 2160;
+                        const is1080 = h >= 1080 && h < 1440;
+                        const is720 = h >= 720 && h < 1080;
 
-            {/* Video Options */}
-            {videoFormats.map((format, index) => {
-                const is4K = format.height && format.height >= 2160;
-                const is2K = format.height && format.height >= 1440 && format.height < 2160;
-                const isHD = format.height && format.height >= 720;
+                        let badgeText: string | undefined;
+                        let badgeStyle: { bg: string; text: string; border: string } | undefined;
+                        let iconColor = '#38BDF8';
+                        let cardBorder = 'rgba(255, 255, 255, 0.07)';
 
-                let qualityColor = Colors.textMuted;
-                if (is4K) qualityColor = '#A855F7';
-                else if (is2K) qualityColor = Colors.secondary;
-                else if (isHD) qualityColor = Colors.success;
+                        if (is4K) {
+                            badgeText = '4K ULTRA HD';
+                            badgeStyle = { bg: 'rgba(168, 85, 247, 0.2)', border: 'rgba(168, 85, 247, 0.35)', text: '#C084FC' };
+                            iconColor = '#C084FC';
+                            cardBorder = 'rgba(168, 85, 247, 0.2)';
+                        } else if (is2K) {
+                            badgeText = '2K QHD';
+                            badgeStyle = { bg: 'rgba(99, 102, 241, 0.2)', border: 'rgba(99, 102, 241, 0.35)', text: '#818CF8' };
+                            iconColor = '#818CF8';
+                            cardBorder = 'rgba(99, 102, 241, 0.2)';
+                        } else if (is1080) {
+                            badgeText = '1080P FHD';
+                            badgeStyle = { bg: 'rgba(59, 130, 246, 0.2)', border: 'rgba(59, 130, 246, 0.3)', text: '#60A5FA' };
+                            iconColor = '#60A5FA';
+                            cardBorder = 'rgba(59, 130, 246, 0.2)';
+                        } else if (is720) {
+                            badgeText = '720P HD';
+                            badgeStyle = { bg: 'rgba(14, 165, 233, 0.18)', border: 'rgba(14, 165, 233, 0.3)', text: '#38BDF8' };
+                            iconColor = '#38BDF8';
+                        }
 
-                return (
-                    <FormatCard
-                        key={`${format.formatId}-${index}`}
-                        title={`${format.height}p ${format.ext?.toUpperCase() || 'MP4'}`}
-                        subtitle={format.filesize ? `~${formatFileSize(format.filesize)}` : 'Best Quality'}
-                        badge={is4K ? '4K' : is2K ? '2K' : format.ext?.toUpperCase()}
-                        badgeColor={qualityColor}
-                        icon={<VideoIcon size={20} color={qualityColor} />}
-                        onPress={() => onSelectFormat(format.formatId || 'best')}
-                        delay={animationDelay += 50}
-                        isBest={index === 0}
-                        platformColor={platformColor}
-                    />
-                );
-            })}
+                        const extraBadgeText = index === 0 ? 'BEST QUALITY' : undefined;
+                        const extraBadgeStyle = index === 0 ? {
+                            bg: 'rgba(255, 255, 255, 0.12)',
+                            border: 'rgba(255, 255, 255, 0.2)',
+                            text: 'rgba(255, 255, 255, 0.9)',
+                        } : undefined;
 
-            {/* Fallback if no video formats */}
-            {videoFormats.length === 0 && (
-                <FormatCard
-                    title="Auto Best Quality"
-                    subtitle="MP4 Video"
-                    badge="BEST"
-                    badgeColor={Colors.primary}
-                    icon={<VideoIcon size={20} color={Colors.primary} />}
-                    onPress={() => onSelectFormat('bestvideo[ext=mp4]+bestaudio[ext=m4a]/best')}
-                    delay={animationDelay += 50}
-                    isBest={true}
-                    platformColor={platformColor}
-                />
+                        return (
+                            <FormatCard
+                                key={`${format.formatId}-${index}`}
+                                title={`${h}p`}
+                                subtitle={`${format.ext?.toUpperCase() || 'MP4'} • ${h}p`}
+                                badge={badgeText}
+                                badgeStyle={badgeStyle}
+                                extraBadge={extraBadgeText}
+                                extraBadgeStyle={extraBadgeStyle}
+                                icon={<VideoIcon size={18} color={iconColor} />}
+                                cardBorder={cardBorder}
+                                onPress={() => onSelectFormat(format.formatId || 'best')}
+                                delay={animationDelay += 35}
+                            />
+                        );
+                    })}
+                </>
             )}
         </View>
     );
@@ -306,87 +358,108 @@ const styles = StyleSheet.create({
         paddingHorizontal: Spacing.md,
         paddingBottom: Spacing.xl,
     },
-    sectionHeader: {
+    topHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.sm,
+        justifyContent: 'space-between',
         marginBottom: Spacing.md,
-        paddingLeft: Spacing.xs,
+        marginTop: Spacing.xs,
+        paddingHorizontal: Spacing.xs,
+    },
+    topHeaderTitle: {
+        color: 'rgba(255, 255, 255, 0.45)',
+        fontSize: 11,
+        fontWeight: '700',
+        letterSpacing: 1,
+    },
+    topHeaderSubtitle: {
+        color: 'rgba(255, 255, 255, 0.3)',
+        fontSize: 11,
+    },
+    sectionHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: Spacing.sm,
+        marginTop: Spacing.xs,
+        paddingHorizontal: Spacing.xs,
+    },
+    sectionHeaderLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
     },
     sectionTitle: {
-        color: Colors.textMuted,
-        fontSize: Typography.sizes.xxs,
-        fontWeight: Typography.weights.bold,
-        letterSpacing: Typography.letterSpacing.wider,
+        fontSize: 11,
+        fontWeight: '700',
+        letterSpacing: 0.8,
+    },
+    sectionHeaderRight: {
+        color: 'rgba(255, 255, 255, 0.3)',
+        fontSize: 10,
+        fontWeight: '600',
+        letterSpacing: 0.5,
     },
     formatCard: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: Colors.surface,
-        padding: Spacing.md,
-        marginBottom: Spacing.sm,
-        borderRadius: BorderRadius.lg,
+        backgroundColor: '#0F1216',
+        paddingVertical: 12,
+        paddingHorizontal: 14,
+        marginBottom: 8,
+        borderRadius: 14,
         borderWidth: 1,
-        borderColor: Colors.border,
-        position: 'relative',
-        overflow: 'hidden',
-    },
-    bestIndicator: {
-        position: 'absolute',
-        top: 0,
-        right: 0,
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderBottomLeftRadius: BorderRadius.md,
-        gap: 4,
-    },
-    bestText: {
-        color: '#FFF',
-        fontSize: 8,
-        fontWeight: Typography.weights.bold,
-        letterSpacing: 0.5,
     },
     iconContainer: {
-        width: 44,
-        height: 44,
-        borderRadius: BorderRadius.md,
+        width: 38,
+        height: 38,
+        borderRadius: 10,
         justifyContent: 'center',
         alignItems: 'center',
-        marginRight: Spacing.md,
+        marginRight: 12,
+        borderWidth: 1,
     },
     formatInfo: {
         flex: 1,
+        justifyContent: 'center',
+    },
+    titleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: 6,
+        marginBottom: 3,
     },
     formatTitle: {
-        color: Colors.textPrimary,
-        fontSize: Typography.sizes.base,
-        fontWeight: Typography.weights.semibold,
-        marginBottom: 2,
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '600',
     },
     formatSubtitle: {
-        color: Colors.textMuted,
-        fontSize: Typography.sizes.sm,
+        color: 'rgba(255, 255, 255, 0.42)',
+        fontSize: 11,
     },
     badge: {
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: BorderRadius.sm,
-        marginRight: Spacing.md,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 5,
+        borderWidth: 1,
     },
     badgeText: {
-        fontSize: Typography.sizes.xxs,
-        fontWeight: Typography.weights.bold,
+        fontSize: 9,
+        fontWeight: '700',
         letterSpacing: 0.5,
     },
     downloadButton: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        backgroundColor: Colors.surfaceElevated,
+        width: 34,
+        height: 34,
+        borderRadius: 10,
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.08)',
         justifyContent: 'center',
         alignItems: 'center',
+        marginLeft: 10,
     },
 });
 

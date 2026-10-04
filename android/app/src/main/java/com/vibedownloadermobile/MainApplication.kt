@@ -10,6 +10,9 @@ import com.vibedownloadermobile.ytdlp.YtDlpPackage
 import com.vibedownloadermobile.cookie.CookiePackage
 import com.vibedownloadermobile.story.StoryPackage
 import com.vibedownloadermobile.webview.WebViewLoginPackage
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.ffmpeg.FFmpeg
+import android.util.Log
 
 class MainApplication : Application(), ReactApplication {
 
@@ -33,6 +36,21 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    try {
+      YoutubeDL.getInstance().init(this)
+      try {
+        FFmpeg.getInstance().init(this)
+      } catch (t: Throwable) {
+        try {
+          FFmpeg.init(this)
+        } catch (t2: Throwable) {
+          Log.w("MainApplication", "FFmpeg init fallback: ${t2.message}")
+        }
+      }
+      Log.d("MainApplication", "YoutubeDL & FFmpeg initialized in Application.onCreate")
+    } catch (e: Exception) {
+      Log.e("MainApplication", "Failed to initialize YoutubeDL in Application.onCreate", e)
+    }
     loadReactNative(this)
   }
 }

@@ -50,13 +50,22 @@ export function isYouTubeMusicUrl(url: string): boolean {
 }
 
 /**
+ * Returns true if the URL is any YouTube URL (youtube.com, youtu.be, music.youtube.com).
+ */
+export function isYouTubeUrl(url: string): boolean {
+    return Boolean(extractYouTubeVideoId(url));
+}
+
+/**
  * Given a raw JSON string (or any text body), extracts all
- * lh3.googleusercontent.com URLs and returns the one with the largest
+ * lh3/yt3.googleusercontent.com URLs and returns the one with the largest
  * declared width (=wNNN) — i.e., the best album art.
  */
 function extractBestLh3Url(raw: string): string | null {
-    // Regex mirrors the Python: r'https://lh3\.googleusercontent\.com/[^"\\]+'
-    const found = raw.match(/https:\/\/lh3\.googleusercontent\.com\/[^"\\]+/g);
+    // The JSON escapes slashes as \/ — unescape so URL matching works
+    const unescaped = raw.replace(/\\\//g, '/');
+    // Match both lh3 (older API) and yt3 (current YT Music API) subdomains
+    const found = unescaped.match(/https?:\/\/(?:lh3|yt3)\.googleusercontent\.com\/[^"\\]+/g);
     if (!found || found.length === 0) return null;
 
     const unique = Array.from(new Set(found));
@@ -71,12 +80,17 @@ function extractBestLh3Url(raw: string): string | null {
 }
 
 /**
- * Upgrades an lh3.googleusercontent.com URL to maximum resolution.
- * Replaces whatever size suffix is present with w2000-h2000-l90-rj.
+ * Upgrades a googleusercontent.com URL to maximum resolution JPEG.
+ * Matches desktop rewriteArtUrl: replaces size suffix with =w2000-h2000-p-l90-rj.
  */
-function upgradeToMaxRes(url: string): string {
-    // Remove everything after the last '=' parameter block
-    return url.replace(/=w\d+[^?]*$/, '=w2000-h2000-l90-rj');
+export function upgradeToMaxRes(url: string): string {
+    if (url.includes('=w')) {
+        return url.replace(/=w\d+.*$/, '=w2000-h2000-p-l90-rj');
+    }
+    if (!url.includes('=')) {
+        return `${url}=w2000-h2000-p-l90-rj`;
+    }
+    return url;
 }
 
 // ─── Method 1: YouTube Music internal /next API ────────────────────────────
@@ -195,26 +209,33 @@ export async function getYouTubeMusicAlbumArt(
         return null;
     }
 
-    console.log(`[YTMusicService] Fetching album art in parallel for video ID: ${videoId}`);
+    console.log(`[YTMusicService] Fetching real album art for video ID: ${videoId}`);
 
     try {
-        // Run all 3 methods in parallel. Promise.any resolves with the first one that succeeds (returns a non-null URL).
-        const artUrl = await Promise.any([
+        // Run Method 1 (API) and Method 2 (page scrape) in parallel for true square album art
+        const realArtUrl = await Promise.any([
             getAlbumArtFromApi(videoId),
             getAlbumArtFromPage(videoId),
-            getAlbumArtFallback(videoId),
         ].map(p => p.then(url => {
-            if (!url) throw new Error('Method returned no result');
+            if (!url) throw new Error('No real album art found');
             return url;
         })));
 
-        // If it's not a ytimg URL, it's real high-res album art from lh3
-        const isRealAlbumArt = !artUrl.includes('ytimg.com');
-
-        return { url: artUrl, isRealAlbumArt, videoId };
-
-    } catch (e) {
-        console.warn(`[YTMusicService] ❌ All 3 methods failed for ${videoId}`);
-        return null;
+        if (realArtUrl) {
+            console.log(`[YTMusicService] 🌟 Got true album art: ${realArtUrl}`);
+            return { url: realArtUrl, isRealAlbumArt: true, videoId };
+        }
+    } catch (_) {
+        // True art methods failed, fall through to video thumbnail fallback
     }
+
+    try {
+        const fallbackUrl = await getAlbumArtFallback(videoId);
+        if (fallbackUrl) {
+            return { url: fallbackUrl, isRealAlbumArt: false, videoId };
+        }
+    } catch (_) {}
+
+    console.warn(`[YTMusicService] ❌ All methods failed for ${videoId}`);
+    return null;
 }

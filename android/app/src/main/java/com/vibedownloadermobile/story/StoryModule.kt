@@ -107,8 +107,20 @@ class StoryModule(
                         withContext(Dispatchers.Main) { promise.resolve(toNativeArray(fallback, platform, username)) }
                         return@launch
                     }
-                    val detail = (result as? SnapSaveResult.Failed)?.message
-                        ?: "No stories are available for $username right now."
+                    val detail = if (platform.equals("facebook", ignoreCase = true)) {
+                        // SnapSave refuses Facebook outright, so yt-dlp with Facebook
+                        // cookies is the only route and its raw message is not useful.
+                        if (hasCookies) {
+                            "Facebook would not serve that story even while signed in. " +
+                                "Copy the story link again and check that your Facebook cookies are current."
+                        } else {
+                            "Facebook stories need you to be signed in. Log in to Facebook inside the " +
+                                "app so your cookies are saved, then paste the story link again."
+                        }
+                    } else {
+                        (result as? SnapSaveResult.Failed)?.message
+                            ?: "No stories are available for $username right now."
+                    }
                     withContext(Dispatchers.Main) {
                         promise.reject("NO_STORIES", detail)
                     }
@@ -163,7 +175,14 @@ class StoryModule(
         return when (platform.lowercase()) {
             "instagram" -> "https://www.instagram.com/stories/${lastSegment}/"
             "facebook" -> when {
-                clean.contains("/stories/") -> "https://www.facebook.com/$clean/"
+                // Story-tray permalink as copied from the Facebook app/web:
+                //   facebook.com/stories/<page_id>/<opaque_story_id>/
+                // Keep the two path segments intact, dropping any query string.
+                clean.startsWith("stories/") -> {
+                    val path = clean.substringBefore('?').trimEnd('/')
+                    "https://www.facebook.com/$path/"
+                }
+                clean.contains("/stories/") -> "https://www.facebook.com/${clean.substringBefore('?').trimEnd('/')}/"
                 storyId.isNotBlank() ->
                     "https://www.facebook.com/${clean.substringBeforeLast('/')}/stories/$storyId/"
                 else -> throw IllegalArgumentException(
@@ -369,13 +388,28 @@ class StoryModule(
 
     private fun fetchFacebookStories(username: String, cookiePath: String): List<JSONObject> {
         val stories = mutableListOf<JSONObject>()
-        
-        // Try yt-dlp with cookies first
-        val facebookUrls = listOf(
-            "https://www.facebook.com/$username",
-            "https://www.facebook.com/stories/$username"
-        )
-        
+
+        // SnapSave will not serve Facebook, so this is the working path and it
+        // needs Facebook cookies. Build every plausible permalink from the input
+        // instead of assuming a bare username.
+        val clean = username.trim().trimEnd('/').substringBefore('?')
+        val lastSegment = clean.substringAfterLast('/')
+        val facebookUrls = buildList {
+            if (clean.startsWith("stories/")) {
+                add("https://www.facebook.com/$clean")
+                // The opaque story id from the tray is not the story_fbid, so
+                // also try the page feed, which yt-dlp can enumerate.
+                val pageId = clean.removePrefix("stories/").substringBefore('/')
+                if (pageId.isNotBlank()) add("https://www.facebook.com/$pageId/stories")
+            } else if (clean.contains("/stories/")) {
+                add("https://www.facebook.com/$clean")
+            } else {
+                add("https://www.facebook.com/stories/$clean")
+                add("https://www.facebook.com/$clean/stories")
+                add("https://www.facebook.com/$clean")
+            }
+        }.distinct()
+
         for (fbUrl in facebookUrls) {
             try {
                 val request = YoutubeDLRequest(fbUrl)
@@ -388,7 +422,7 @@ class StoryModule(
                 val response = YoutubeDL.getInstance().execute(request)
                 val json = JSONObject(response.out)
                 val entries = json.optJSONArray("entries")
-                
+
                 if (entries != null && entries.length() > 0) {
                     for (i in 0 until entries.length()) {
                         val entry = entries.getJSONObject(i)
@@ -404,7 +438,7 @@ class StoryModule(
                 Log.w(TAG, "Facebook yt-dlp attempt failed for $fbUrl: ${e.message}")
             }
         }
-        
+
         return stories
     }
 

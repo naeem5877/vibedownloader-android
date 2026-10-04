@@ -249,6 +249,36 @@ export const SparkleIcon: React.FC<IconProps> = ({ size = 24, color = Colors.pri
     </Svg>
 );
 
+export const LayersIcon: React.FC<IconProps> = ({ size = 24, color = Colors.primary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+            d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+    </Svg>
+);
+
+export const PlaySmallIcon: React.FC<IconProps> = ({ size = 24, color = Colors.primary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+            d="M6 4l14 8-14 8V4z"
+            fill={color}
+        />
+    </Svg>
+);
+
+export const PauseIcon: React.FC<IconProps> = ({ size = 24, color = Colors.primary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+            d="M7 4h3.5v16H7V4zm6.5 0H17v16h-3.5V4z"
+            fill={color}
+        />
+    </Svg>
+);
+
 export const GitHubIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPrimary }) => (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
         <Path
@@ -303,7 +333,36 @@ export const TrashIcon: React.FC<IconProps> = ({ size = 24, color = Colors.error
     </Svg>
 );
 
-export const InfoIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textSecondary }) => (
+export const ScissorsIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textSecondary }) => (
+      <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          {/* Blade crossing the other, plus the two finger rings below. */}
+          <Circle cx="6" cy="6" r="3" stroke={color} strokeWidth={2} />
+          <Circle cx="6" cy="18" r="3" stroke={color} strokeWidth={2} />
+          <Path
+              d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12"
+              stroke={color}
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+          />
+      </Svg>
+  );
+
+  export const WarningIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textSecondary }) => (
+      <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Path
+              d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
+              stroke={color}
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+          />
+          <Path d="M12 9v4" stroke={color} strokeWidth={2} strokeLinecap="round" />
+          <Path d="M12 17h.01" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      </Svg>
+  );
+
+  export const InfoIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textSecondary }) => (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
         <Path
             d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
@@ -527,6 +586,8 @@ export default {
     TypeIcon,
     AlignLeftIcon,
     LanguagesIcon,
-    ChevronDownIcon,
-    SpinnerIcon,
-};
+ChevronDownIcon,
+      SpinnerIcon,
+      ScissorsIcon,
+      WarningIcon,
+  };

@@ -51,9 +51,12 @@ import { useYtDlp } from '../hooks/useYtDlp';
 import { VideoFormat, ytDlpEventEmitter, YtDlpNative } from '../native/YtDlpModule';
 import { StoryNative } from '../native/StoryModule';
 import { WebViewLoginNative } from '../native/WebViewLoginModule';
-import { DownloadIcon, SparkleIcon, WaveformIcon, LibraryIcon, CloseIcon, SettingsIcon } from '../components/Icons';
+import { DownloadIcon, SparkleIcon, LayersIcon, WaveformIcon, LibraryIcon, CloseIcon, SettingsIcon, ChevronRightIcon, ScissorsIcon, WarningIcon } from '../components/Icons';
 import { useDownloadQueue } from '../hooks/useDownloadQueue';
 import { DownloadQueuePanel } from '../components/DownloadQueuePanel';
+import { BatchDownloadSheet, BatchResolvedItem } from '../components/BatchDownloadSheet';
+import { CutDownloadSheet } from '../components/CutDownloadSheet';
+import { LiveBadge, LiveRecordBar } from '../components/LiveRecordBar';
 import { checkForUpdates, UpdateInfo } from '../services/GitHubUpdateService';
 import { getSpotifyPlaylist, extractSpotifyId, getTrackInfo, buildYouTubeSearchQuery, formatTrackMetadata } from '../services/SpotifyService';
 
@@ -68,6 +71,18 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface HomeScreenProps {
     onNavigateToLibrary?: () => void;
+}
+
+/** `3:45`, or `1:02:03` for long media, for inline duration labels. */
+function formatDuration(seconds: number): string {
+    const safe = Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : 0;
+    const h = Math.floor(safe / 3600);
+    const m = Math.floor((safe % 3600) / 60);
+    const s = safe % 60;
+    if (h > 0) {
+        return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+    return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) => {
@@ -130,16 +145,24 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
     const [state, actions] = useYtDlp();
 
     const [queuePanelVisible, setQueuePanelVisible] = useState(false);
+const [batchSheetVisible, setBatchSheetVisible] = useState(false);
+const [cutSheetVisible, setCutSheetVisible] = useState(false);
+const [liveRecording, setLiveRecording] = useState(false);
     const {
         queue,
         isQueueRunning,
+        isPaused,
         totalDone,
         totalFailed,
+        stats,
         addToQueue,
         cancelItem,
         cancelAll,
         clearQueue,
+        retryItem,
         retryFailed,
+        pause,
+        resume,
     } = useDownloadQueue();
 
     // Animation refs
@@ -305,6 +328,9 @@ let isStoryFetch = false;
         const inputStr = text.trim();
         const fullIgStoryRegex = /(?:https?:\/\/)?(?:www\.)?instagram\.com\/stories\/([a-zA-Z0-9._]+)\/(\d+)\/?/;
         const fullFbStoryRegex = /(?:https?:\/\/)?(?:www\.)?facebook\.com\/([a-zA-Z0-9._-]+)\/stories\/(\d+)\/?/;
+        // Story-tray permalink as copied from the Facebook app:
+        //   facebook.com/stories/<page_id>/<opaque_story_id>/?bucket_count=9&source=story_tray
+        const fbTrayStoryRegex = /(?:https?:\/\/)?(?:www\.|m\.)?facebook\.com\/stories\/(\d+)\/([A-Za-z0-9_=%+-]+)/;
         let match = inputStr.match(igRegex);
         if (match && match[1] && !['stories', 'p', 'reel', 'tv'].includes(match[1].toLowerCase())) {
             isStoryFetch = true;
@@ -314,11 +340,19 @@ let isStoryFetch = false;
         } else {
             const igStory = inputStr.match(fullIgStoryRegex);
             const fbStory = inputStr.match(fullFbStoryRegex);
+            const fbTray = inputStr.match(fbTrayStoryRegex);
             if (igStory) {
                 isStoryFetch = true;
                 platformName = 'instagram';
                 storyUsername = igStory[1];
                 storyUrl = `https://www.instagram.com/stories/${igStory[1]}/${igStory[2]}/`;
+            } else if (fbTray) {
+                isStoryFetch = true;
+                platformName = 'facebook';
+                // Keep both path segments so the native side can rebuild the
+                // permalink exactly; the query string is not needed.
+                storyUsername = `stories/${fbTray[1]}/${fbTray[2]}`;
+                storyUrl = `https://www.facebook.com/stories/${fbTray[1]}/${fbTray[2]}/`;
             } else if (fbStory) {
                 isStoryFetch = true;
                 platformName = 'facebook';
@@ -1085,6 +1119,22 @@ let isStoryFetch = false;
         setTimeout(() => setQueuePanelVisible(true), 380);
     }, [addToQueue]);
 
+    /**
+     * Batch paste: the sheet has already resolved titles and cookies for each
+     * link, so this only has to hand them to the queue.
+     */
+    const handleStartBatch = useCallback((items: BatchResolvedItem[], formatId: string | null) => {
+        const result = addToQueue(items as any, formatId);
+        setBatchSheetVisible(false);
+        setTimeout(() => setQueuePanelVisible(true), 380);
+        if (result.duplicates > 0) {
+            ToastAndroid.show(
+                `Skipped ${result.duplicates} duplicate link${result.duplicates > 1 ? 's' : ''}`,
+                ToastAndroid.SHORT
+            );
+        }
+    }, [addToQueue]);
+
     const handleDownload = useCallback(async (format: VideoFormat | string, forceTitle?: string, platform?: string) => {
         if (!state.videoInfo) return;
 
@@ -1150,6 +1200,83 @@ let isStoryFetch = false;
             ToastAndroid.show(error?.message || 'Download failed', ToastAndroid.LONG);
         }
     }, [state.videoInfo, actions, detectedPlatform, ytMusicAlbumArtUrl, selectedAudioFormatId]);
+
+    /**
+     * Starts a cut download for the range chosen in the Cut sheet.
+     *
+     * Reuses the normal download path and only adds the in/out seconds, so
+     * cookies, platform detection and metadata naming all behave identically.
+     * The native side trims after the file lands, and publishes only the clip.
+     */
+    const handleCutConfirm = useCallback(
+        async (selection: { start: number; end: number; formatId: string }) => {
+            if (!state.videoInfo) return;
+
+            setCutSheetVisible(false);
+
+            const resolvedPlatform = detectedPlatform || state.videoInfo.platform || null;
+            const cookiesPath = resolvedPlatform
+                ? await CookieManagerService.getCookiesForPlatform(resolvedPlatform)
+                : null;
+
+            // Reflect the chosen output type in the quality list behind the sheet.
+            setAudioOnlyIntent(selection.formatId.startsWith('audio'));
+
+            try {
+                await actions.download(state.videoInfo.url, selection.formatId, {
+                    title: state.videoInfo.title,
+                    artist: state.videoInfo.uploader || 'Unknown',
+                    platform: resolvedPlatform || 'Unknown',
+                    cookies: cookiesPath || undefined,
+                    audioFormatId: selectedAudioFormatId ?? undefined,
+                    cutStart: selection.start,
+                    cutEnd: selection.end,
+                });
+            } catch (error: any) {
+                console.error('Cut download error:', error);
+                ToastAndroid.show(error?.message || 'Cut download failed', ToastAndroid.LONG);
+            }
+        },
+        [state.videoInfo, actions, detectedPlatform, selectedAudioFormatId]
+    );
+
+    /**
+     * Starts recording a live broadcast.
+     *
+     * `maxDurationSeconds` is optional: without it the recording follows the
+     * stream until the user cancels, which is the honest behaviour for a live
+     * feed. `isLive` tells the hook not to apply the normal download timeout,
+     * since the stream is still running rather than slow.
+     */
+    const handleLiveRecord = useCallback(
+        async (maxDurationSeconds: number | undefined) => {
+            if (!state.videoInfo) return;
+
+            const resolvedPlatform = detectedPlatform || state.videoInfo.platform || null;
+            const cookiesPath = resolvedPlatform
+                ? await CookieManagerService.getCookiesForPlatform(resolvedPlatform)
+                : null;
+
+            setLiveRecording(true);
+            setAudioOnlyIntent(false);
+            try {
+                await actions.download(state.videoInfo.url, 'best', {
+                    title: state.videoInfo.title,
+                    artist: state.videoInfo.uploader || 'Unknown',
+                    platform: resolvedPlatform || 'Unknown',
+                    cookies: cookiesPath || undefined,
+                    isLive: true,
+                    maxDurationSeconds,
+                });
+            } catch (error: any) {
+                console.error('Live recording error:', error);
+                ToastAndroid.show(error?.message || 'Recording failed', ToastAndroid.LONG);
+            } finally {
+                setLiveRecording(false);
+            }
+        },
+        [state.videoInfo, actions, detectedPlatform]
+    );
 
     const handleOpenLogin = useCallback(async () => {
         if (!detectedPlatform) return;
@@ -1326,6 +1453,33 @@ let isStoryFetch = false;
                                 }
                             />
                         </View>
+
+                        {/* Batch download: a labelled action next to the field it
+                            relates to. As a bare header icon it was invisible. */}
+                        <TouchableOpacity
+                            style={styles.batchRow}
+                            activeOpacity={0.7}
+                            onPress={() => setBatchSheetVisible(true)}
+                        >
+                            <View style={[styles.batchIconWrap, { backgroundColor: `${platformColor}1F` }]}>
+                                <LayersIcon size={18} color={platformColor} />
+                            </View>
+                            <View style={styles.batchTextWrap}>
+                                <Text style={styles.batchTitle}>Batch Download</Text>
+                                <Text style={styles.batchSubtitle} numberOfLines={1}>
+                                    {queue.length > 0
+                                        ? `${queue.length} in queue${isQueueRunning ? ' · downloading' : isPaused ? ' · paused' : ''}`
+                                        : 'Queue several links at once'}
+                                </Text>
+                            </View>
+                            <View style={styles.batchCta}>
+                                <Text style={[styles.batchCtaText, { color: platformColor }]}>
+                                    {queue.length > 0 ? 'OPEN' : 'START'}
+                                </Text>
+                                <ChevronRightIcon size={14} color={platformColor} />
+                            </View>
+                        </TouchableOpacity>
+
                         {detectedPlatform && ['instagram', 'facebook', 'youtube', 'tiktok', 'twitter', 'x', 'twitch'].includes(detectedPlatform.toLowerCase()) && (
                             <TouchableOpacity 
                                 style={[
@@ -1433,6 +1587,24 @@ let isStoryFetch = false;
                                 onSaveThumbnail={handleSaveThumbnail}
                                 isMusic={isMusicTrack}
                             />
+                            {/* A live broadcast replaces the ordinary download
+                                controls: it has no duration and no end, so the
+                                quality list would be misleading. */}
+                            {state.videoInfo.isLive && (
+                                <>
+                                    <View style={styles.liveBadgeRow}>
+                                        <LiveBadge platformColor={platformColor} />
+                                        <Text style={styles.liveBadgeHint}>
+                                            This channel is live right now
+                                        </Text>
+                                    </View>
+                                    <LiveRecordBar
+                                        platformColor={platformColor}
+                                        onStart={handleLiveRecord}
+                                        recording={liveRecording || state.isDownloading}
+                                    />
+                                </>
+                            )}
                             {ytMusicAlbumArtUrl && (
                                 <View style={styles.albumArtBadge}>
                                     <Text style={styles.albumArtBadgeText}>
@@ -1482,6 +1654,11 @@ let isStoryFetch = false;
                         {/* Animated Skeleton Loading while formats are being resolved */}
                         {state.videoInfo.partial ? (
                             <FormatsSkeleton />
+                        ) : state.videoInfo.isLive ? (
+                            // Live streams are recorded through LiveRecordBar above;
+                            // a quality list and a one-tap download would both
+                            // misrepresent an unbounded stream.
+                            null
                         ) : (
                             <>
 
@@ -1503,6 +1680,27 @@ let isStoryFetch = false;
                                             Quick Download
                                         </Text>
                                     </TouchableOpacity>
+
+                                    {/* Cut & Download — needs a known duration to
+                                        pick a range, so it waits for the full
+                                        metadata instead of the oEmbed preview. */}
+                                    {state.videoInfo.duration > 0 && (
+                                        <TouchableOpacity
+                                            style={[styles.cutBtn, { borderColor: platformColor }]}
+                                            onPress={() => setCutSheetVisible(true)}
+                                            activeOpacity={0.75}
+                                            accessibilityLabel="Cut and download a clip"
+                                        >
+                                            <ScissorsIcon size={18} color={platformColor} />
+                                            <View style={styles.cutBtnTextWrap}>
+                                                <Text style={styles.cutBtnText}>Cut &amp; Download</Text>
+                                                <Text style={styles.cutBtnHint}>
+                                                    Save only part of this {formatDuration(state.videoInfo.duration)}
+                                                </Text>
+                                            </View>
+                                            <ChevronRightIcon size={16} color={Colors.textMuted} />
+                                        </TouchableOpacity>
+                                    )}
                                 </View>
 
                                 <AudioTrackSelector
@@ -1513,10 +1711,11 @@ let isStoryFetch = false;
                                 />
 
                                 <FormatList
-                                    formats={state.videoInfo.formats}
-                                    onSelectFormat={handleDownload}
-                                    platformColor={platformColor}
-                                />
+formats={state.videoInfo.formats}
+    onSelectFormat={handleDownload}
+    platformColor={platformColor}
+    platform={detectedPlatform ?? state.videoInfo.platform}
+    />
                             </>
                         )}
                     </>
@@ -1572,13 +1771,42 @@ let isStoryFetch = false;
                 onClose={() => setQueuePanelVisible(false)}
                 queue={queue}
                 isRunning={isQueueRunning}
+                isPaused={isPaused}
                 totalDone={totalDone}
                 totalFailed={totalFailed}
+                overallPercent={stats.overallPercent}
                 platformColor={platformColor}
                 onCancelItem={cancelItem}
                 onCancelAll={cancelAll}
                 onClearQueue={clearQueue}
+                onRetryItem={retryItem}
                 onRetryFailed={retryFailed}
+                onPause={pause}
+                onResume={resume}
+            />
+
+            {/* The hook sets this when a requested trim fails but a usable
+                full-length file was still saved, so surface it instead of
+                leaving it in state where nobody can see it. */}
+            {state.cutWarning && (
+                <View style={styles.cutWarningBanner}>
+                    <WarningIcon size={16} color={Colors.warning} />
+                    <Text style={styles.cutWarningText}>{state.cutWarning}</Text>
+                </View>
+            )}
+
+            <BatchDownloadSheet
+                visible={batchSheetVisible}
+                onClose={() => setBatchSheetVisible(false)}
+                onStart={handleStartBatch}
+            />
+
+            <CutDownloadSheet
+                visible={cutSheetVisible}
+                videoInfo={state.videoInfo}
+                initialFormatId={selectedAudioFormatId}
+                onClose={() => setCutSheetVisible(false)}
+                onConfirm={handleCutConfirm}
             />
         </SafeAreaView>
     );
@@ -1634,6 +1862,52 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: '#252528',
     },
+    batchRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        marginTop: 10,
+        paddingVertical: 11,
+        paddingHorizontal: 12,
+        borderRadius: 16,
+        backgroundColor: '#161618',
+        borderWidth: 1,
+        borderColor: '#252528',
+    },
+    batchRowPressed: {
+        opacity: 0.7,
+        transform: [{ scale: 0.995 }],
+    },
+    batchIconWrap: {
+        width: 34,
+        height: 34,
+        borderRadius: 11,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    batchTextWrap: { flex: 1 },
+    batchTitle: {
+        color: Colors.textPrimary,
+        fontSize: 14,
+        fontWeight: '700',
+        letterSpacing: -0.1,
+    },
+    batchSubtitle: {
+        color: Colors.textMuted,
+        fontSize: 11.5,
+        marginTop: 1,
+    },
+    batchCta: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 3,
+        paddingLeft: 8,
+    },
+    batchCtaText: {
+        fontSize: 11,
+        fontWeight: '800',
+        letterSpacing: 0.6,
+    },
     tagline: {
         color: Colors.textMuted,
         fontSize: 14,
@@ -1668,11 +1942,33 @@ const styles = StyleSheet.create({
         shadowRadius: 12,
         elevation: 8,
     },
-    quickDownloadText: {
-        color: '#FFF',
-        fontSize: 16,
-        fontWeight: '700',
-        letterSpacing: 0.3,
+quickDownloadText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    },
+    cutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+    borderRadius: 16,
+    backgroundColor: Colors.surfaceElevated,
+    borderWidth: 1,
+    },
+    cutBtnTextWrap: { flex: 1 },
+    cutBtnText: {
+    color: Colors.textPrimary,
+    fontSize: Typography.sizes.sm,
+    fontWeight: '700',
+    },
+    cutBtnHint: {
+    color: Colors.textMuted,
+    fontSize: Typography.sizes.xxs,
+    marginTop: 2,
     },
     // ── Error ──
     errorContainer: {
@@ -1699,9 +1995,38 @@ const styles = StyleSheet.create({
     progressSection: {
         marginTop: Spacing.lg,
     },
-    videoSection: {
-        marginTop: Spacing.xl,
+videoSection: {
+marginTop: Spacing.xl,
+marginHorizontal: Spacing.md,
+    },
+    liveBadgeRow: {
+flexDirection: 'row',
+alignItems: 'center',
+gap: Spacing.sm,
+marginHorizontal: Spacing.md,
+marginTop: Spacing.sm,
+    },
+    liveBadgeHint: {
+fontSize: Typography.sizes.xs,
+color: Colors.textMuted,
+    },
+    cutWarningBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
         marginHorizontal: Spacing.md,
+        marginTop: Spacing.sm,
+        padding: Spacing.sm,
+        borderRadius: BorderRadius.md,
+        backgroundColor: `${Colors.warning}1A`,
+        borderWidth: 1,
+        borderColor: `${Colors.warning}44`,
+    },
+    cutWarningText: {
+        flex: 1,
+        fontSize: Typography.sizes.xs,
+        color: Colors.textSecondary,
+        lineHeight: 17,
     },
     lyricsLoadingCard: {
         marginHorizontal: Spacing.md,

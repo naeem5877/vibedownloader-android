@@ -126,6 +126,19 @@ fun JsonObject.num(key: String): Double? {
     }
 }
 
+/** Boolean value, or `null` when absent. Handles the `"true"`/`1` spellings too. */
+fun JsonObject.bool(key: String): Boolean? {
+  val el = get(key) ?: return null
+  if (!el.isJsonPrimitive) return null
+  val primitive = el.asJsonPrimitive
+  return when {
+    primitive.isBoolean -> primitive.asBoolean
+    primitive.isNumber -> primitive.asDouble != 0.0
+    primitive.isString -> primitive.asString.trim().toBooleanStrictOrNull()
+    else -> null
+  }
+}
+
 /** The `live_chat` pseudo-track is a chat log, not a subtitle of the audio. */
 private fun isRealCaptionLang(lang: String): Boolean =
     !lang.contains("live_chat", ignoreCase = true)

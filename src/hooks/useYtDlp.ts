@@ -19,11 +19,41 @@ interface UseYtDlpState {
     downloadLine: string;
     fetchError: string | null;
     downloadError: string | null;
+    /**
+     * Set when a cut range was requested but could not be applied, so the caller
+     * can tell the user the untrimmed file was saved rather than failing.
+     */
+    cutWarning: string | null;
+}
+
+/** Optional per-download tuning passed straight through to the native module. */
+export interface YtDlpDownloadOptions {
+    title?: string;
+    artist?: string;
+    platform?: string;
+    cookies?: string;
+    thumbnailPath?: string;
+    audioFormatId?: string;
+    /** In-point in seconds; requires `cutEnd`. Cut to `[cutStart, cutEnd)`. */
+    cutStart?: number;
+    /** Out-point in seconds; requires `cutStart > 0` or an explicit in-point. */
+    cutEnd?: number;
+    /**
+     * Stop a live recording after this many seconds. Left unset the recording
+     * runs until cancelled, which is what a live stream needs since it has no
+     * natural end.
+     */
+    maxDurationSeconds?: number;
+    /**
+     * Set for live broadcasts so the normal download timeout is not applied to
+     * a stream that is still running on purpose.
+     */
+    isLive?: boolean;
 }
 
 export interface UseYtDlpActions {
     fetchInfo: (url: string, options?: { cookies?: string; args?: string[] }) => Promise<void>;
-    download: (url: string, formatId: string | null, options?: { title?: string; artist?: string; platform?: string; cookies?: string; thumbnailPath?: string; audioFormatId?: string }) => Promise<DownloadResult | null>;
+    download: (url: string, formatId: string | null, options?: YtDlpDownloadOptions) => Promise<DownloadResult | null>;
     downloadSpotifyTrack: (searchQuery: string, title: string, artist: string, album: string, thumbnail: string | null) => Promise<DownloadResult | null>;
     cancelDownload: () => Promise<void>;
     validateUrl: (url: string) => Promise<ValidationResult>;
@@ -45,6 +75,7 @@ const initialState: UseYtDlpState = {
     downloadLine: '',
     fetchError: null,
     downloadError: null,
+    cutWarning: null,
 };
 
 // A refetch of the same URL (duplicate share intents, going back and forward)
@@ -156,7 +187,8 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
             isLoading: true,
             fetchError: null,
             videoInfo: null,
-            downloadError: null
+            downloadError: null,
+            cutWarning: null
         }));
 
         // Paint the card from the cheap oEmbed lookup while the real extraction
@@ -230,9 +262,13 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
     }, []);
 
     const download = useCallback(
-        async (url: string, formatId: string | null, options?: { title?: string; artist?: string; platform?: string; cookies?: string; thumbnailPath?: string; audioFormatId?: string }) => {
+        async (url: string, formatId: string | null, options?: YtDlpDownloadOptions) => {
             const processId = generateProcessId();
             processIdRef.current = processId;
+
+            const isCut = typeof options?.cutStart === 'number' && typeof options?.cutEnd === 'number';
+            const requestedRange =
+                isCut ? ` (cut ${(options!.cutStart! as number).toFixed(1)}-${(options!.cutEnd! as number).toFixed(1)}s)` : '';
 
             setState((prev) => ({
                 ...prev,
@@ -241,20 +277,37 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 downloadEta: 0,
                 downloadLine: 'Preparing download...',
                 downloadError: null,
+                cutWarning: null,
             }));
 
-            // Overall timeout (5 minutes max for any download)
-            const downloadTimeout = setTimeout(() => {
-                console.warn('Download hard timeout reached (5 min)');
-                if (YtDlpNative?.cancelDownload) {
-                    YtDlpNative.cancelDownload(processId).catch(() => { });
-                }
-                setState((prev) => ({
-                    ...prev,
-                    isDownloading: false,
-                    downloadError: 'Download timed out. The server may be slow or the file is too large.',
-                }));
-            }, 300000); // 5 minutes
+// Overall timeout (5 minutes max for any download). A cut gets a much
+      // longer budget because it is a post-process that may fall back from a
+      // fast stream copy to a full re-encode after the download has finished.
+      //
+      // A live stream deliberately has no timeout: it is still running, so
+      // there is no "slow server" to give up on. It ends when the user cancels,
+      // or on its own when a maxDurationSeconds cap was set.
+      const timeoutMs = isCut
+        ? 45 * 60 * 1000
+        : options?.isLive
+          ? null
+          : 300000;
+      const downloadTimeout =
+          timeoutMs === null
+              ? null
+              : setTimeout(() => {
+                  console.warn(`Download hard timeout reached${requestedRange}`);
+                  if (YtDlpNative?.cancelDownload) {
+                      YtDlpNative.cancelDownload(processId).catch(() => { });
+                  }
+                  setState((prev) => ({
+                      ...prev,
+                      isDownloading: false,
+                      downloadError: isCut
+                          ? 'Timed out while preparing your clip. The clip is cut after the full file downloads, so very long videos can take a while.'
+                          : 'Download timed out. The server may be slow or the file is too large.',
+                  }));
+              }, timeoutMs);
 
             try {
                 if (!YtDlpNative || !YtDlpNative.download) {
@@ -262,11 +315,21 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 }
 
                 const result = await YtDlpNative.download(url, formatId, processId, options);
-                clearTimeout(downloadTimeout);
-                setState((prev) => ({ ...prev, isDownloading: false, downloadProgress: 100 }));
+        if (downloadTimeout !== null) clearTimeout(downloadTimeout);
+                setState((prev) => ({
+                    ...prev,
+                    isDownloading: false,
+                    downloadProgress: 100,
+                    // A requested cut that did not apply still leaves a usable
+                    // download, so warn instead of reporting a failure.
+                    cutWarning:
+                        isCut && result?.cutApplied === false
+                            ? 'The clip could not be trimmed, so the full video was saved instead.'
+                            : null,
+                }));
                 return result;
             } catch (error: any) {
-                clearTimeout(downloadTimeout);
+                if (downloadTimeout !== null) clearTimeout(downloadTimeout);
                 if (error.code === 'CANCELLED') {
                     setState((prev) => ({ ...prev, isDownloading: false }));
                     return null;
@@ -298,9 +361,10 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 isDownloading: true,
                 downloadProgress: 0,
                 downloadEta: 0,
-                downloadLine: 'Searching for track...',
-                downloadError: null,
-            }));
+downloadLine: 'Searching for track...',
+                  downloadError: null,
+                  cutWarning: null,
+              }));
  
             // Overall timeout (5 minutes)
             const downloadTimeout = setTimeout(() => {
@@ -375,11 +439,12 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
     const reset = useCallback(() => {
         setState(prev => ({
             ...prev,
-            videoInfo: null,
-            fetchError: null,
-            downloadError: null,
-            isDownloading: false
-        }));
+videoInfo: null,
+              fetchError: null,
+              downloadError: null,
+              cutWarning: null,
+              isDownloading: false
+          }));
     }, []);
 
     const checkSharedText = useCallback(async (): Promise<string | null> => {
@@ -436,7 +501,8 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
             videoInfo: info,
             isLoading: false,
             fetchError: null,
-            downloadError: null
+            downloadError: null,
+            cutWarning: null
         }));
     }, []);
 

@@ -87,7 +87,12 @@ export interface VideoInfo {
      * audio tracks are still loading, so download controls must stay hidden.
      */
     partial?: boolean;
-    artist?: string;
+    /**
+     * True for a live broadcast. A live stream has no known duration and never
+     * ends on its own, so downloads must not be cut short by a normal timeout.
+     */
+    isLive?: boolean;
+  artist?: string;
     track?: string;
     isMusic?: boolean;
     categories?: string[];
@@ -120,11 +125,16 @@ export interface DownloadProgress {
 }
 
 export interface DownloadResult {
-    processId: string;
-    outputDir: string;
-    exitCode: number;
-    output: string;
-}
+      processId: string;
+      outputDir: string;
+      exitCode: number;
+      output: string;
+      /**
+       * False only when a cut range was requested but could not be applied, in
+       * which case `filePath` holds the untrimmed file.
+       */
+      cutApplied?: boolean;
+  }
 
 export interface DownloadedFile {
     name: string;
@@ -160,7 +170,20 @@ export interface YtDlpNativeModule {
   isFfmpegAvailable(): Promise<boolean>;
   /** Reads a UTF-8 text file (lyrics/subtitles) for the in-app viewer. */
   readTextFile(filePath: string): Promise<string>;
-    download(url: string, formatId: string | null, processId: string, options?: { title?: string; artist?: string; platform?: string; cookies?: string; thumbnailPath?: string; audioFormatId?: string }): Promise<DownloadResult>;
+    /**
+     * Downloads `url`, optionally trimming the finished file to the half-open
+     * second range `[cutStart, cutEnd)`.
+     *
+     * The cut is a post-process (ffmpeg `-ss`/`-t`), not `--download-sections`,
+     * so the whole media is fetched first and only the trimmed copy is published.
+     * Requires `isFfmpegAvailable()`; when ffmpeg cannot run the full file is
+     * saved and `cutApplied` comes back false. Stream copy snaps the in-point to
+     * the nearest keyframe unless the copy attempt fails and it re-encodes.
+     *
+     * `maxDurationSeconds` caps a live recording so it stops after that long
+     * instead of following the stream forever. Requires ffmpeg as well.
+     */
+    download(url: string, formatId: string | null, processId: string, options?: { title?: string; artist?: string; platform?: string; cookies?: string; thumbnailPath?: string; audioFormatId?: string; cutStart?: number; cutEnd?: number; maxDurationSeconds?: number }): Promise<DownloadResult>;
     /**
      * Downloads one caption track and publishes it to
      * Download/VibeDownloader/<Platform>/Subtitles.

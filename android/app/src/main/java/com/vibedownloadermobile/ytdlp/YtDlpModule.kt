@@ -34,6 +34,7 @@ import java.io.FileOutputStream
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.Locale
 
 class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
 
@@ -64,9 +65,12 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
             "spotify.com", "open.spotify.com",
             "tidal.com", "listen.tidal.com", "store.tidal.com",
             "twitter.com", "x.com", "mobile.twitter.com",
-            "pinterest.com", "pin.it", "www.pinterest.com",
-            "soundcloud.com", "www.soundcloud.com", "m.soundcloud.com"
-        )
+"pinterest.com", "pin.it", "www.pinterest.com",
+  "soundcloud.com", "www.soundcloud.com", "m.soundcloud.com",
+  // Twitch. clips.twitch.tv serves the clip short links, m.twitch.tv the
+  // mobile site, and player.twitch.tv the embedded player URLs.
+  "twitch.tv", "www.twitch.tv", "m.twitch.tv", "clips.twitch.tv", "player.twitch.tv"
+  )
 
         private val SHORT_PATTERNS = listOf(
             "/shorts/", "/reel/", "/reels/", "/short/", "vm.tiktok.com"
@@ -145,6 +149,18 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     @Volatile
     private var ffmpegProbed = false
 
+    @Volatile
+    private var ffmpegRuns: Boolean? = null
+
+    /**
+     * Locates the ffmpeg executable that ships inside the APK.
+     *
+     * Only a positive result is cached. The binary arrives as a zip in
+     * `libffmpeg.zip.so` that `FFmpeg.init()` unpacks in `Application.onCreate`,
+     * so an early call can legitimately find nothing yet; remembering that miss
+     * would report ffmpeg as missing for the rest of the process and read to
+     * the user as "ffmpeg is not installed".
+     */
     private fun ffmpegBinary(): File? {
         if (ffmpegProbed) return ffmpegProbe?.let { File(it) }
         val nativeDir = reactApplicationContext.applicationInfo.nativeLibraryDir
@@ -156,18 +172,19 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
             File(base, "ffmpeg"),
         )
         val found = candidates.firstOrNull { it.isFile && isExecutable(it) }
-        ffmpegProbe = found?.absolutePath
-        ffmpegProbed = true
         if (found != null) {
-            Log.d(TAG, "FFmpeg binary: ${found.absolutePath}")
+            ffmpegProbe = found.absolutePath
+            ffmpegProbed = true
+            Log.d(TAG, "FFmpeg binary (bundled in app): ${found.absolutePath}")
         } else {
-            Log.w(TAG, "No runnable ffmpeg found; postprocessing will be unavailable")
+            Log.w(TAG, "Bundled ffmpeg not unpacked yet; will re-probe")
         }
         return found
     }
 
     /** True when the bundled binaries can actually be executed on this device. */
     fun isFfmpegAvailable(): Boolean {
+        ffmpegRuns?.let { return it }
         val binary = ffmpegBinary() ?: return false
         return try {
             val nativeDir = reactApplicationContext.applicationInfo.nativeLibraryDir
@@ -191,13 +208,180 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         } catch (e: Exception) {
             Log.w(TAG, "ffmpeg probe failed: ${e.message}")
             false
-        }
+        }.also { ffmpegRuns = it }
     }
 
 private fun isExecutable(file: File): Boolean = try {
         file.canExecute() || file.setExecutable(true, true)
     } catch (e: Exception) {
         false
+    }
+
+    // ---------------------------------------------------------------------
+    // Clip cutting
+    //
+    // The desktop app cuts by post-processing the finished file with ffmpeg
+    // rather than asking yt-dlp for a byte range (`--download-sections` also
+    // shells out to ffmpeg, and it forfeits the direct-CDN fast path). This is
+    // the same two-step strategy: stream copy first, and only re-encode when
+    // the copy fails, which happens whenever the in/out points do not land on
+    // keyframe boundaries.
+    // ---------------------------------------------------------------------
+
+    /** ffmpeg subprocesses currently cutting, so cancelDownload() can kill them. */
+    private val activeCutProcesses = ConcurrentHashMap<String, Process>()
+
+    private val CUT_TIMEOUT_MINUTES = 30L
+
+    /** Formats that carry no video track, so the re-encode must not force one. */
+    private val AUDIO_ONLY_EXT = setOf("mp3", "m4a", "aac", "opus", "ogg", "wav", "flac")
+
+    /**
+     * Formats a timestamp the way ffmpeg parses it: `H:MM:SS.cc`, two decimals
+     * (10 ms resolution, the same precision the desktop app passes).
+     */
+    private fun fmtSec(seconds: Double): String {
+        val safe = if (seconds.isFinite() && seconds > 0) seconds else 0.0
+        val h = Math.floor(safe / 3600)
+        val m = Math.floor((safe % 3600) / 60)
+        val sec = (safe % 60)
+        return String.format(Locale.US, "%d:%02d:%06.3f", h.toInt(), m.toInt(), sec)
+    }
+
+    /**
+     * Runs the bundled ffmpeg with the same library search path the availability
+     * probe uses, returning the exit code, or null when it could not be run.
+     *
+     * [processId] registers the process so a user-initiated cancel can destroy
+     * it, and [isCancelled] aborts a cut that was cancelled mid-flight.
+     */
+    private fun runFfmpeg(
+        args: List<String>,
+        processId: String,
+        isCancelled: AtomicBoolean
+    ): Int? {
+        val binary = ffmpegBinary() ?: return null
+        return try {
+            val nativeDir = reactApplicationContext.applicationInfo.nativeLibraryDir
+            val unpackedLibs = File(
+                reactApplicationContext.noBackupFilesDir,
+                "youtubedl-android/packages/ffmpeg/usr/lib"
+            ).absolutePath
+            val builder = ProcessBuilder(listOf(binary.absolutePath) + args)
+                .redirectErrorStream(true)
+            builder.environment()["LD_LIBRARY_PATH"] = "$unpackedLibs:$nativeDir"
+
+            val process = builder.start()
+            activeCutProcesses[processId] = process
+            try {
+                // Drain stdout so ffmpeg never blocks on a full pipe buffer.
+                val output = process.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+                val finished = process.waitFor(CUT_TIMEOUT_MINUTES, java.util.concurrent.TimeUnit.MINUTES)
+                if (!finished) {
+                    process.destroyForcibly()
+                    Log.w(TAG, "ffmpeg cut timed out after $CUT_TIMEOUT_MINUTES minutes")
+                    return null
+                }
+                val code = process.exitValue()
+                if (code != 0) {
+                    Log.w(TAG, "ffmpeg exited $code: ${output.take(400)}")
+                }
+                code
+            } finally {
+                activeCutProcesses.remove(processId)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "ffmpeg cut failed to run", e)
+            null
+        }
+    }
+
+    /**
+     * Cuts [source] to the half-open range [start, end) and returns the new file.
+     *
+     * Tries a stream copy first (`-c copy`), which is near-instant but snaps the
+     * in-point back to the nearest keyframe, then falls back to a real H.264 /
+     * AAC re-encode for exact boundaries. Returns null if both attempts fail, in
+     * which case the caller keeps the full-length file.
+     */
+    private fun cutMediaFile(
+        source: File,
+        start: Double,
+        end: Double,
+        processId: String,
+        isCancelled: AtomicBoolean
+    ): File? {
+        if (!source.exists()) return null
+        val clipDuration = end - start
+        if (clipDuration <= 0) return null
+
+        val ext = source.extension.ifEmpty { "mp4" }
+        // The range is baked into the name so the published file is identifiable,
+        // matching the desktop app's `_cut_<start>-<end>` suffix.
+        val outFile = File(
+            source.parentFile,
+            "${source.nameWithoutExtension}_cut_${Math.round(start)}-${Math.round(end)}.$ext"
+        )
+        if (outFile.exists() && !outFile.delete()) {
+            Log.w(TAG, "Could not replace existing cut file ${outFile.name}")
+            return null
+        }
+
+        val audioOnly = ext.lowercase() in AUDIO_ONLY_EXT
+        val startArg = fmtSec(start)
+        val durationArg = fmtSec(clipDuration)
+
+        // Attempt 1: stream copy. Fast and lossless, boundaries snap to keyframes.
+        // No faststart here: -c copy already remuxes, and forcing a second
+        // pass would defeat the point of the copy path. Desktop behaves the same.
+        val copyArgs = listOf(
+            "-hide_banner", "-loglevel", "error", "-y",
+            "-ss", startArg, "-i", source.absolutePath,
+            "-t", durationArg,
+            "-c", "copy",
+            "-avoid_negative_ts", "make_zero",
+            outFile.absolutePath
+        )
+        if (runFfmpeg(copyArgs, processId, isCancelled) == 0 && outFile.exists() && outFile.length() > 0) {
+            return outFile
+        }
+        outFile.delete()
+
+        if (isCancelled.get()) return null
+
+        // Attempt 2: re-encode. Exact boundaries, far slower.
+        val reencode = mutableListOf(
+            "-hide_banner", "-loglevel", "error", "-y",
+            "-ss", startArg, "-i", source.absolutePath,
+            "-t", durationArg
+        )
+        val faststartTarget = ext.equals("mp4", true) || ext.equals("mov", true)
+        if (audioOnly) {
+            // Only m4a can hold AAC; for mp3/opus/ogg/wav/flac let ffmpeg pick
+            // the container's own default codec. Forcing AAC into an .mp3
+            // produces an unplayable file.
+            if (ext.equals("m4a", true)) {
+                reencode.addAll(listOf("-c:a", "aac", "-b:a", "192k"))
+                reencode.addAll(listOf("-movflags", "+faststart"))
+            }
+        } else {
+            reencode.addAll(
+                listOf(
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                    "-c:a", "aac", "-b:a", "192k",
+                    "-pix_fmt", "yuv420p"
+                )
+            )
+            if (faststartTarget) reencode.addAll(listOf("-movflags", "+faststart"))
+        }
+        reencode.add(outFile.absolutePath)
+
+        if (runFfmpeg(reencode.toList(), processId, isCancelled) == 0 && outFile.exists() && outFile.length() > 0) {
+            return outFile
+        }
+        outFile.delete()
+        Log.w(TAG, "Cut failed for ${source.name}; keeping the full-length file")
+        return null
     }
 
      /**
@@ -521,8 +705,9 @@ fun fetchQuickInfo(url: String, promise: Promise) {
                 host.contains("spotify") -> "Spotify"
                 host.contains("twitter") || host.contains("x.com") -> "X"
                 host.contains("pinterest") || host.contains("pin.it") -> "Pinterest"
-                host.contains("soundcloud") -> "SoundCloud"
-                else -> "Unknown"
+host.contains("soundcloud") -> "SoundCloud"
+  host.contains("twitch.tv") -> "Twitch"
+  else -> "Unknown"
             }
         } catch (e: Exception) {
             "Unknown"
@@ -959,10 +1144,22 @@ fun fetchQuickInfo(url: String, promise: Promise) {
                         request.addOption("--referer", "https://www.instagram.com/")
                     }
                     
-                    if (options?.hasKey("cookies") == true) {
-                        val cookiesPath = options.getString("cookies")
-                        if (!cookiesPath.isNullOrEmpty()) request.addOption("--cookies", cookiesPath)
-                    }
+if (options?.hasKey("cookies") == true) {
+  val cookiesPath = options.getString("cookies")
+  if (!cookiesPath.isNullOrEmpty()) request.addOption("--cookies", cookiesPath)
+}
+
+  // Optional cap for recording a live broadcast. A live stream has no end, so
+  // without this it records until the user cancels. This fetches only the
+  // leading window rather than following the playlist forever, and needs ffmpeg
+  // to cut the assembled stream (already guaranteed for Twitch).
+  val maxDurationSeconds = if (options?.hasKey("maxDurationSeconds") == true) {
+    options.getDouble("maxDurationSeconds")
+  } else null
+  if (maxDurationSeconds != null && maxDurationSeconds > 0 && maxDurationSeconds.isFinite()) {
+    request.addOption("--download-sections", "*0-${fmtSec(maxDurationSeconds)}")
+    request.addOption("--force-keyframes-at-cuts")
+  }
                     
                     if (options?.hasKey("args") == true) {
                         val extraArgs = options.getArray("args")
@@ -1062,9 +1259,15 @@ fun fetchQuickInfo(url: String, promise: Promise) {
                     putDouble("viewCount", raw.num("view_count") ?: 0.0)
                     putDouble("likeCount", raw.num("like_count") ?: 0.0)
                     putString("uploadDate", raw.str("upload_date"))
-                    putString("extractor", raw.str("extractor"))
-                    putString("url", url)
-                    putString("platform", platform)
+putString("extractor", raw.str("extractor"))
+  putString("url", url)
+  putString("platform", platform)
+  // Live broadcasts have no known duration (0 or absent) and report a
+  // live_status. Twitch reports "is_live"; treat any non-"not_live"/absent
+  // status as live so recording is not treated as an unbounded VOD.
+  val liveStatus = raw.str("live_status")
+  putBoolean("isLive", raw.bool("is_live") == true ||
+    (liveStatus.isNotBlank() && liveStatus != "not_live" && liveStatus != "was_live"))
                     putString("ext", raw.str("ext").ifBlank { "mp4" })
                     putDouble("filesize", 0.0)
                     putString("resolution", "")
@@ -1733,6 +1936,20 @@ private fun publishSidecarFile(
                 } else {
                     null
                 }?.takeIf { it.isNotBlank() }
+
+                // Optional clip range in seconds, from the Cut & Download sheet.
+                // Cutting is a post-process, so this is deliberately NOT passed to
+                // yt-dlp as --download-sections: that would download only the
+                // requested range and skip the direct-CDN fast path entirely.
+                // Both bounds must be present and ordered, otherwise no cut runs.
+                val requestedCutStart = if (options?.hasKey("cutStart") == true) {
+                    if (options.getType("cutStart") == ReadableType.Number) options.getDouble("cutStart") else null
+                } else null
+                val requestedCutEnd = if (options?.hasKey("cutEnd") == true) {
+                    if (options.getType("cutEnd") == ReadableType.Number) options.getDouble("cutEnd") else null
+                } else null
+val isCutDownload = requestedCutStart != null && requestedCutEnd != null &&
+      requestedCutEnd > requestedCutStart
                 
                 // Determine platform (use forced if provided, e.g. for Spotify lossless)
                 val platform = forcedPlatform ?: getPlatformName(url)
@@ -1795,7 +2012,7 @@ private fun publishSidecarFile(
                 
                 // --- Format and Codec Selection ---
                 val isAudioDownload = formatId?.startsWith("audio") == true || formatId == "audio_best" || formatId == "audio_mp3"
-                
+
                 val ffmpegLoc = getFFmpegLocation()
                 if (ffmpegLoc != null) {
                     request.addOption("--ffmpeg-location", ffmpegLoc)
@@ -1803,6 +2020,28 @@ private fun publishSidecarFile(
                 val ffmpegAvailable = ffmpegLoc != null && isFfmpegAvailable()
                 if (!ffmpegAvailable) {
                     Log.w(TAG, "Downloading without postprocessing: bundled ffmpeg cannot run here")
+                }
+
+                // Twitch is the one platform that cannot degrade gracefully
+                // without ffmpeg: every VOD and clip is DASH with separate
+                // video-only and audio-only tracks, and there is no progressive
+                // fallback to take instead. Without a merge the user would get a
+                // video file with no sound that looks like a successful download,
+                // so refuse up front instead.
+                // `platform` can arrive from JS as either "Twitch" or "twitch",
+                // so compare case-insensitively; otherwise the ffmpeg guard below
+                // silently gets skipped and Twitch returns a video with no sound.
+                val isTwitch = platform.equals("Twitch", ignoreCase = true)
+                if (isTwitch && !ffmpegAvailable) {
+                    Log.e(TAG, "Twitch needs ffmpeg to merge its separate audio/video tracks")
+                    promise.reject(
+"FFMPEG_REQUIRED",
+                    "Twitch videos are split into separate audio and video streams, which must be merged. " +
+                        "This app already includes ffmpeg for that, but it cannot start on this device."
+                    )
+                    activeDownloads.remove(processId)
+                    updateServiceState()
+                    return@launch
                 }
 
                 if (!formatId.isNullOrEmpty()) {
@@ -1858,24 +2097,41 @@ private fun publishSidecarFile(
                             request.addOption("-x")
                             request.addOption("--audio-format", "mp3")
                         }
-                        else -> {
-                            // Video format - ensure MP4 container
-                            if (url.contains("youtube.com") || url.contains("youtu.be")) {
-                                // tv_embedded is skipped by yt-dlp and web is
-                                // SABR-only; web_embedded is the one that resolves.
-                                request.addOption("--extractor-args", "youtube:player_client=web_embedded")
-                            }
-                            // Pair the chosen video with the chosen audio language;
-                            // plain bestaudio would hand back the original track.
-                            request.addOption("-f", "$formatId+${audioFormatId ?: "bestaudio"}/best")
+else -> {
+      // Video format - ensure MP4 container
+      if (url.contains("youtube.com") || url.contains("youtu.be")) {
+        // tv_embedded is skipped by yt-dlp and web is SABR-only;
+        // web_embedded is the one that resolves.
+        request.addOption("--extractor-args", "youtube:player_client=web_embedded")
+      }
+      if (isTwitch) {
+        // Twitch quality ids are bare names ("1080p60", "720p60", "audio_only")
+        // and there is no per-language audio track to honour, so pair the chosen
+        // rung with the single audio track and merge the two.
+        request.addOption("-f", "$formatId+bestaudio/best")
+      } else {
+        // Pair the chosen video with the chosen audio language;
+        // plain bestaudio would hand back the original track.
+        request.addOption("-f", "$formatId+${audioFormatId ?: "bestaudio"}/best")
+      }
+      request.addOption("--merge-output-format", "mp4")
+   }
+ }
+ }
+} else {
+                    // Smart defaults based on platform. Twitch is matched on the
+                    // case-insensitive `isTwitch` flag rather than as a `when`
+                    // label so a lowercase "twitch" from JS still merges.
+                    when {
+                        isTwitch -> {
+                            // Twitch has no progressive stream: the best video and
+                            // the audio track are always separate DASH streams, so
+                            // both must be requested and merged. The no-ffmpeg case
+                            // already rejected above, so this always merges.
+                            request.addOption("-f", "bestvideo+bestaudio/best")
                             request.addOption("--merge-output-format", "mp4")
                         }
-                     }
-                    }
-                } else {
-                    // Smart defaults based on platform
-                    when (platform) {
-                        "YouTube" -> {
+                        platform.equals("YouTube", ignoreCase = true) -> {
                             // tv_embedded is skipped by yt-dlp and web is SABR-only,
                             // so web_embedded is the client that still resolves streams.
                             request.addOption("--extractor-args", "youtube:player_client=web_embedded")
@@ -1888,15 +2144,16 @@ private fun publishSidecarFile(
                                 request.addOption("-f", "best[ext=mp4]/best")
                             }
                         }
-                        "Spotify", "SoundCloud" -> {
-                            if (ffmpegAvailable) {
-                                request.addOption("-x")
-                                request.addOption("--audio-format", "mp3")
-                                request.addOption("--audio-quality", "0")
-                            } else {
-                                request.addOption("-f", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best")
-                            }
-                        }
+platform.equals("Spotify", ignoreCase = true) ||
+                            platform.equals("SoundCloud", ignoreCase = true) -> {
+    if (ffmpegAvailable) {
+      request.addOption("-x")
+      request.addOption("--audio-format", "mp3")
+      request.addOption("--audio-quality", "0")
+    } else {
+      request.addOption("-f", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best")
+    }
+   }
                         else -> {
                             request.addOption("-f", "best[ext=mp4]/best")
                             if (ffmpegAvailable) {
@@ -2067,6 +2324,56 @@ private fun publishSidecarFile(
                         }
                     }
 
+                    // --- Clip cut (Cut & Download) ---
+                    // Runs after the download and any album-art work so the cut
+                    // keeps the finished container, and before publishing so only
+                    // the trimmed file ever reaches MediaStore. A failure keeps the
+                    // full-length file and flags the result instead of discarding a
+                    // download the user already paid for.
+                    var cutApplied = false
+                    if (isCutDownload) {
+                        val cutStartSec = requestedCutStart!!
+                        val cutEndSec = requestedCutEnd!!
+                        if (isCancelled.get()) {
+                            cacheDir.deleteRecursively()
+                            withContext(Dispatchers.Main) { promise.reject("CANCELLED", "Download was cancelled") }
+                            return@launch
+                        }
+                        if (!isFfmpegAvailable()) {
+                            Log.w(TAG, "Cut requested but ffmpeg cannot run on this device; keeping full file")
+                        } else {
+                            val cutParams = WritableNativeMap().apply {
+                                putString("processId", processId)
+                                putDouble("progress", 95.0)
+                                putDouble("eta", 0.0)
+                                putString("line", "Cutting segment...")
+                            }
+                            sendEvent("onDownloadProgress", cutParams)
+                            showProgressNotification(
+                                processId,
+                                forcedTitle ?: "Cutting segment...",
+                                95,
+                                "Cutting segment..."
+                            )
+
+                            val cutFile = cutMediaFile(
+                                finalProcessingFile,
+                                cutStartSec,
+                                cutEndSec,
+                                processId,
+                                isCancelled
+                            )
+                            if (cutFile != null) {
+                                cutApplied = true
+                                // The range is already in the cut filename; drop the
+                                // full-length original now that it is superseded.
+                                try { finalProcessingFile.delete() } catch (e: Exception) {}
+                                finalProcessingFile = cutFile
+                                Log.d(TAG, "Cut saved: ${cutFile.name}")
+                            }
+                        }
+                    }
+
                     // Move to public storage with proper categorization
                     val contentType = getContentType(url, platform)
                     val finalFile = moveToPublicStorage(finalProcessingFile, platform, contentType)
@@ -2118,6 +2425,9 @@ private fun publishSidecarFile(
                             putString("fileName", finalFile.name)
                             putString("platform", platform)
                             putInt("exitCode", 0) // Important: UI expects exitCode 0 to show success
+                            // False when a cut was asked for but could not be applied, so
+                            // the UI can say the full video was saved instead of failing.
+                            putBoolean("cutApplied", cutApplied)
                         }
                         
                         showDownloadNotification(finalFile.name, finalFile.absolutePath, platform)
@@ -2498,9 +2808,19 @@ private fun publishSidecarFile(
     }
 
     @ReactMethod
-    fun cancelDownload(processId: String, promise: Promise) {
-        val isCancelled = activeDownloads[processId]
-        if (isCancelled != null) {
+fun cancelDownload(processId: String, promise: Promise) {
+          val isCancelled = activeDownloads[processId]
+          // A cut runs after yt-dlp has exited, so destroying the yt-dlp process
+          // alone would leave ffmpeg churning on a file the user abandoned.
+          activeCutProcesses.remove(processId)?.let { process ->
+              try {
+                  process.destroy()
+                  if (!process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) process.destroyForcibly()
+              } catch (e: Exception) {
+                  Log.w(TAG, "Error destroying cut process: ${e.message}")
+              }
+          }
+          if (isCancelled != null) {
             isCancelled.set(true)
             try {
                 // Force kill logic if needed, usually destroyProcessById is proper

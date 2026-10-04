@@ -19,6 +19,30 @@ interface FormatListProps {
     onSelectFormat: (format: VideoFormat | string) => void;
     onDownloadThumbnail?: () => void;
     platformColor?: string;
+    /** Used to label Twitch with its real quality ladder instead of raw ids. */
+    platform?: string;
+}
+
+/**
+ * Renders a Twitch format id the way Twitch itself names its qualities.
+ *
+ * Twitch ids look like `1080p60`, `720p`, `160p` or `audio_only`, so the
+ * resolution alone loses the frame rate that distinguishes e.g. 1080p60 from
+ * 1080p. Anything unrecognised falls back to the height.
+ */
+export function formatTwitchQuality(format: VideoFormat): string {
+    const id = (format.formatId ?? '').toLowerCase();
+    if (id === 'audio_only' || format.hasAudio === true && format.hasVideo === false) {
+        return 'Audio Only';
+    }
+    const match = id.match(/(\d+)p(\d+)?/);
+    if (match) {
+        const [, height, fps] = match;
+        return fps ? `${height}p${fps}` : `${height}p`;
+    }
+    const h = format.height;
+    if (!h) return format.formatId || 'Video';
+    return format.fps ? `${h}p${Math.round(format.fps)}` : `${h}p`;
 }
 
 interface FormatCardProps {
@@ -151,7 +175,10 @@ const FormatCard: React.FC<FormatCardProps> = ({
 export const FormatList: React.FC<FormatListProps> = ({
     formats,
     onSelectFormat,
+    platform,
 }) => {
+    const isTwitch = (platform ?? '').toLowerCase() === 'twitch';
+
     // Process formats: Filter unique heights, prioritize MP4, sort by quality desc
     const videoFormats = useMemo(() => {
         const extPriority: Record<string, number> = {
@@ -176,6 +203,14 @@ export const FormatList: React.FC<FormatListProps> = ({
                 if (!existing) {
                     return acc.concat([current]);
                 } else {
+                    // Twitch publishes several frame rates at the same height
+                    // (1080p60 vs 1080p30), so the higher frame rate wins rather
+                    // than whichever container happens to sort first.
+                    if (isTwitch) {
+                        return (current.fps ?? 0) > (existing.fps ?? 0)
+                            ? acc.map(i => i === existing ? current : i)
+                            : acc;
+                    }
                     const curExtPriority = getExtPriority(current.ext);
                     const existingExtPriority = getExtPriority(existing.ext);
 
@@ -187,10 +222,10 @@ export const FormatList: React.FC<FormatListProps> = ({
                     return acc;
                 }
             }, [] as VideoFormat[])
-            .sort((a, b) => (b.height || 0) - (a.height || 0));
+            .sort((a, b) => (b.height || 0) - (a.height || 0) || (b.fps || 0) - (a.fps || 0));
 
         return unique.slice(0, 7);
-    }, [formats]);
+    }, [formats, isTwitch]);
 
     let animationDelay = 0;
 
@@ -331,12 +366,16 @@ export const FormatList: React.FC<FormatListProps> = ({
                             text: 'rgba(255, 255, 255, 0.9)',
                         } : undefined;
 
-                        return (
-                            <FormatCard
-                                key={`${format.formatId}-${index}`}
-                                title={`${h}p`}
-                                subtitle={`${format.ext?.toUpperCase() || 'MP4'} • ${h}p`}
-                                badge={badgeText}
+return (
+<FormatCard
+      key={`${format.formatId}-${index}`}
+       title={isTwitch ? formatTwitchQuality(format) : `${h}p`}
+      subtitle={
+          isTwitch
+              ? `${format.ext?.toUpperCase() || 'MP4'}${format.fps ? ` • ${Math.round(format.fps)} fps` : ''}`
+              : `${format.ext?.toUpperCase() || 'MP4'} • ${h}p`
+      }
+      badge={isTwitch ? (index === 0 ? 'SOURCE' : badgeText) : badgeText}
                                 badgeStyle={badgeStyle}
                                 extraBadge={extraBadgeText}
                                 extraBadgeStyle={extraBadgeStyle}

@@ -11,7 +11,7 @@ import {
 import Svg, { Circle } from 'react-native-svg';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '../theme';
 import { QueueItem, QueueItemStatus } from '../hooks/useDownloadQueue';
-import { CloseIcon, CheckIcon, DownloadIcon } from './Icons';
+import { CloseIcon, CheckIcon, DownloadIcon, PlaySmallIcon, PauseIcon, RefreshIcon, TrashIcon } from './Icons';
 
 // ── Mini circular progress per item ──────────────────────────────────────────
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -122,6 +122,7 @@ const QueueRow: React.FC<{
     onRetry: (id: string) => void;
 }> = ({ item, platformColor, onCancel, onRetry }) => {
     const color = item.status === 'downloading' ? platformColor : Colors.primary;
+    const canRetry = item.status === 'failed' || item.status === 'cancelled';
 
     return (
         <View style={[styles.row, item.status === 'downloading' && styles.rowActive]}>
@@ -138,8 +139,10 @@ const QueueRow: React.FC<{
                         <View style={[styles.progressFill, { width: `${item.progress}%` as any, backgroundColor: color }]} />
                     </View>
                 )}
-                {item.status === 'failed' && item.errorMessage && (
-                    <Text style={styles.errorMsg} numberOfLines={1}>{item.errorMessage}</Text>
+                {item.errorMessage && (
+                    <Text style={[styles.errorMsg, item.status === 'waiting' && styles.retryPending]} numberOfLines={2}>
+                        {item.errorMessage}
+                    </Text>
                 )}
             </View>
 
@@ -149,7 +152,7 @@ const QueueRow: React.FC<{
                     <CloseIcon size={14} color={Colors.textMuted} />
                 </TouchableOpacity>
             )}
-            {item.status === 'failed' && (
+            {canRetry && (
                 <TouchableOpacity style={[styles.rowAction, styles.retryBtn]} onPress={() => onRetry(item.id)}>
                     <Text style={styles.retryText}>↺</Text>
                 </TouchableOpacity>
@@ -164,13 +167,19 @@ interface DownloadQueuePanelProps {
     onClose: () => void;
     queue: QueueItem[];
     isRunning: boolean;
+    isPaused: boolean;
     totalDone: number;
     totalFailed: number;
+    /** Percentage across the whole batch, counting the in-flight item's progress. */
+    overallPercent: number;
     platformColor: string;
     onCancelItem: (id: string) => void;
     onCancelAll: () => void;
     onClearQueue: () => void;
+    onRetryItem: (id: string) => void;
     onRetryFailed: () => void;
+    onPause: () => void;
+    onResume: () => void;
 }
 
 export const DownloadQueuePanel: React.FC<DownloadQueuePanelProps> = ({
@@ -178,13 +187,18 @@ export const DownloadQueuePanel: React.FC<DownloadQueuePanelProps> = ({
     onClose,
     queue,
     isRunning,
+    isPaused,
     totalDone,
     totalFailed,
+    overallPercent,
     platformColor,
     onCancelItem,
     onCancelAll,
     onClearQueue,
+    onRetryItem,
     onRetryFailed,
+    onPause,
+    onResume,
 }) => {
     const slideAnim = useRef(new Animated.Value(500)).current;
     const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -203,9 +217,11 @@ export const DownloadQueuePanel: React.FC<DownloadQueuePanelProps> = ({
         }
     }, [visible]);
 
+    // Retry must target the tapped row. Previously this ignored the id and
+    // retried every failed item, so fixing one link restarted all of them.
     const handleRetry = useCallback((id: string) => {
-        onRetryFailed();
-    }, [onRetryFailed]);
+        onRetryItem(id);
+    }, [onRetryItem]);
 
     const total = queue.length;
     const waiting = queue.filter(i => i.status === 'waiting').length;
@@ -236,10 +252,14 @@ export const DownloadQueuePanel: React.FC<DownloadQueuePanelProps> = ({
 
                     {/* Header */}
                     <View style={styles.header}>
-                        <View>
+                        <View style={{ flex: 1 }}>
                             <Text style={styles.title}>Download Queue</Text>
                             <Text style={styles.subtitle}>
-                                {downloading > 0 ? `Downloading ${downloading}` : isRunning ? 'Processing...' : 'Queue ready'}
+                                {isPaused
+                                    ? 'Paused'
+                                    : downloading > 0
+                                        ? `Downloading ${downloading}`
+                                        : isRunning ? 'Processing...' : 'Queue ready'}
                                 {waiting > 0 ? ` · ${waiting} waiting` : ''}
                             </Text>
                         </View>
@@ -271,14 +291,16 @@ export const DownloadQueuePanel: React.FC<DownloadQueuePanelProps> = ({
                         </View>
                     </View>
 
-                    {/* Overall progress bar */}
+                    {/* Overall progress. Counting only finished rows left this pinned at 0%
+                        for the entire first download, so the in-flight item's
+                        progress is included too. */}
                     {total > 0 && (
                         <View style={styles.overallBar}>
                             <View style={[
                                 styles.overallFill,
                                 {
-                                    width: `${(totalDone / total) * 100}%` as any,
-                                    backgroundColor: platformColor,
+                                    width: `${overallPercent}%` as any,
+                                    backgroundColor: isPaused ? Colors.textMuted : platformColor,
                                 }
                             ]} />
                         </View>
@@ -301,21 +323,54 @@ export const DownloadQueuePanel: React.FC<DownloadQueuePanelProps> = ({
 
                     {/* Footer actions */}
                     <View style={styles.footer}>
+                        {isPaused ? (
+                            <TouchableOpacity
+                                style={[styles.footerBtn, { borderColor: Colors.primary, backgroundColor: `${Colors.primary}14` }]}
+                                onPress={onResume}
+                            >
+                                <PlaySmallIcon size={13} color={Colors.primary} />
+                                <Text style={[styles.footerBtnText, { color: Colors.primary }]}>Resume</Text>
+                            </TouchableOpacity>
+                        ) : (
+                            <>
+                                {isRunning && (
+                                    <TouchableOpacity
+                                        style={[styles.footerBtn, { borderColor: `${Colors.warning}66` }]}
+                                        onPress={onPause}
+                                    >
+                                        <PauseIcon size={13} color={Colors.warning} />
+                                        <Text style={[styles.footerBtnText, { color: Colors.warning }]}>Pause</Text>
+                                    </TouchableOpacity>
+                                )}
+                                {isRunning && (
+                                    <TouchableOpacity
+                                        style={[styles.footerBtn, { borderColor: `${Colors.error}66` }]}
+                                        onPress={onCancelAll}
+                                    >
+                                        <CloseIcon size={13} color={Colors.error} />
+                                        <Text style={[styles.footerBtnText, { color: Colors.error }]}>Cancel All</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </>
+                        )}
                         {totalFailed > 0 && (
-                            <TouchableOpacity style={styles.footerBtn} onPress={onRetryFailed}>
+                            <TouchableOpacity
+                                style={[styles.footerBtn, { borderColor: `${Colors.warning}66` }]}
+                                onPress={onRetryFailed}
+                            >
+                                <RefreshIcon size={13} color={Colors.warning} />
                                 <Text style={[styles.footerBtnText, { color: Colors.warning }]}>
                                     Retry Failed ({totalFailed})
                                 </Text>
                             </TouchableOpacity>
                         )}
-                        {isRunning && (
-                            <TouchableOpacity style={styles.footerBtn} onPress={onCancelAll}>
-                                <Text style={[styles.footerBtnText, { color: Colors.error }]}>Cancel All</Text>
-                            </TouchableOpacity>
-                        )}
-                        {!isRunning && queue.length > 0 && (
-                            <TouchableOpacity style={styles.footerBtn} onPress={onClearQueue}>
-                                <Text style={[styles.footerBtnText, { color: Colors.textMuted }]}>Clear Queue</Text>
+                        {!isRunning && !isPaused && queue.length > 0 && (
+                            <TouchableOpacity
+                                style={[styles.footerBtn, { borderColor: Colors.border }]}
+                                onPress={onClearQueue}
+                            >
+                                <TrashIcon size={13} color={Colors.textMuted} />
+                                <Text style={[styles.footerBtnText, { color: Colors.textMuted }]}>Clear</Text>
                             </TouchableOpacity>
                         )}
                     </View>
@@ -471,6 +526,7 @@ const styles = StyleSheet.create({
         color: Colors.error,
         marginTop: 2,
     },
+    retryPending: { color: Colors.warning },
     rowAction: {
         width: 28,
         height: 28,
@@ -501,16 +557,26 @@ const styles = StyleSheet.create({
     footer: {
         flexDirection: 'row',
         justifyContent: 'center',
+        alignItems: 'center',
+        // Up to three actions can show at once, so let them wrap rather than
+        // squeeze off the edge of the panel.
+        flexWrap: 'wrap',
         gap: Spacing.lg,
-        padding: Spacing.lg,
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.lg,
         borderTopWidth: 1,
         borderTopColor: Colors.border,
     },
     footerBtn: {
-        paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 14,
+        paddingVertical: 9,
         borderRadius: BorderRadius.lg,
         backgroundColor: Colors.surfaceElevated,
+        borderWidth: 1,
+        borderColor: Colors.border,
     },
     footerBtnText: {
         fontSize: Typography.sizes.sm,

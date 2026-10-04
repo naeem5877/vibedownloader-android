@@ -70,8 +70,9 @@ export const Colors = {
     tiktok: '#00F2EA', // CYAN for TikTok
     spotify: '#1DB954',
     x: '#FFFFFF',
-    pinterest: '#BD081C',
-    soundcloud: '#FF5500',
+pinterest: '#BD081C',
+  soundcloud: '#FF5500',
+  twitch: '#9146FF',
     lossless: '#00D4AA', // Added for FLAC lossless feature
 };
 
@@ -123,12 +124,18 @@ export const PlatformThemes: Record<string, {
         surface: Colors.surface,
         gradient: ['#BD081C', '#9C0617'],
     },
-    SoundCloud: {
-        primary: '#FF5500',
-        background: Colors.background,
-        surface: Colors.surface,
-        gradient: ['#FF8800', '#FF5500'],
-    },
+SoundCloud: {
+ primary: '#FF5500',
+ background: Colors.background,
+ surface: Colors.surface,
+ gradient: ['#FF8800', '#FF5500'],
+ },
+ Twitch: {
+ primary: '#9146FF',
+ background: '#0A0710',
+ surface: '#150E24',
+ gradient: ['#A970FF', '#9146FF'],
+ },
     default: {
         primary: Colors.primary,
         background: Colors.background,
@@ -146,6 +153,7 @@ export const SUPPORTED_PLATFORMS = [
     { id: 'X', color: Colors.x, label: 'X' },
     { id: 'Pinterest', color: Colors.pinterest, label: 'Pinterest' },
     { id: 'SoundCloud', color: Colors.soundcloud, label: 'SoundCloud' },
+{ id: 'Twitch', color: Colors.twitch, label: 'Twitch' },
 ];
 
 export const getPlatformColor = (platform: string | null | undefined): string => {

@@ -8,8 +8,11 @@ export const detectPlatform = (url: string): string => {
     if (lowerUrl.includes('spotify.com')) return 'Spotify';
     if (lowerUrl.includes('twitter.com') || lowerUrl.includes('x.com')) return 'X';
     if (lowerUrl.includes('pinterest.com') || lowerUrl.includes('pin.it')) return 'Pinterest';
-    if (lowerUrl.includes('soundcloud.com')) return 'SoundCloud';
-    if (lowerUrl.includes('youtu.be') || lowerUrl.includes('youtube.com')) return 'YouTube';
+if (lowerUrl.includes('soundcloud.com')) return 'SoundCloud';
+  // clips.twitch.tv is checked first only for readability; both forms share the
+  // twitch.tv host, so a single substring test covers VODs, channels and clips.
+  if (lowerUrl.includes('twitch.tv')) return 'Twitch';
+  if (lowerUrl.includes('youtu.be') || lowerUrl.includes('youtube.com')) return 'YouTube';
 
     return 'YouTube'; // Default/Fallback
 };

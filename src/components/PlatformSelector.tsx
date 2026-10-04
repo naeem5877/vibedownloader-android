@@ -13,7 +13,7 @@ import {
     UIManager,
 } from 'react-native';
 import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
-import { Colors, Spacing, Typography, BorderRadius } from '../theme';
+import { Colors, Spacing } from '../theme';
 import { Haptics } from '../utils/haptics';
 import {
     YouTubeIcon,
@@ -24,6 +24,7 @@ import {
     XIcon,
     PinterestIcon,
     SoundCloudIcon,
+    TwitchIcon,
 } from './Icons';
 
 // Enable LayoutAnimation for Android
@@ -45,6 +46,7 @@ const PLATFORMS = [
     { id: 'facebook', Icon: FacebookIcon, color: '#1877F2', gradient: ['#1877F2', '#3b5998'] },
     { id: 'spotify', Icon: SpotifyIcon, color: '#1DB954', gradient: ['#1DB954', '#1ED760'] },
     { id: 'x', Icon: XIcon, color: '#FFFFFF', gradient: ['#000000', '#333333'] },
+    { id: 'twitch', Icon: TwitchIcon, color: '#9146FF', gradient: ['#A970FF', '#9146FF'] },
     { id: 'pinterest', Icon: PinterestIcon, color: '#E60023', gradient: ['#E60023', '#BD081C'] },
     { id: 'soundcloud', Icon: SoundCloudIcon, color: '#FF5500', gradient: ['#FF5500', '#FF3300'] },
 ];
@@ -68,7 +70,7 @@ const PlatformItem: React.FC<PlatformItemProps> = ({ platform, isSelected, onPre
             tension: 50,
             useNativeDriver: true,
         }).start();
-    }, [isSelected]);
+    }, [anim, isSelected]);
 
     // Interpolations for visual effects
     const iconScale = anim.interpolate({

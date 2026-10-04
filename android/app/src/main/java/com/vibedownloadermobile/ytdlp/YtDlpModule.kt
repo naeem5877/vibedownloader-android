@@ -1950,6 +1950,16 @@ private fun publishSidecarFile(
                 } else null
 val isCutDownload = requestedCutStart != null && requestedCutEnd != null &&
       requestedCutEnd > requestedCutStart
+
+                // Live recording options. yt-dlp follows a live stream until it ends;
+                // an optional cap is enforced by ffmpeg so the recording stops cleanly.
+                val isLiveDownload = options?.hasKey("isLive") == true &&
+                    options.getType("isLive") == ReadableType.Boolean &&
+                    options.getBoolean("isLive")
+                val maxLiveDuration = if (options?.hasKey("maxDurationSeconds") == true &&
+                    options.getType("maxDurationSeconds") == ReadableType.Number) {
+                    options.getDouble("maxDurationSeconds").takeIf { it > 0 }
+                } else null
                 
                 // Determine platform (use forced if provided, e.g. for Spotify lossless)
                 val platform = forcedPlatform ?: getPlatformName(url)
@@ -2044,7 +2054,28 @@ val isCutDownload = requestedCutStart != null && requestedCutEnd != null &&
                     return@launch
                 }
 
-                if (!formatId.isNullOrEmpty()) {
+                if (isLiveDownload) {
+                    if (!ffmpegAvailable) {
+                        promise.reject(
+                            "FFMPEG_REQUIRED",
+                            "Live recording needs ffmpeg to merge the live video and audio streams on this device."
+                        )
+                        activeDownloads.remove(processId)
+                        updateServiceState()
+                        return@launch
+                    }
+                    // Live broadcasts use separate video/audio streams. Let yt-dlp
+                    // choose the best live representation and mux it to MP4.
+                    request.addOption("-f", "bestvideo+bestaudio/best")
+                    request.addOption("--merge-output-format", "mp4")
+                    if (maxLiveDuration != null) {
+                        request.addOption("--downloader", "ffmpeg")
+                        request.addOption(
+                            "--downloader-args",
+                            "ffmpeg_i:-t ${fmtSec(maxLiveDuration)}"
+                        )
+                    }
+                } else if (!formatId.isNullOrEmpty()) {
                      if (!ffmpegAvailable) {
                         // No ffmpeg means no transcoding and no muxing, so take the
                         // source streams as they are. Transcoding is dropped rather

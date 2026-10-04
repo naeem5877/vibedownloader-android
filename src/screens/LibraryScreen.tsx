@@ -1,1412 +1,611 @@
 /**
- * LibraryScreen - Modern File Management for Downloaded Media
- * Displays all downloaded files organized by platform with actions like play, share, delete
+ * LibraryScreen - a photo-style gallery of everything downloaded.
+ *
+ * Flat newest-first grid with filter chips, long-press multi-select for bulk
+ * delete, and in-app preview for video and images.
  */
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-    View,
-    Text,
-    FlatList,
-    StyleSheet,
-    TouchableOpacity,
-    Image,
     Alert,
-    ToastAndroid,
-    StatusBar,
-    Animated,
-    Dimensions,
+    FlatList,
+    Image,
+    Pressable,
     RefreshControl,
-    Modal,
-    Platform,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
+    useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, BorderRadius, Spacing, Typography, Shadows, getPlatformColor } from '../theme';
+import { Colors, Spacing, Typography, BorderRadius, getPlatformColor } from '../theme';
 import {
-    FolderIcon,
-    PlayIcon,
-    ShareIcon,
-    TrashIcon,
-    DownloadIcon,
-    ChevronRightIcon,
-    InfoIcon,
-    RefreshIcon,
+    CheckIcon,
     CloseIcon,
-    VideoIcon,
-    MusicIcon,
     ImageIcon,
-    CaptionsIcon,
     MusicNoteIcon,
+    PlayIcon,
+    RefreshIcon,
+    SearchIcon,
+    TrashIcon,
+    TypeIcon,
+    VideoIcon,
 } from '../components/Icons';
 import { EmptyState } from '../components/EmptyState';
-import SubtitleViewerModal, {
-    type SubtitleViewerFile,
-} from '../components/SubtitleViewerModal';
+import { MediaPreviewModal } from '../components/MediaPreviewModal';
+import SubtitleViewerModal, { type SubtitleViewerFile } from '../components/SubtitleViewerModal';
+import { useLibraryGallery } from '../hooks/useLibraryGallery';
 import { YtDlpNative, formatFileSize } from '../native/YtDlpModule';
 import { Haptics } from '../utils/haptics';
+import {
+    deriveMediaKind,
+    formatTileDuration,
+    isPreviewable,
+    SORT_LABELS,
+    type KindFilter,
+    type LibraryItem,
+    type SortOrder,
+} from '../utils/libraryMedia';
 
-const { width } = Dimensions.get('window');
-
-// Types
-interface DownloadedFile {
-    name: string;
-    path: string;
-    size: number;
-    modified: number;
-    platform: string;
-    contentType: string;
-    extension: string;
-    thumbnail?: string;
-}
-
-interface PlatformFolder {
-    platform: string;
-    contentTypes: {
-        type: string;
-        files: DownloadedFile[];
-        count: number;
-    }[];
-    totalCount: number;
-    totalSize: number;
-}
-
-interface PlatformStorageUsage {
-    platform: string;
-    size: number;
-    color: string;
-}
-
-// Storage Info Component
-const StorageInfoCard: React.FC<{ basePath: string; onPress: () => void }> = ({ basePath, onPress }) => {
-    return (
-        <TouchableOpacity style={styles.storageCard} onPress={onPress} activeOpacity={0.8}>
-            <View style={styles.storageIconContainer}>
-                <View style={[styles.storageIconGlow, { backgroundColor: Colors.primary }]} />
-                <FolderIcon size={20} color={Colors.primary} />
-            </View>
-            <View style={styles.storageInfo}>
-                <Text style={styles.storageTitle}>STORAGE SYSTEM</Text>
-                <Text style={styles.storagePath} numberOfLines={1}>
-                    {basePath || 'Internal Storage'}
-                </Text>
-            </View>
-            <View style={styles.storageAction}>
-                <ChevronRightIcon size={16} color={Colors.textMuted} />
-            </View>
-        </TouchableOpacity>
-    );
-};
-
-// Individual storage item component for proper hooks usage
-const PlatformStorageItem: React.FC<{
-    platform: PlatformStorageUsage;
-    maxSize: number;
-    index: number;
-}> = ({ platform, maxSize, index }) => {
-    const percentage = (platform.size / maxSize) * 100;
-    const widthAnim = useRef(new Animated.Value(0)).current;
-
-    useEffect(() => {
-        Animated.spring(widthAnim, {
-            toValue: percentage,
-            tension: 50,
-            friction: 10,
-            delay: index * 80,
-            useNativeDriver: false, // width is not supported by native driver
-        }).start();
-    }, [percentage, index]);
-
-    return (
-        <View style={styles.platformStorageItem}>
-            <View style={styles.platformStorageItemHeader}>
-                <View style={styles.platformStorageItemLeft}>
-                    <View style={[styles.platformDot, { backgroundColor: platform.color }]} />
-                    <Text style={styles.platformStorageItemName}>{platform.platform}</Text>
-                </View>
-                <Text style={styles.platformStorageItemSize}>
-                    {formatFileSize(platform.size)}
-                </Text>
-            </View>
-            <View style={styles.platformStorageBar}>
-                <Animated.View
-                    style={[
-                        styles.platformStorageBarFill,
-                        {
-                            backgroundColor: platform.color,
-                            width: widthAnim.interpolate({
-                                inputRange: [0, 100],
-                                outputRange: ['0%', '100%']
-                            })
-                        }
-                    ]}
-                />
-            </View>
-        </View>
-    );
-};
-
-const PlatformStorageUsageCard: React.FC<{ folders: PlatformFolder[] }> = ({ folders }) => {
-    const totalSize = folders.reduce((sum, f) => sum + f.totalSize, 0);
-
-    if (totalSize === 0) return null;
-
-    // Sort by size descending
-    const sortedPlatforms: PlatformStorageUsage[] = folders
-        .map(f => ({
-            platform: f.platform,
-            size: f.totalSize,
-            color: getPlatformColor(f.platform)
-        }))
-        .sort((a, b) => b.size - a.size);
-
-    const maxSize = sortedPlatforms[0]?.size || 1;
-
-    return (
-        <View style={styles.platformStorageCard}>
-            <View style={styles.platformStorageHeader}>
-                <View style={styles.platformStorageHeaderLeft}>
-                    <Text style={styles.platformStorageTitle}>DISTRIBUTION</Text>
-                </View>
-                <Text style={styles.platformStorageTotal}>{formatFileSize(totalSize)}</Text>
-            </View>
-
-            <View style={styles.platformStorageList}>
-                {sortedPlatforms.slice(0, 4).map((platform, index) => (
-                    <PlatformStorageItem
-                        key={platform.platform}
-                        platform={platform}
-                        maxSize={maxSize}
-                        index={index}
-                    />
-                ))}
-            </View>
-        </View>
-    );
-};
-
-
-// Platform Folder Card Component
-const PlatformFolderCard: React.FC<{
-    folder: PlatformFolder;
-    onPress: () => void;
-    expanded: boolean;
-}> = ({ folder, onPress, expanded }) => {
-    const platformColor = getPlatformColor(folder.platform);
-    const rotateAnim = useRef(new Animated.Value(expanded ? 1 : 0)).current;
-
-    useEffect(() => {
-        Animated.spring(rotateAnim, {
-            toValue: expanded ? 1 : 0,
-            tension: 50,
-            friction: 8,
-            useNativeDriver: true,
-        }).start();
-    }, [expanded]);
-
-    const rotation = rotateAnim.interpolate({
-        inputRange: [0, 1],
-        outputRange: ['0deg', '90deg'],
-    });
-
-    return (
-        <TouchableOpacity
-            style={[styles.folderCard, expanded && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}
-            onPress={onPress}
-            activeOpacity={0.8}
-        >
-            <View style={[styles.folderIconBg, { backgroundColor: `${platformColor}15` }]}>
-                <FolderIcon size={20} color={platformColor} />
-            </View>
-
-            <View style={styles.folderInfo}>
-                <Text style={styles.folderName}>{folder.platform.toUpperCase()}</Text>
-                <Text style={styles.folderMeta}>
-                    {folder.totalCount} ITEMS • {formatFileSize(folder.totalSize)}
-                </Text>
-            </View>
-
-            <Animated.View style={{ transform: [{ rotate: rotation }] }}>
-                <ChevronRightIcon size={18} color={Colors.textMuted} />
-            </Animated.View>
-        </TouchableOpacity>
-    );
-};
-
-// Content Type Row Component
-const ContentTypeRow: React.FC<{
-    type: string;
-    files: DownloadedFile[];
-    platformColor: string;
-    onFilePress: (file: DownloadedFile) => void;
-}> = ({ type, files, platformColor, onFilePress }) => {
-    return (
-        <View style={styles.contentTypeContainer}>
-            <View style={styles.contentTypeHeader}>
-                <View style={styles.contentTypeLine} />
-                <Text style={[styles.contentTypeText, { color: platformColor }]}>
-                    {type.toUpperCase()}
-                </Text>
-                <View style={styles.contentTypeLine} />
-            </View>
-
-            <FlatList
-                data={files}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                keyExtractor={(item) => item.path}
-                renderItem={({ item }) => (
-                    <FileCard file={item} onPress={() => onFilePress(item)} />
-                )}
-                contentContainerStyle={styles.horizontalFileList}
-            />
-        </View>
-    );
-};
-
-// File Card Component
-const FileCard: React.FC<{
-    file: DownloadedFile;
-    onPress: () => void;
-}> = ({ file, onPress }) => {
-    const isVideo = ['mp4', 'webm', 'mkv'].includes(file.extension.toLowerCase());
-    const isAudio = ['mp3', 'm4a', 'wav', 'aac', 'flac'].includes(file.extension.toLowerCase());
-    const isImage = ['jpg', 'jpeg', 'png', 'webp'].includes(file.extension.toLowerCase());
-    const isLossless = file.extension.toLowerCase() === 'flac';
-    const isLyrics = file.extension.toLowerCase() === 'lrc';
-    const isSubtitle = ['srt', 'vtt', 'ttml'].includes(file.extension.toLowerCase());
-
-    const getIcon = () => {
-        if (isVideo) return <VideoIcon size={20} color={Colors.textSecondary} />;
-        if (isAudio) return <MusicIcon size={20} color={Colors.textSecondary} />;
-        if (isImage) return <ImageIcon size={20} color={Colors.textSecondary} />;
-        if (isLyrics) return <MusicNoteIcon size={20} color={Colors.textSecondary} />;
-        if (isSubtitle) return <CaptionsIcon size={20} color={Colors.textSecondary} />;
-        return <DownloadIcon size={20} color={Colors.textSecondary} />;
-    };
-
-    return (
-        <TouchableOpacity
-            style={[
-                styles.fileCard,
-                isLossless && { borderColor: Colors.lossless, borderWidth: 1 }
-            ]}
-            onPress={onPress}
-            activeOpacity={0.8}
-        >
-            <View style={styles.fileThumbnail}>
-                {file.thumbnail ? (
-                    <Image source={{ uri: file.thumbnail }} style={styles.thumbnailImage} />
-                ) : (
-                    <View style={[styles.filePlaceholder, isLossless && { backgroundColor: `${Colors.lossless}10` }]}>
-                        {isLossless ? <MusicIcon size={22} color={Colors.lossless} /> : getIcon()}
-                    </View>
-                )}
-                <View style={styles.fileCardOverlay} />
-                {isVideo && (
-                    <View style={styles.playOverlaySmall}>
-                        <PlayIcon size={14} color={Colors.textPrimary} />
-                    </View>
-                )}
-                {isLossless && (
-                    <View style={styles.losslessBadgeSmall}>
-                        <Text style={styles.losslessBadgeTextSmall}>FLAC</Text>
-                    </View>
-                )}
-            </View>
-            <View style={styles.fileCardInfo}>
-                <Text style={styles.fileName} numberOfLines={1}>{file.name}</Text>
-                <Text style={styles.fileSize}>{formatFileSize(file.size)}</Text>
-            </View>
-        </TouchableOpacity>
-    );
-};
-
-// File Detail Modal
-const FileDetailModal: React.FC<{
-    visible: boolean;
-    file: DownloadedFile | null;
-    onClose: () => void;
-    onPlay: () => void;
-    onShare: () => void;
-    onDelete: () => void;
-    onOpenText: () => void;
-}> = ({ visible, file, onClose, onPlay, onShare, onDelete, onOpenText }) => {
-    if (!file) return null;
-
-    const platformColor = getPlatformColor(file.platform);
-    const isVideo = ['mp4', 'webm', 'mkv'].includes(file.extension.toLowerCase());
-    const isAudio = ['mp3', 'm4a', 'wav', 'aac', 'flac'].includes(file.extension.toLowerCase());
-    const isLossless = file.extension.toLowerCase() === 'flac';
-    const isLyrics = file.extension.toLowerCase() === 'lrc';
-    const isSubtitle = ['srt', 'vtt', 'ttml'].includes(file.extension.toLowerCase());
-    // Lyrics/subtitles open in the in-app viewer rather than an external player,
-    // which has no handler for them.
-    const isText = isLyrics || isSubtitle || file.extension.toLowerCase() === 'txt';
-
-    return (
-        <Modal
-            visible={visible}
-            transparent
-            animationType="slide"
-            onRequestClose={onClose}
-        >
-            <View style={styles.modalOverlay}>
-                <View style={styles.modalContent}>
-                    <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle} numberOfLines={2}>{file.name}</Text>
-                        <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                            <CloseIcon size={24} color={Colors.textMuted} />
-                        </TouchableOpacity>
-                    </View>
-
-                    {/* File Preview */}
-                    <View style={[
-                        styles.modalPreview,
-                        { borderColor: isLossless ? Colors.lossless : platformColor },
-                        isLossless && { backgroundColor: `${Colors.lossless}05` }
-                    ]}>
-                        {file.thumbnail ? (
-                            <Image source={{ uri: file.thumbnail }} style={styles.modalThumbnail} />
-                        ) : (
-                            <View style={styles.modalPlaceholder}>
-                                {isVideo ? (
-                                    <VideoIcon size={48} color={platformColor} />
-                                ) : isAudio ? (
-                                    <MusicIcon size={48} color={isLossless ? Colors.lossless : platformColor} />
-                                ) : isLyrics ? (
-                                    <MusicNoteIcon size={48} color={platformColor} />
-                                ) : isSubtitle || isText ? (
-                                    <CaptionsIcon size={48} color={platformColor} />
-                                ) : (
-                                    <DownloadIcon size={48} color={platformColor} />
-                                )}
-                            </View>
-                        )}
-                        {isLossless && (
-                            <View style={styles.losslessBadgeLarge}>
-                                <Text style={styles.losslessBadgeTextLarge}>LOSSLESS AUDIO • FLAC</Text>
-                            </View>
-                        )}
-                    </View>
-
-                    {/* File Info */}
-                    <View style={styles.fileInfoSection}>
-                        <View style={styles.infoRow}>
-                            <Text style={styles.infoLabel}>Platform</Text>
-                            <View style={[styles.platformBadge, { backgroundColor: `${platformColor}20` }]}>
-                                <Text style={[styles.platformBadgeText, { color: platformColor }]}>
-                                    {file.platform}
-                                </Text>
-                            </View>
-                        </View>
-                        <View style={styles.infoRow}>
-                            <Text style={styles.infoLabel}>Type</Text>
-                            <Text style={styles.infoValue}>{file.contentType}</Text>
-                        </View>
-                        <View style={styles.infoRow}>
-                            <Text style={styles.infoLabel}>Size</Text>
-                            <Text style={styles.infoValue}>{formatFileSize(file.size)}</Text>
-                        </View>
-                        <View style={styles.infoRow}>
-                            <Text style={styles.infoLabel}>Format</Text>
-                            <Text style={styles.infoValue}>{file.extension.toUpperCase()}</Text>
-                        </View>
-                        <View style={styles.infoRow}>
-                            <Text style={styles.infoLabel}>Location</Text>
-                            <Text style={[styles.infoValue, styles.pathText]} numberOfLines={2}>
-                                {file.path}
-                            </Text>
-                        </View>
-                    </View>
-
-                    {/* Actions */}
-                    <View style={styles.modalActions}>
-                        {(isVideo || isAudio) && (
-                            <TouchableOpacity
-                                style={[styles.actionButton, { backgroundColor: platformColor }]}
-                                onPress={onPlay}
-                            >
-                                <PlayIcon size={20} color={Colors.textPrimary} />
-                                <Text style={styles.actionButtonText}>Play</Text>
-                            </TouchableOpacity>
-                        )}
-                        {isText && (
-                            <TouchableOpacity
-                                style={[styles.actionButton, { backgroundColor: platformColor }]}
-                                onPress={onOpenText}
-                            >
-                                {isLyrics ? (
-                                    <MusicNoteIcon size={20} color={Colors.textPrimary} />
-                                ) : (
-                                    <CaptionsIcon size={20} color={Colors.textPrimary} />
-                                )}
-                                <Text style={styles.actionButtonText}>
-                                    {isLyrics ? 'Lyrics' : 'Subtitles'}
-                                </Text>
-                            </TouchableOpacity>
-                        )}
-                        <TouchableOpacity
-                            style={[styles.actionButton, styles.shareButton]}
-                            onPress={onShare}
-                        >
-                            <ShareIcon size={20} color={Colors.textPrimary} />
-                            <Text style={styles.actionButtonText}>Share</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.actionButton, styles.deleteButton]}
-                            onPress={onDelete}
-                        >
-                            <TrashIcon size={20} color={Colors.textPrimary} />
-                            <Text style={styles.actionButtonText}>Delete</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </View>
-        </Modal>
-    );
-};
-
-// Storage Info Modal
-const StorageInfoModal: React.FC<{
-    visible: boolean;
-    basePath: string;
-    onClose: () => void;
-}> = ({ visible, basePath, onClose }) => {
-    return (
-        <Modal
-            visible={visible}
-            transparent
-            animationType="fade"
-            onRequestClose={onClose}
-        >
-            <TouchableOpacity
-                style={styles.modalOverlay}
-                activeOpacity={1}
-                onPress={onClose}
-            >
-                <View style={styles.infoModalContent}>
-                    <View style={styles.infoModalHeader}>
-                        <InfoIcon size={24} color={Colors.primary} />
-                        <Text style={styles.infoModalTitle}>Storage Information</Text>
-                    </View>
-
-                    <View style={styles.infoSection}>
-                        <Text style={styles.infoSectionTitle}>📁 Where are files saved?</Text>
-                        <Text style={styles.infoSectionText}>
-                            On Android 11+, files are saved to app-specific storage for better compatibility:
-                        </Text>
-                        <View style={styles.pathBox}>
-                            <Text style={styles.pathBoxText}>{basePath || '/Android/data/com.vibedownloadermobile/files/vibedownloader'}</Text>
-                        </View>
-                    </View>
-
-                    <View style={styles.infoSection}>
-                        <Text style={styles.infoSectionTitle}>📱 Folder Structure</Text>
-                        <Text style={styles.infoSectionText}>
-                            Files are organized by platform and content type:
-                        </Text>
-                        <View style={styles.folderStructure}>
-                            <Text style={styles.structureItem}>📂 vibedownloader/</Text>
-                            <Text style={styles.structureItem}>   📂 YouTube/</Text>
-                            <Text style={styles.structureItem}>      📂 Videos/</Text>
-                            <Text style={styles.structureItem}>      📂 Shorts/</Text>
-                            <Text style={styles.structureItem}>      📂 Music/</Text>
-                            <Text style={styles.structureItem}>   📂 Instagram/</Text>
-                            <Text style={styles.structureItem}>      📂 Reels/</Text>
-                            <Text style={styles.structureItem}>      📂 Posts/</Text>
-                            <Text style={styles.structureItem}>   📂 TikTok/</Text>
-                            <Text style={styles.structureItem}>   ...</Text>
-                        </View>
-                    </View>
-
-                    <View style={styles.infoSection}>
-                        <Text style={styles.infoSectionTitle}>🖼️ Gallery Access</Text>
-                        <Text style={styles.infoSectionText}>
-                            Videos and images are also added to your Gallery app for easy access!
-                        </Text>
-                    </View>
-
-                    <TouchableOpacity style={styles.gotItButton} onPress={onClose}>
-                        <Text style={styles.gotItText}>Got it!</Text>
-                    </TouchableOpacity>
-                </View>
-            </TouchableOpacity>
-        </Modal>
-    );
-};
-
-// Main Library Screen
-export interface LibraryScreenProps {
+interface LibraryScreenProps {
     isFocused?: boolean;
 }
 
-export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = false }) => {
-    const [folders, setFolders] = useState<PlatformFolder[]>([]);
-    const [refreshing, setRefreshing] = useState(false);
-    const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({}); // Changed from expandedPlatform
-    const [basePath, setBasePath] = useState<string>('');
-    const [selectedFile, setSelectedFile] = useState<DownloadedFile | null>(null);
-    const [showFileModal, setShowFileModal] = useState(false);
-    const [viewerFile, setViewerFile] = useState<SubtitleViewerFile | null>(null);
-    const [showStorageInfo, setShowStorageInfo] = useState(false);
-    // Keeping isEmpty as it was not explicitly removed in the instruction's state list,
-    // but the instruction's `loadFiles` was a placeholder.
-    const [isEmpty, setIsEmpty] = useState(false);
+/** Tiles per row. 3 matches Google Photos and keeps titles readable. */
+const COLUMNS = 3;
 
-    const headerFadeAnim = useRef(new Animated.Value(0)).current;
-    const headerSlideAnim = useRef(new Animated.Value(-20)).current;
+const KIND_FILTERS: {
+    key: KindFilter;
+    label: string;
+    Icon: React.FC<{ size?: number; color?: string }> | null;
+}[] = [
+    { key: 'all', label: 'All', Icon: null },
+    { key: 'video', label: 'Videos', Icon: VideoIcon },
+    { key: 'image', label: 'Images', Icon: ImageIcon },
+    { key: 'audio', label: 'Audio', Icon: MusicNoteIcon },
+    { key: 'text', label: 'Text', Icon: TypeIcon },
+];
 
+const SORT_CYCLE: SortOrder[] = ['newest', 'oldest', 'largest', 'name'];
+
+export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }) => {
+    const gallery = useLibraryGallery();
+    const { width } = useWindowDimensions();
+    const [showSearch, setShowSearch] = useState(false);
+    const [preview, setPreview] = useState<LibraryItem | null>(null);
+    const [textViewer, setTextViewer] = useState<SubtitleViewerFile | null>(null);
+
+    // Pull the library when the tab becomes active, matching the old
+    // focus-driven reload so downloads that finished in the background appear.
     useEffect(() => {
-        Animated.parallel([
-            Animated.timing(headerFadeAnim, {
-                toValue: 1,
-                duration: 600,
-                useNativeDriver: true,
-            }),
-            Animated.spring(headerSlideAnim, {
-                toValue: 0,
-                tension: 50,
-                friction: 8,
-                useNativeDriver: true,
-            }),
-        ]).start();
-
-        loadFiles();
-        loadBasePath();
-    }, []);
-
-    // Auto-refresh when focused
-    useEffect(() => {
-        if (isFocused) {
-            loadFiles();
-        }
+        if (isFocused) gallery.reload();
+        // Intentionally keyed on focus only: reloading on every filter change
+        // would restart the listing and undo the user's selection.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isFocused]);
 
-    const loadBasePath = async () => {
-        try {
-            const path = await YtDlpNative.getOutputDirectory();
-            setBasePath(path);
-        } catch (error) {
-            console.warn('Failed to get output directory:', error);
-        }
-    };
+    const gap = Spacing.xs;
+    // Subtract the screen padding and inter-tile gaps before dividing, otherwise
+    // the last column overflows by the accumulated gap width.
+    const tileWidth = Math.floor((width - Spacing.md * 2 - gap * (COLUMNS - 1)) / COLUMNS);
 
-    const loadFiles = async () => {
-        try {
-            setRefreshing(true);
-            const files = await YtDlpNative.listDownloadedFiles();
-
-            if (!files || files.length === 0) {
-                setIsEmpty(true);
-                setFolders([]);
+    const openItem = useCallback(
+        (item: LibraryItem) => {
+            const kind = deriveMediaKind(item.extension);
+            if (kind === 'text') {
+                // Text sidecars have no external app that claims them, so they
+                // always open in the in-app viewer.
+                setTextViewer({
+                    path: item.path,
+                    name: item.name,
+                    platform: item.platform,
+                    size: item.size,
+                });
                 return;
             }
+            if (!isPreviewable(kind)) {
+                // Audio has no inline stage, so fall back to the system player.
+                YtDlpNative.openFile?.(item.path);
+                return;
+            }
+            setPreview(item);
+        },
+        []
+    );
 
-            setIsEmpty(false);
+    const handleDeleteOne = useCallback(
+        async (item: LibraryItem) => {
+            Alert.alert('Delete?', item.name, [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                        Haptics.impact();
+                        const ok = await YtDlpNative.deleteFile?.(item.path);
+                        if (ok) {
+                            Haptics.success();
+                            gallery.reload();
+                        } else {
+                            Haptics.error();
+                            Alert.alert('Could not delete', 'The file is still there.');
+                        }
+                    },
+                },
+            ]);
+        },
+        [gallery]
+    );
 
-            // Group files by platform and content type
-            const platformMap = new Map<string, Map<string, DownloadedFile[]>>();
-
-            files.forEach((file: any) => {
-                const platform = file.platform || 'Unknown';
-                const contentType = file.contentType || 'Downloads';
-
-                if (!platformMap.has(platform)) {
-                    platformMap.set(platform, new Map());
-                }
-                const typeMap = platformMap.get(platform)!;
-                if (!typeMap.has(contentType)) {
-                    typeMap.set(contentType, []);
-                }
-                typeMap.get(contentType)!.push({
-                    ...file,
-                    extension: file.name.split('.').pop() || 'unknown',
-                });
-            });
-
-            // Convert to folder structure
-            const folderData: PlatformFolder[] = [];
-            platformMap.forEach((typeMap, platform) => {
-                const contentTypes: { type: string; files: DownloadedFile[]; count: number }[] = [];
-                let totalCount = 0;
-                let totalSize = 0;
-
-                typeMap.forEach((files, type) => {
-                    contentTypes.push({
-                        type,
-                        files: files.sort((a, b) => b.modified - a.modified),
-                        count: files.length,
-                    });
-                    totalCount += files.length;
-                    totalSize += files.reduce((sum, f) => sum + f.size, 0);
-                });
-
-                folderData.push({
-                    platform,
-                    contentTypes,
-                    totalCount,
-                    totalSize,
-                });
-            });
-
-            // Sort by total count descending
-            folderData.sort((a, b) => b.totalCount - a.totalCount);
-            setFolders(folderData);
-
-        } catch (error) {
-            console.error('Failed to load files:', error);
-            setIsEmpty(true);
-        } finally {
-            setRefreshing(false);
-        }
-    };
-
-    const handleRefresh = useCallback(() => {
-        loadFiles();
-    }, []);
-
-    const togglePlatformExpand = (platform: string) => {
-        setExpandedFolders(prev => ({
-            ...prev,
-            [platform]: !prev[platform]
-        }));
-    };
-
-    const handleFilePress = (file: DownloadedFile) => {
-        setSelectedFile(file);
-        setShowFileModal(true);
-    };
-
-    const handlePlay = async () => {
-        if (!selectedFile) return;
-        try {
-            await YtDlpNative.openFile?.(selectedFile.path);
-        } catch (error) {
-            ToastAndroid.show('Unable to play file', ToastAndroid.SHORT);
-        }
-        setShowFileModal(false);
-    };
-
-    // Lyrics and subtitles have no external handler on Android, so they open in
-    // the in-app viewer instead of being handed to a player that cannot read them.
-    const handleOpenText = () => {
-        if (!selectedFile) return;
-        setViewerFile({
-            path: selectedFile.path,
-            name: selectedFile.name,
-            platform: selectedFile.platform,
-            size: selectedFile.size,
-        });
-        setShowFileModal(false);
-    };
-
-    const handleShare = async () => {
-        if (!selectedFile) return;
-        try {
-            await YtDlpNative.shareFile?.(selectedFile.path);
-        } catch (error) {
-            ToastAndroid.show('Unable to share file', ToastAndroid.SHORT);
-        }
-        setShowFileModal(false);
-    };
-
-    const handleDelete = () => {
-        if (!selectedFile) return;
-        Haptics.impact();
-
+    const handleBulkDelete = useCallback(() => {
+        const count = gallery.selected.size;
+        if (count === 0) return;
         Alert.alert(
-            'Delete File',
-            `Are you sure you want to delete "${selectedFile.name}"?`,
+            `Delete ${count} item${count === 1 ? '' : 's'}?`,
+            'This cannot be undone.',
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
                     text: 'Delete',
                     style: 'destructive',
                     onPress: async () => {
+                        Haptics.impact();
                         try {
-                            const deleted = await YtDlpNative.deleteFile(selectedFile.path);
-                            if (deleted) {
-                                Haptics.success();
-                                ToastAndroid.show('File deleted', ToastAndroid.SHORT);
-                                loadFiles();
-                            } else {
+                            const result = await gallery.deleteSelected();
+                            if (!result) return;
+                            if (result.failed.length > 0) {
+                                // Name the survivors rather than implying the
+                                // whole batch succeeded.
                                 Haptics.error();
-                                ToastAndroid.show('Failed to delete file', ToastAndroid.SHORT);
+                                Alert.alert(
+                                    'Partly deleted',
+                                    `${result.deleted.length} deleted, ${result.failed.length} could not be removed.`
+                                );
+                            } else {
+                                Haptics.success();
                             }
-                        } catch (error) {
+                            setPreview(null);
+                        } catch (e) {
                             Haptics.error();
-                            ToastAndroid.show('Error deleting file', ToastAndroid.SHORT);
+                            Alert.alert('Delete failed', e instanceof Error ? e.message : undefined);
                         }
-                        setShowFileModal(false);
                     },
                 },
             ]
         );
-    };
+    }, [gallery]);
 
-    const renderFolder = (folder: PlatformFolder) => {
-        const isExpanded = !!expandedFolders[folder.platform];
-        const platformColor = getPlatformColor(folder.platform);
+    const toggleSort = useCallback(() => {
+        const next = SORT_CYCLE[(SORT_CYCLE.indexOf(gallery.filters.sort) + 1) % SORT_CYCLE.length];
+        gallery.setSort(next);
+        Haptics.selection();
+    }, [gallery]);
 
-        return (
-            <View key={folder.platform}>
-                <PlatformFolderCard
-                    folder={folder}
-                    onPress={() => togglePlatformExpand(folder.platform)}
-                    expanded={isExpanded}
-                />
+    const renderTile = useCallback(
+        ({ item }: { item: LibraryItem }) => {
+            const kind = deriveMediaKind(item.extension);
+            const accent = getPlatformColor(item.platform);
+            const duration = formatTileDuration(item.duration);
+            const poster = gallery.thumbnails[item.path] ?? item.thumbnail ?? null;
+            const isSel = gallery.isSelected(item.path);
 
-                {isExpanded && (
-                    <View style={styles.expandedContent}>
-                        {folder.contentTypes.map((ct) => (
-                            <ContentTypeRow
-                                key={ct.type}
-                                type={ct.type}
-                                files={ct.files}
-                                platformColor={platformColor}
-                                onFilePress={handleFilePress}
-                            />
-                        ))}
-                    </View>
-                )}
-            </View>
-        );
-    };
+            // Only videos need a generated poster; images and audio already have
+            // a real thumbnail or artwork from the listing.
+            if (kind === 'video' && !poster) gallery.requestThumbnail(item.path);
 
-    return (
-        <SafeAreaView style={styles.container} edges={['top']}>
-            <StatusBar barStyle="light-content" backgroundColor={Colors.background} animated />
+            const KindIcon =
+                kind === 'video' ? VideoIcon : kind === 'audio' ? MusicNoteIcon : kind === 'text' ? TypeIcon : ImageIcon;
 
-            {/* Header */}
-            <Animated.View
-                style={[
-                    styles.header,
-                    {
-                        opacity: headerFadeAnim,
-                        transform: [{ translateY: headerSlideAnim }],
-                    }
-                ]}
-            >
-                <View style={styles.headerContent}>
-                    <View>
-                        <Text style={styles.headerTitle}>Library</Text>
-                        <Text style={styles.headerSubtitle}>Your downloaded media</Text>
-                    </View>
-                    <TouchableOpacity onPress={handleRefresh} style={styles.refreshButton}>
-                        <RefreshIcon size={20} color={Colors.textSecondary} />
-                    </TouchableOpacity>
-                </View>
-            </Animated.View>
-
-            <FlatList
-                data={[]}
-                renderItem={() => null}
-                ListHeaderComponent={
-                    <>
-                        {/* Storage Info Card */}
-                        <StorageInfoCard
-                            basePath={basePath}
-                            onPress={() => setShowStorageInfo(true)}
-                        />
-
-                        {/* Platform Storage Usage Card */}
-                        <PlatformStorageUsageCard folders={folders} />
-
-                        {/* Empty State */}
-                        {isEmpty && (
-                            <EmptyState
-                                title="No Downloads Yet"
-                                subtitle="Downloaded videos and music from any platform will appear here for easy access and offline playback."
-                                support="MP4 • MP3 • FLAC • WEBM • JPG"
-                                features={['🎬 Watch Offline', '🎵 Lossless Audio', '📂 Organized', '🚀 Fast Access']}
-                                icon={<FolderIcon size={44} color={Colors.primary} />}
-                            />
+            return (
+                <Pressable
+                    onPress={() => (gallery.selectionMode ? gallery.toggleSelect(item.path) : openItem(item))}
+                    onLongPress={() => {
+                        Haptics.impact();
+                        gallery.toggleSelect(item.path);
+                    }}
+                    delayLongPress={280}
+                    accessibilityRole="button"
+                    accessibilityLabel={item.name}
+                    accessibilityState={{ selected: isSel }}
+                    style={[styles.tile, { width: tileWidth }]}
+                >
+                    <View style={[styles.thumb, { backgroundColor: `${accent}1A` }]}>
+                        {poster ? (
+                            <Image source={{ uri: poster }} style={styles.thumbImage} resizeMode="cover" />
+                        ) : (
+                            <KindIcon size={30} color={accent} />
                         )}
 
-                        {/* Platform Folders */}
-                        {folders.map(renderFolder)}
-                    </>
-                }
+                        {/* Scrim keeps the duration and selection ring legible over
+                            a bright frame. */}
+                        <View style={styles.scrim} pointerEvents="none" />
+
+                        {duration && kind !== 'image' && (
+                            <View style={styles.durationBadge}>
+                                <Text style={styles.durationText}>{duration}</Text>
+                            </View>
+                        )}
+
+                        {kind === 'video' && poster && (
+                            <View style={styles.playDot} pointerEvents="none">
+                                <PlayIcon size={12} color="#FFF" />
+                            </View>
+                        )}
+
+                        {isSel && (
+                            <View style={[styles.selRing, { borderColor: accent }]}>
+                                <View style={[styles.selDot, { backgroundColor: accent }]}>
+                                    <CheckIcon size={13} color="#FFF" />
+                                </View>
+                            </View>
+                        )}
+                    </View>
+
+                    <Text style={styles.tileTitle} numberOfLines={1}>
+                        {item.name.replace(/\.[^.]+$/, '')}
+                    </Text>
+                    <Text style={styles.tileMeta} numberOfLines={1}>
+                        {formatFileSize(item.size)}
+                    </Text>
+                </Pressable>
+            );
+        },
+        [tileWidth, gallery, openItem]
+    );
+
+    const header = useMemo(
+        () => (
+            <View>
+                {/* Search field, revealed by the magnifier rather than always
+                    taking vertical space from the grid. */}
+                {showSearch && (
+                    <View style={styles.searchRow}>
+                        <SearchIcon size={16} color={Colors.textMuted} />
+                        <TextInput
+                            value={gallery.filters.query}
+                            onChangeText={gallery.setQuery}
+                            placeholder="Search downloads"
+                            placeholderTextColor={Colors.textMuted}
+                            style={styles.searchInput}
+                            autoCorrect={false}
+                            autoCapitalize="none"
+                            returnKeyType="search"
+                        />
+                        <Pressable onPress={() => { gallery.setQuery(''); setShowSearch(false); }} hitSlop={10}>
+                            <CloseIcon size={16} color={Colors.textMuted} />
+                        </Pressable>
+                    </View>
+                )}
+
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.chipRow}
+                >
+                    {KIND_FILTERS.map(({ key, label, Icon }) => {
+                        const active = gallery.filters.kind === key;
+                        const count = gallery.kindCounts[key];
+                        return (
+                            <Pressable
+                                key={key}
+                                onPress={() => { gallery.setKind(key); Haptics.selection(); }}
+                                style={[styles.chip, active && styles.chipActive]}
+                            >
+                                {Icon && (
+                                    <Icon size={13} color={active ? Colors.background : Colors.textSecondary} />
+                                )}
+                                <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                                    {label}
+                                    {count > 0 ? ` ${count}` : ''}
+                                </Text>
+                            </Pressable>
+                        );
+                    })}
+                </ScrollView>
+
+                {gallery.platforms.length > 1 && (
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.chipRow}
+                    >
+                        <Pressable
+                            onPress={() => { gallery.setPlatform(null); Haptics.selection(); }}
+                            style={[styles.chip, !gallery.filters.platform && styles.chipActive]}
+                        >
+                            <Text
+                                style={[
+                                    styles.chipText,
+                                    !gallery.filters.platform && styles.chipTextActive,
+                                ]}
+                            >
+                                Every platform
+                            </Text>
+                        </Pressable>
+                        {gallery.platforms.map((platform) => {
+                            const active = gallery.filters.platform === platform;
+                            return (
+                                <Pressable
+                                    key={platform}
+                                    onPress={() => {
+                                        gallery.setPlatform(active ? null : platform);
+                                        Haptics.selection();
+                                    }}
+                                    style={[
+                                        styles.chip,
+                                        active && { backgroundColor: getPlatformColor(platform), borderColor: getPlatformColor(platform) },
+                                    ]}
+                                >
+                                    <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                                        {platform}
+                                    </Text>
+                                </Pressable>
+                            );
+                        })}
+                    </ScrollView>
+                )}
+
+                <View style={styles.statusRow}>
+                    <Text style={styles.statusText}>
+                        {gallery.visible.length} item{gallery.visible.length === 1 ? '' : 's'}
+                        {gallery.hasActiveFilters ? ' filtered' : ''}
+                    </Text>
+                    <Pressable onPress={toggleSort} hitSlop={8} style={styles.sortBtn}>
+                        <Text style={styles.sortText}>{SORT_LABELS[gallery.filters.sort]}</Text>
+                    </Pressable>
+                </View>
+            </View>
+        ),
+        [showSearch, gallery, toggleSort]
+    );
+
+    const empty = gallery.loading ? null : gallery.error ? (
+        <EmptyState icon={<RefreshIcon size={44} color={Colors.textMuted} />} title="Library unavailable" subtitle={gallery.error} />
+    ) : gallery.items.length === 0 ? (
+        <EmptyState icon={<ImageIcon size={44} color={Colors.textMuted} />} title="Nothing here yet" subtitle="Downloads you make will appear here" />
+    ) : (
+        <EmptyState icon={<SearchIcon size={44} color={Colors.textMuted} />} title="No matches" subtitle="Try a different filter" />
+    );
+
+    return (
+        <SafeAreaView style={styles.root} edges={['top']}>
+            <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+
+            {/* The header swaps to a selection bar so the bulk action always has
+                a home and never covers the grid. */}
+            {gallery.selectionMode ? (
+                <View style={styles.header}>
+                    <Pressable onPress={gallery.clearSelection} hitSlop={12} style={styles.iconBtn}>
+                        <CloseIcon size={22} color={Colors.textPrimary} />
+                    </Pressable>
+                    <Text style={styles.headerTitle}>{gallery.selected.size} selected</Text>
+                    <View style={styles.headerActions}>
+                        <Pressable onPress={gallery.selectAll} hitSlop={12} style={styles.iconBtn}>
+                            <Text style={styles.selectAllText}>All</Text>
+                        </Pressable>
+                        <Pressable
+                            onPress={handleBulkDelete}
+                            hitSlop={12}
+                            disabled={gallery.deleting}
+                            style={[styles.iconBtn, gallery.deleting && styles.iconBtnDisabled]}
+                        >
+                            <TrashIcon size={20} color={Colors.errorLight} />
+                        </Pressable>
+                    </View>
+                </View>
+            ) : (
+                <View style={styles.header}>
+                    <View style={styles.headerTextWrap}>
+                        <Text style={styles.headerTitle}>Library</Text>
+                        <Text style={styles.headerSub}>{gallery.items.length} downloads</Text>
+                    </View>
+                    <View style={styles.headerActions}>
+                        <Pressable onPress={() => setShowSearch((s) => !s)} hitSlop={12} style={styles.iconBtn}>
+                            <SearchIcon size={20} color={Colors.textPrimary} />
+                        </Pressable>
+                        <Pressable onPress={() => { gallery.reload(); Haptics.impact(); }} hitSlop={12} style={styles.iconBtn}>
+                            <RefreshIcon size={20} color={Colors.textPrimary} />
+                        </Pressable>
+                    </View>
+                </View>
+            )}
+
+            <FlatList
+                key={`grid-${tileWidth}`}
+                data={gallery.visible}
+                keyExtractor={(item) => item.path}
+                renderItem={renderTile}
+                numColumns={COLUMNS}
+                ListHeaderComponent={header}
+                ListEmptyComponent={empty}
+                columnWrapperStyle={styles.row}
                 contentContainerStyle={styles.listContent}
-                showsVerticalScrollIndicator={false}
                 refreshControl={
                     <RefreshControl
-                        refreshing={refreshing}
-                        onRefresh={handleRefresh}
-                        tintColor={Colors.primary}
+                        refreshing={gallery.refreshing}
+                        onRefresh={() => gallery.reload()}
+                        tintColor={Colors.textMuted}
                         colors={[Colors.primary]}
                     />
                 }
+                removeClippedSubviews
+                initialNumToRender={12}
+                maxToRenderPerBatch={12}
+                windowSize={7}
             />
 
-            {/* File Detail Modal */}
-            <FileDetailModal
-                visible={showFileModal}
-                file={selectedFile}
-                onClose={() => setShowFileModal(false)}
-                onPlay={handlePlay}
-                onShare={handleShare}
-                onDelete={handleDelete}
-                onOpenText={handleOpenText}
+            <MediaPreviewModal
+                item={preview}
+                onClose={() => setPreview(null)}
+                onDelete={
+                    preview
+                        ? () => {
+                              const target = preview;
+                              setPreview(null);
+                              handleDeleteOne(target);
+                          }
+                        : undefined
+                }
             />
 
-            {/* Lyrics / Subtitle Viewer */}
-            <SubtitleViewerModal file={viewerFile} onClose={() => setViewerFile(null)} />
-
-            {/* Storage Info Modal */}
-            <StorageInfoModal
-                visible={showStorageInfo}
-                basePath={basePath}
-                onClose={() => setShowStorageInfo(false)}
-            />
+            {textViewer && <SubtitleViewerModal file={textViewer} onClose={() => setTextViewer(null)} />}
         </SafeAreaView>
     );
 };
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: Colors.background,
-    },
+    root: { flex: 1, backgroundColor: Colors.background },
     header: {
-        paddingHorizontal: Spacing.md,
-        paddingTop: Spacing.lg,
-        paddingBottom: Spacing.sm,
-    },
-    headerContent: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
         paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        gap: Spacing.sm,
     },
+    headerTextWrap: { flex: 1 },
     headerTitle: {
-        fontSize: Typography.sizes['3xl'],
-        fontWeight: Typography.weights.black,
         color: Colors.textPrimary,
-        letterSpacing: Typography.letterSpacing.tight,
+        fontSize: Typography.sizes.xl,
+        fontWeight: Typography.weights.bold,
     },
-    headerSubtitle: {
-        fontSize: Typography.sizes.xs,
-        color: Colors.textMuted,
-        fontWeight: Typography.weights.medium,
-        letterSpacing: 1,
-        textTransform: 'uppercase',
-        marginTop: 2,
-    },
-    refreshButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 12,
-        backgroundColor: Colors.surfaceMedium,
+    headerSub: { color: Colors.textMuted, fontSize: Typography.sizes.xs, marginTop: 1 },
+    headerActions: { flexDirection: 'row', gap: Spacing.xs, alignItems: 'center' },
+    iconBtn: {
+        width: 38,
+        height: 38,
+        borderRadius: BorderRadius.round,
+        alignItems: 'center',
         justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: Colors.innerBorder,
+        backgroundColor: Colors.surface,
     },
-    listContent: {
-        paddingBottom: 120,
-    },
-    // Storage Card
-    storageCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: Colors.surfaceMedium,
-        marginHorizontal: Spacing.md,
-        borderRadius: 16,
-        padding: 14,
-        marginBottom: Spacing.md,
-        borderWidth: 1,
-        borderColor: Colors.innerBorder,
-    },
-    storageIconContainer: {
-        width: 40,
-        height: 40,
-        borderRadius: 10,
-        backgroundColor: `${Colors.primary}10`,
-        justifyContent: 'center',
-        alignItems: 'center',
-        position: 'relative',
-    },
-    storageIconGlow: {
-        position: 'absolute',
-        width: '100%',
-        height: '100%',
-        borderRadius: 10,
-        opacity: 0.1,
-    },
-    storageInfo: {
-        flex: 1,
-        marginLeft: Spacing.md,
-    },
-    storageTitle: {
-        fontSize: 10,
-        fontWeight: Typography.weights.bold,
-        color: Colors.textMuted,
-        letterSpacing: 1,
-    },
-    storagePath: {
-        fontSize: Typography.sizes.sm,
-        color: Colors.textPrimary,
-        fontWeight: Typography.weights.medium,
-        marginTop: 2,
-    },
-    storageAction: {
-        padding: Spacing.xs,
-    },
-    // Platform Storage Usage Card
-    platformStorageCard: {
-        backgroundColor: Colors.surfaceMedium,
-        marginHorizontal: Spacing.md,
-        borderRadius: 16,
-        padding: 16,
-        marginBottom: Spacing.lg,
-        borderWidth: 1,
-        borderColor: Colors.innerBorder,
-    },
-    platformStorageHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 16,
-    },
-    platformStorageHeaderLeft: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: Spacing.sm,
-    },
-    platformStorageTitle: {
-        fontSize: 10,
-        fontWeight: Typography.weights.bold,
-        color: Colors.textMuted,
-        letterSpacing: 1,
-    },
-    platformStorageTotal: {
-        fontSize: Typography.sizes.sm,
-        fontWeight: Typography.weights.bold,
+    iconBtnDisabled: { opacity: 0.4 },
+    selectAllText: {
         color: Colors.primary,
+        fontSize: Typography.sizes.sm,
+        fontWeight: Typography.weights.semibold,
     },
-    platformStorageList: {
-        gap: 14,
-    },
-    platformStorageItem: {
-        gap: 8,
-    },
-    platformStorageItemHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-    },
-    platformStorageItemLeft: {
+    searchRow: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: Spacing.sm,
-    },
-    platformDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 2,
-    },
-    platformStorageItemName: {
-        fontSize: Typography.sizes.xs,
-        color: Colors.textSecondary,
-        fontWeight: Typography.weights.semibold,
-        textTransform: 'uppercase',
-    },
-    platformStorageItemSize: {
-        fontSize: Typography.sizes.xxs,
-        color: Colors.textMuted,
-        fontWeight: Typography.weights.medium,
-    },
-    platformStorageBar: {
-        height: 4,
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-        borderRadius: 2,
-        overflow: 'hidden',
-    },
-    platformStorageBarFill: {
-        height: '100%',
-        borderRadius: 2,
-    },
-    // Folder Card
-    folderCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: Colors.surfaceMedium,
-        padding: 16,
         marginHorizontal: Spacing.md,
-        marginBottom: 2,
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: Colors.innerBorder,
-    },
-    folderIconBg: {
-        width: 40,
-        height: 40,
-        borderRadius: 10,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    folderInfo: {
-        flex: 1,
-        marginLeft: Spacing.md,
-    },
-    folderName: {
-        fontSize: Typography.sizes.base,
-        fontWeight: Typography.weights.bold,
-        color: Colors.textPrimary,
-        letterSpacing: Typography.letterSpacing.normal,
-    },
-    folderMeta: {
-        fontSize: 10,
-        color: Colors.textMuted,
-        fontWeight: Typography.weights.medium,
-        marginTop: 2,
-        letterSpacing: 0.5,
-    },
-    // Expanded Content
-    expandedContent: {
-        marginBottom: Spacing.md,
-        marginTop: 4,
-        marginHorizontal: Spacing.md,
-        backgroundColor: 'rgba(255, 255, 255, 0.02)',
-        borderBottomLeftRadius: 16,
-        borderBottomRightRadius: 16,
-        borderWidth: 1,
-        borderColor: Colors.innerBorder,
-        borderTopWidth: 0,
-        paddingBottom: Spacing.md,
-    },
-    // Content Type
-    contentTypeContainer: {
-        marginTop: Spacing.md,
-    },
-    contentTypeHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 12,
+        marginBottom: Spacing.sm,
         paddingHorizontal: Spacing.md,
+        height: 40,
+        borderRadius: BorderRadius.md,
+        backgroundColor: Colors.surface,
+        borderWidth: 1,
+        borderColor: Colors.border,
     },
-    contentTypeLine: {
-        flex: 1,
-        height: 1,
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    searchInput: { flex: 1, color: Colors.textPrimary, fontSize: Typography.sizes.base, padding: 0 },
+    chipRow: { gap: Spacing.xs, paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs },
+    chip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        borderRadius: BorderRadius.round,
+        backgroundColor: Colors.surface,
+        borderWidth: 1,
+        borderColor: Colors.border,
     },
-    contentTypeText: {
-        fontSize: 9,
-        fontWeight: Typography.weights.black,
-        marginHorizontal: Spacing.sm,
-        letterSpacing: 1.5,
+    chipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+    chipText: {
+        color: Colors.textSecondary,
+        fontSize: Typography.sizes.xs,
+        fontWeight: Typography.weights.medium,
     },
-    horizontalFileList: {
-        paddingLeft: Spacing.md,
+    chipTextActive: { color: Colors.background, fontWeight: Typography.weights.semibold },
+    statusRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: Spacing.md,
+        paddingTop: Spacing.sm,
     },
-    // File Card
-    fileCard: {
-        width: 140,
-        marginRight: Spacing.sm,
-        backgroundColor: Colors.surfaceHigh,
-        borderRadius: 12,
+    statusText: { color: Colors.textMuted, fontSize: Typography.sizes.xs },
+    sortBtn: {
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.xs,
+        borderRadius: BorderRadius.round,
+        backgroundColor: Colors.surface,
+    },
+    sortText: {
+        color: Colors.textSecondary,
+        fontSize: Typography.sizes.xs,
+        fontWeight: Typography.weights.semibold,
+    },
+    listContent: { paddingHorizontal: Spacing.md, paddingBottom: Spacing.xxl, gap: Spacing.md },
+    row: { gap: Spacing.xs },
+    tile: { marginBottom: Spacing.xs },
+    thumb: {
+        width: '100%',
+        aspectRatio: 1,
+        borderRadius: BorderRadius.md,
         overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: Colors.innerBorder,
-    },
-    fileThumbnail: {
-        width: '100%',
-        height: 85,
-        backgroundColor: Colors.surfaceLow,
-        position: 'relative',
-    },
-    thumbnailImage: {
-        width: '100%',
-        height: '100%',
-        resizeMode: 'cover',
-    },
-    filePlaceholder: {
-        width: '100%',
-        height: '100%',
-        justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: Colors.surfaceLow,
+        justifyContent: 'center',
     },
-    fileCardOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.1)',
-    },
-    playOverlaySmall: {
+    thumbImage: { width: '100%', height: '100%' },
+    scrim: {
         position: 'absolute',
-        top: '50%',
-        left: '50%',
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginTop: -14,
-        marginLeft: -14,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        height: '38%',
+        backgroundColor: 'rgba(0,0,0,0.25)',
     },
-    fileCardInfo: {
-        padding: 8,
+    durationBadge: {
+        position: 'absolute',
+        right: 4,
+        bottom: 4,
+        paddingHorizontal: 5,
+        paddingVertical: 1,
+        borderRadius: 4,
+        backgroundColor: 'rgba(0,0,0,0.65)',
     },
-    fileName: {
+    durationText: {
+        color: '#FFF',
         fontSize: Typography.sizes.xxs,
         fontWeight: Typography.weights.semibold,
-        color: Colors.textPrimary,
-        marginBottom: 2,
+        fontVariant: ['tabular-nums'],
     },
-    fileSize: {
-        fontSize: 9,
-        color: Colors.textMuted,
-        fontWeight: Typography.weights.medium,
-    },
-    // Modal
-    modalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.85)',
-        justifyContent: 'flex-end',
-    },
-    modalContent: {
-        backgroundColor: Colors.surfaceHigh,
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        padding: Spacing.lg,
-        paddingBottom: 40,
-        borderWidth: 1,
-        borderColor: Colors.innerBorderLight,
-    },
-    modalHeader: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        justifyContent: 'space-between',
-        marginBottom: Spacing.lg,
-    },
-    modalTitle: {
-        flex: 1,
-        fontSize: Typography.sizes.lg,
-        fontWeight: Typography.weights.bold,
-        color: Colors.textPrimary,
-        marginRight: Spacing.md,
-        letterSpacing: Typography.letterSpacing.normal,
-    },
-    closeButton: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: 'rgba(255,255,255,0.05)',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    modalPreview: {
-        width: '100%',
-        height: 200,
-        borderRadius: 16,
-        overflow: 'hidden',
-        backgroundColor: Colors.surfaceLow,
-        marginBottom: Spacing.lg,
-        borderWidth: 1,
-        borderColor: Colors.innerBorder,
-    },
-    modalThumbnail: {
-        width: '100%',
-        height: '100%',
-        resizeMode: 'cover',
-    },
-    modalPlaceholder: {
-        width: '100%',
-        height: '100%',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    // File Info Section
-    fileInfoSection: {
-        marginBottom: Spacing.xl,
-        backgroundColor: 'rgba(255,255,255,0.02)',
-        borderRadius: 12,
-        padding: 4,
-    },
-    infoRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingVertical: 12,
-        paddingHorizontal: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255,255,255,0.03)',
-    },
-    infoLabel: {
-        fontSize: 10,
-        fontWeight: Typography.weights.bold,
-        color: Colors.textMuted,
-        letterSpacing: 0.5,
-        textTransform: 'uppercase',
-    },
-    infoValue: {
-        flex: 1,
-        fontSize: Typography.sizes.sm,
-        color: Colors.textPrimary,
-        textAlign: 'right',
-        fontWeight: Typography.weights.medium,
-    },
-    pathText: {
-        fontSize: 10,
-        opacity: 0.7,
-    },
-    platformBadge: {
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 6,
-    },
-    platformBadgeText: {
-        fontSize: 10,
-        fontWeight: Typography.weights.bold,
-        textTransform: 'uppercase',
-    },
-    // Modal Actions
-    modalActions: {
-        flexDirection: 'row',
-        gap: 12,
-    },
-    actionButton: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        paddingVertical: 16,
-        borderRadius: 12,
-    },
-    actionButtonText: {
-        fontSize: Typography.sizes.sm,
-        fontWeight: Typography.weights.bold,
-        color: Colors.textPrimary,
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
-    },
-    shareButton: {
-        backgroundColor: Colors.surfaceMedium,
-        borderWidth: 1,
-        borderColor: Colors.innerBorder,
-    },
-    deleteButton: {
-        backgroundColor: 'rgba(239, 68, 68, 0.15)',
-        borderWidth: 1,
-        borderColor: 'rgba(239, 68, 68, 0.2)',
-    },
-    // Info Modal
-    infoModalContent: {
-        backgroundColor: Colors.surfaceHigh,
-        marginHorizontal: Spacing.lg,
-        borderRadius: 20,
-        padding: Spacing.xl,
-        maxWidth: 400,
-        alignSelf: 'center',
-        borderWidth: 1,
-        borderColor: Colors.innerBorderLight,
-    },
-    infoModalHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        marginBottom: 20,
-    },
-    infoModalTitle: {
-        fontSize: Typography.sizes.lg,
-        fontWeight: Typography.weights.black,
-        color: Colors.textPrimary,
-        letterSpacing: Typography.letterSpacing.tight,
-    },
-    infoSection: {
-        marginBottom: 20,
-    },
-    infoSectionTitle: {
-        fontSize: 11,
-        fontWeight: Typography.weights.bold,
-        color: Colors.primary,
-        marginBottom: 6,
-        letterSpacing: 0.5,
-        textTransform: 'uppercase',
-    },
-    infoSectionText: {
-        fontSize: Typography.sizes.sm,
-        color: Colors.textSecondary,
-        lineHeight: 20,
-    },
-    pathBox: {
-        backgroundColor: Colors.surfaceLow,
-        padding: 12,
-        borderRadius: 8,
-        marginTop: 8,
-        borderWidth: 1,
-        borderColor: Colors.innerBorder,
-    },
-    pathBoxText: {
-        fontSize: 10,
-        color: Colors.textMuted,
-        fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    },
-    folderStructure: {
-        backgroundColor: Colors.surfaceLow,
-        padding: 12,
-        borderRadius: 8,
-        marginTop: 8,
-        borderWidth: 1,
-        borderColor: Colors.innerBorder,
-    },
-    structureItem: {
-        fontSize: 10,
-        color: Colors.textSecondary,
-        fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-        lineHeight: 18,
-    },
-    gotItButton: {
-        backgroundColor: Colors.primary,
-        paddingVertical: 14,
+    playDot: {
+        position: 'absolute',
+        left: 4,
+        bottom: 4,
+        width: 20,
+        height: 20,
         borderRadius: 10,
         alignItems: 'center',
-        marginTop: 10,
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0,0,0,0.55)',
     },
-    gotItText: {
-        fontSize: Typography.sizes.base,
-        fontWeight: Typography.weights.bold,
-        color: Colors.textPrimary,
-        letterSpacing: 0.5,
-    },
-    fileCardOverlaySmall: {
+    selRing: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.1)',
+        borderRadius: BorderRadius.md,
+        borderWidth: 2.5,
     },
-    losslessBadgeSmall: {
+    selDot: {
         position: 'absolute',
-        top: 6,
-        right: 6,
-        backgroundColor: Colors.lossless,
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 4,
+        top: 4,
+        right: 4,
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    losslessBadgeTextSmall: {
-        color: '#000',
-        fontSize: 8,
-        fontWeight: Typography.weights.black,
-        letterSpacing: 0.5,
+    tileTitle: {
+        color: Colors.textPrimary,
+        fontSize: Typography.sizes.xs,
+        marginTop: Spacing.xs,
+        fontWeight: Typography.weights.medium,
     },
-    losslessBadgeLarge: {
-        position: 'absolute',
-        bottom: 12,
-        backgroundColor: Colors.lossless,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 20,
-        borderWidth: 1,
-        borderColor: 'rgba(0,0,0,0.1)',
-    },
-    losslessBadgeTextLarge: {
-        color: '#000',
-        fontSize: 10,
-        fontWeight: Typography.weights.black,
-        letterSpacing: 1,
-    },
+    tileMeta: { color: Colors.textMuted, fontSize: Typography.sizes.xxs },
 });
 
 export default LibraryScreen;

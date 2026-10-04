@@ -35,10 +35,12 @@ class MainActivity : ReactActivity() {
         handleIntent(intent)
     }
 
-    override fun onNewIntent(intent: Intent?) {
+    // RN 0.83 declares this as a non-null Intent, so the previous nullable
+    // signature stopped overriding anything and broke the Kotlin compile.
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        intent?.let { handleIntent(it) }
+        handleIntent(intent)
     }
 
     private fun handleIntent(intent: Intent) {

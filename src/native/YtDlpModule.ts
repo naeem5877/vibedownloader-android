@@ -145,6 +145,16 @@ export interface DownloadedFile {
     contentType: string;
     extension: string;
     thumbnail?: string | null;
+    /** Duration in ms, or -1 when the file has no readable timing. */
+    duration?: number;
+    /** Resolved from the extension, e.g. "video/mp4". */
+    mimeType?: string;
+}
+
+/** Per-file outcome from a bulk delete, so failures can be named to the user. */
+export interface BulkDeleteResult {
+    deleted: string[];
+    failed: string[];
 }
 
 // Shared Data from Intent
@@ -204,6 +214,9 @@ export interface YtDlpNativeModule {
     getPlaylistInfo(url: string, options?: { cookies?: string; extractorArgs?: string; args?: string[] }): Promise<string>;
     listDownloadedFiles(): Promise<DownloadedFile[]>;
     deleteFile(filePath: string): Promise<boolean>;
+    deleteFiles(filePaths: string[]): Promise<BulkDeleteResult>;
+    /** Poster frame for a video, generated on demand and cached on disk. */
+    getMediaThumbnail(filePath: string): Promise<string | null>;
     openFile(filePath: string): Promise<boolean>;
     shareFile(filePath: string): Promise<boolean>;
     // Share Intent Methods

@@ -2790,6 +2790,8 @@ platform.equals("Spotify", ignoreCase = true) ||
                                 putString("contentType", contentType)
                                 putString("extension", file.extension)
                                 putString("thumbnail", thumbnail)
+                                putDouble("duration", mediaDurationMs(file))
+                                putString("mimeType", mimeForPath(file.absolutePath))
                             }
                             filesArray.pushMap(fileMap)
                         }
@@ -2910,6 +2912,110 @@ fun cancelDownload(processId: String, promise: Promise) {
         }
     }
 
+    /** Extensions the retriever can decode a poster frame from. */
+    private val VIDEO_EXTENSIONS = setOf("mp4", "webm", "mkv", "mov", "avi", "3gp", "m4v")
+
+    /**
+     * Duration in milliseconds for playable media, or -1.
+     *
+     * The gallery sorts and labels by length, and a bare filename carries no
+     * timing at all. Failure is tolerated because a missing duration should
+     * degrade the label, not hide the file.
+     */
+    private fun mediaDurationMs(file: File): Double {
+        val ext = file.extension.lowercase()
+        if (ext !in VIDEO_EXTENSIONS && ext !in AUDIO_EXTENSIONS) return -1.0
+        val retriever = android.media.MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull()?.toDouble() ?: -1.0
+        } catch (e: Exception) {
+            -1.0
+        } finally {
+            try { retriever.release() } catch (ignored: Exception) {}
+        }
+    }
+
+    /**
+     * Poster frame for a video, cached on disk by path and mtime.
+     *
+     * The gallery previously had no poster for videos at all, so every video
+     * rendered as a generic icon. The frame is generated on demand rather than
+     * shipped, and the cache key folds in mtime so an edited or re-downloaded
+     * file regenerates instead of showing a stale poster.
+     *
+     * @param targetWidth decode width in px; kept small because this runs per
+     *   grid cell and a full-size frame would thrash memory on a long list.
+     * @return a file:// URI for the cached JPEG, or null when unavailable.
+     */
+    private fun videoThumbnail(file: File, targetWidth: Int = 480): String? {
+        val ext = file.extension.lowercase()
+        if (ext !in VIDEO_EXTENSIONS || !file.exists() || file.length() == 0L) return null
+
+        val cacheDir = File(reactApplicationContext.cacheDir, "videothumbs").apply { mkdirs() }
+        val key = "${file.absolutePath.hashCode().toUInt()}-${file.lastModified()}-${file.length()}"
+        val cached = File(cacheDir, "$key.jpg")
+        if (cached.exists() && cached.length() > 0L) return "file://${cached.absolutePath}"
+
+        val retriever = android.media.MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            val durationMs = retriever
+                .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 0L
+            // Sample away from the very start: the opening frames of a download
+            // are frequently black, a fade-in, or a still slate.
+            val at = (durationMs / 8).coerceAtLeast(1_000_000L)
+            val bitmap = retriever.getFrameAtTime(
+                at,
+                android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+            ) ?: retriever.frameAtTime
+
+            if (bitmap != null) {
+                val scaled = if (bitmap.width > targetWidth) {
+                    val h = (bitmap.height.toLong() * targetWidth / bitmap.width).toInt().coerceAtLeast(1)
+                    android.graphics.Bitmap.createScaledBitmap(bitmap, targetWidth, h, true)
+                } else bitmap
+
+                FileOutputStream(cached).use { out ->
+                    scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out)
+                }
+                if (scaled !== bitmap) scaled.recycle()
+                bitmap.recycle()
+                "file://${cached.absolutePath}"
+            } else null
+        } catch (e: Exception) {
+            // A corrupt or codec-unsupported video must not fail the whole
+            // listing, so the caller just falls back to the icon tile.
+            Log.w(TAG, "Video thumbnail failed for ${file.name}: ${e.message}")
+            null
+        } finally {
+            try { retriever.release() } catch (ignored: Exception) {}
+        }
+    }
+
+    /**
+     * Creates a poster JPEG for a video and returns its file:// URI.
+     *
+     * Exposed because the gallery requests posters lazily, one screenful at a
+     * time, instead of decoding every video up front during listing.
+     */
+    @ReactMethod
+    fun getMediaThumbnail(filePath: String, promise: Promise) {
+        scope.launch {
+            try {
+                val uri = withContext(Dispatchers.IO) { videoThumbnail(File(filePath)) }
+                withContext(Dispatchers.Main) { promise.resolve(uri) }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { promise.reject("THUMBNAIL_ERROR", e.message) }
+            }
+        }
+    }
+
+    /** Audio containers, used to decide whether a duration is worth reading. */
+    private val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "flac", "aac", "wav", "ogg", "opus")
+
     /**
      * Reads a UTF-8 text file (lyrics, subtitles) for the in-app viewer.
      *
@@ -3016,14 +3122,32 @@ fun cancelDownload(processId: String, promise: Promise) {
                 Log.d(TAG, "Attempting to delete file: $filePath")
 
                 // 1. Try cleanup of private sidecar files first
-                try {
-                    val thumbDir = File(reactApplicationContext.getExternalFilesDir(null), "thumbnails")
-                    val thumbFile = File(thumbDir, "${file.nameWithoutExtension}.jpg")
-                    if (thumbFile.exists()) {
-                        thumbFile.delete()
+                val thumbDirs = listOf(
+                    // Artwork is written to filesDir during download, so that is
+                    // the dir that actually holds these. The old code only
+                    // cleaned getExternalFilesDir, so every deleted download left
+                    // its artwork behind on disk.
+                    File(reactApplicationContext.filesDir, "thumbnails"),
+                    File(reactApplicationContext.getExternalFilesDir(null), "thumbnails")
+                )
+                for (dir in thumbDirs) {
+                    try {
+                        val thumbFile = File(dir, "${file.nameWithoutExtension}.jpg")
+                        if (thumbFile.exists()) thumbFile.delete()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to delete thumbnail sidecar in $dir")
                     }
+                }
+
+                // Drop the cached poster frame so a re-download of the same path
+                // cannot resurrect the old video's thumbnail.
+                try {
+                    val videoCache = File(reactApplicationContext.cacheDir, "videothumbs")
+                    videoCache.listFiles()
+                        ?.filter { it.name.startsWith("${file.absolutePath.hashCode().toUInt()}-") }
+                        ?.forEach { it.delete() }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to delete thumbnail sidecar")
+                    Log.w(TAG, "Failed to clear cached video thumbnail")
                 }
 
                 // 2. Try direct file deletion (Works on legacy storage or app-private dirs)
@@ -3091,6 +3215,127 @@ fun cancelDownload(processId: String, promise: Promise) {
                 withContext(Dispatchers.Main) { promise.reject("DELETE_ERROR", e.message) }
             }
         }
+    }
+
+    /**
+     * Deletes several files, reporting per-file success.
+     *
+     * Bulk delete in the gallery must not be all-or-nothing: if one file is held
+     * by something else, the rest should still go and the user should be told
+     * exactly which ones survived. Returns `{ deleted: string[],
+     * failed: string[] }` rather than a single boolean so the UI can name the
+     * failures instead of silently claiming everything worked.
+     *
+     * Runs sequentially on IO because each call does its own MediaStore query;
+     * doing them in parallel on scoped storage just contends on the resolver.
+     */
+    @ReactMethod
+    fun deleteFiles(filePaths: ReadableArray, promise: Promise) {
+        scope.launch {
+            val deleted = WritableNativeArray()
+            val failed = WritableNativeArray()
+            try {
+                for (i in 0 until filePaths.size()) {
+                    val path = filePaths.getString(i) ?: continue
+                    val ok = withContext(Dispatchers.IO) { deleteOne(path) }
+                    if (ok) deleted.pushString(path) else failed.pushString(path)
+                }
+                val result = WritableNativeMap().apply {
+                    putArray("deleted", deleted)
+                    putArray("failed", failed)
+                }
+                withContext(Dispatchers.Main) { promise.resolve(result) }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { promise.reject("DELETE_ERROR", e.message) }
+            }
+        }
+    }
+
+    /**
+     * Single-file delete without a promise, shared by [deleteFile] and the bulk
+     * path so both get identical MediaStore fallback and scanner behaviour.
+     */
+    private suspend fun deleteOne(filePath: String): Boolean {
+        val file = File(filePath)
+        var deleted = false
+
+        // Clean up both thumbnail locations plus the cached poster frame.
+        for (dir in listOf(
+            File(reactApplicationContext.filesDir, "thumbnails"),
+            File(reactApplicationContext.getExternalFilesDir(null), "thumbnails")
+        )) {
+            try {
+                val thumbFile = File(dir, "${file.nameWithoutExtension}.jpg")
+                if (thumbFile.exists()) thumbFile.delete()
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to delete thumbnail sidecar in $dir")
+            }
+        }
+        try {
+            File(reactApplicationContext.cacheDir, "videothumbs").listFiles()
+                ?.filter { it.name.startsWith("${file.absolutePath.hashCode().toUInt()}-") }
+                ?.forEach { it.delete() }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to clear cached video thumbnail")
+        }
+
+        if (file.exists()) {
+            try {
+                if (file.delete()) deleted = true
+            } catch (e: Exception) {
+                Log.d(TAG, "Direct deletion failed, will try MediaStore")
+            }
+        }
+
+        // Scoped storage: the file is still owned by MediaStore, not the path.
+        if (!deleted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val resolver = reactApplicationContext.contentResolver
+            val collections = listOf(
+                android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                android.provider.MediaStore.Files.getContentUri("external")
+            )
+            val selection = "${android.provider.MediaStore.MediaColumns.DATA} = ?"
+            val selectionArgs = arrayOf(filePath)
+
+            for (collectionUri in collections) {
+                try {
+                    resolver.query(
+                        collectionUri,
+                        arrayOf(android.provider.MediaStore.MediaColumns._ID),
+                        selection, selectionArgs, null
+                    )?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val id = cursor.getLong(
+                                cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID)
+                            )
+                            if (resolver.delete(
+                                    android.content.ContentUris.withAppendedId(collectionUri, id),
+                                    null, null
+                                ) > 0
+                            ) {
+                                deleted = true
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed query/delete in $collectionUri")
+                }
+                if (deleted) break
+            }
+        }
+
+        if (deleted || !File(filePath).exists()) {
+            // Rescan so the file vanishes from other gallery apps immediately
+            // instead of lingering until the next media scan.
+            android.media.MediaScannerConnection.scanFile(
+                reactApplicationContext, arrayOf(filePath), null, null
+            )
+            return true
+        }
+        return false
     }
 
     private fun sendEvent(eventName: String, params: WritableMap?) {

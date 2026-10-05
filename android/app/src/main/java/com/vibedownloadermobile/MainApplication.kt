@@ -7,6 +7,7 @@ import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.vibedownloadermobile.ytdlp.YtDlpPackage
+import com.vibedownloadermobile.ytdlp.Webp16kPatcher
 import com.vibedownloadermobile.cookie.CookiePackage
 import com.vibedownloadermobile.story.StoryPackage
 import com.vibedownloadermobile.webview.WebViewLoginPackage
@@ -47,6 +48,7 @@ class MainApplication : Application(), ReactApplication {
           Log.w("MainApplication", "FFmpeg init fallback: ${t2.message}")
         }
       }
+      Webp16kPatcher.apply(this)
       Log.d("MainApplication", "YoutubeDL & FFmpeg initialized in Application.onCreate")
     } catch (e: Exception) {
       Log.e("MainApplication", "Failed to initialize YoutubeDL in Application.onCreate", e)

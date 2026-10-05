@@ -13,7 +13,7 @@ export const DiscordButton: React.FC<DiscordButtonProps> = ({ compact = false })
     const pulseAnim = useRef(new Animated.Value(1)).current;
 
     useEffect(() => {
-        Animated.loop(
+        const loop = Animated.loop(
             Animated.sequence([
                 Animated.timing(pulseAnim, {
                     toValue: 1.05,
@@ -28,7 +28,9 @@ export const DiscordButton: React.FC<DiscordButtonProps> = ({ compact = false })
                     useNativeDriver: true,
                 }),
             ])
-        ).start();
+        );
+        loop.start();
+        return () => loop.stop();
     }, []);
 
     const handlePress = () => {

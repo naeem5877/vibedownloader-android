@@ -13,17 +13,17 @@ export const SkeletonCard = () => {
 
     useEffect(() => {
         // Shimmer animation
-        Animated.loop(
+        const shimmerLoop = Animated.loop(
             Animated.timing(shimmerAnim, {
                 toValue: 1,
                 duration: 1500,
                 useNativeDriver: true,
                 easing: Easing.linear,
             })
-        ).start();
+        );
 
         // Pulse animation
-        Animated.loop(
+        const pulseLoop = Animated.loop(
             Animated.sequence([
                 Animated.timing(pulseAnim, {
                     toValue: 0.6,
@@ -38,7 +38,14 @@ export const SkeletonCard = () => {
                     easing: Easing.inOut(Easing.ease),
                 }),
             ])
-        ).start();
+        );
+
+        shimmerLoop.start();
+        pulseLoop.start();
+        return () => {
+            shimmerLoop.stop();
+            pulseLoop.stop();
+        };
     }, []);
 
     const translateX = shimmerAnim.interpolate({

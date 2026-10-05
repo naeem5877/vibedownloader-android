@@ -72,7 +72,7 @@ export const DownloadProgress: React.FC<DownloadProgressProps> = ({
 
     // Pulse animation
     useEffect(() => {
-        Animated.loop(
+        const pulseLoop = Animated.loop(
             Animated.sequence([
                 Animated.timing(pulseAnim, {
                     toValue: 1.02,
@@ -87,10 +87,10 @@ export const DownloadProgress: React.FC<DownloadProgressProps> = ({
                     easing: Easing.inOut(Easing.ease),
                 }),
             ])
-        ).start();
+        );
 
         // Glow animation
-        Animated.loop(
+        const glowLoop = Animated.loop(
             Animated.sequence([
                 Animated.timing(glowAnim, {
                     toValue: 1,
@@ -105,16 +105,25 @@ export const DownloadProgress: React.FC<DownloadProgressProps> = ({
                     easing: Easing.inOut(Easing.ease),
                 }),
             ])
-        ).start();
+        );
         // Shimmer effect
-        Animated.loop(
+        const shimmerLoop = Animated.loop(
             Animated.timing(shimmerAnim, {
                 toValue: 1,
                 duration: 2000,
                 useNativeDriver: true,
                 easing: Easing.linear,
             })
-        ).start();
+        );
+
+        pulseLoop.start();
+        glowLoop.start();
+        shimmerLoop.start();
+        return () => {
+            pulseLoop.stop();
+            glowLoop.stop();
+            shimmerLoop.stop();
+        };
     }, []);
 
     const formatStatus = (): string => {

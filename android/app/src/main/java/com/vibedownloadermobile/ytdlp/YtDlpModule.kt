@@ -110,6 +110,7 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
                     Log.w(TAG, "FFmpeg fallback init: ${t2.message}")
                 }
             }
+            Webp16kPatcher.apply(reactApplicationContext)
             isInitialized = true
             Log.d(TAG, "YtDlp & FFmpeg initialized successfully")
             
@@ -182,39 +183,159 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         return found
     }
 
+    /**
+     * Search path the bundled ffmpeg needs to start.
+     *
+     * ffmpeg's own libraries are not enough: libfontconfig (pulled in by ffmpeg)
+     * needs libexpat, which ships in the *python* package, and the loader
+     * answers with `library "libexpat.so.1" not found`. youtubedl-android sets
+     * both directories when it runs yt-dlp, so downloads worked, while our own
+     * probe and clip-cutting used only the ffmpeg directory and therefore always
+     * reported "ffmpeg cannot start on this device".
+     */
+    private fun ffmpegLibraryPath(): String {
+        val packages = File(reactApplicationContext.noBackupFilesDir, "youtubedl-android/packages")
+        val nativeDir = reactApplicationContext.applicationInfo.nativeLibraryDir
+        return listOf(File(packages, "python/usr/lib"), File(packages, "ffmpeg/usr/lib"))
+            .filter { it.isDirectory }
+            .map { it.absolutePath }
+            .plus(nativeDir)
+            .joinToString(":")
+    }
+
     /** True when the bundled binaries can actually be executed on this device. */
     fun isFfmpegAvailable(): Boolean {
-        ffmpegRuns?.let { return it }
+        // Only a positive answer is final. A failure can be transient (the
+        // libraries are still being unpacked on first launch), and caching it
+        // would disable trimming until the app process is killed.
+        if (ffmpegRuns == true) return true
         val binary = ffmpegBinary() ?: return false
         return try {
-            val nativeDir = reactApplicationContext.applicationInfo.nativeLibraryDir
-            val unpackedLibs = File(
-                reactApplicationContext.noBackupFilesDir,
-                "youtubedl-android/packages/ffmpeg/usr/lib"
-            ).absolutePath
             val builder = ProcessBuilder(binary.absolutePath, "-version")
                 .redirectErrorStream(true)
-            // The shared libraries live outside the app's native dir, so the
-            // probe needs the same search path the library uses at download time.
-            builder.environment()["LD_LIBRARY_PATH"] = "$unpackedLibs:$nativeDir"
+            builder.environment()["LD_LIBRARY_PATH"] = ffmpegLibraryPath()
             val process = builder.start()
-            process.inputStream.use { it.readBytes() }
+            val output = process.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
             if (!process.waitFor(8, java.util.concurrent.TimeUnit.SECONDS)) {
                 process.destroy()
                 false
+            } else if (process.exitValue() == 0) {
+                true
             } else {
-                process.exitValue() == 0
+                // The loader's message says exactly why (missing library, 16KB
+                // page-size alignment, ...). Keep it in the log.
+                Log.w(TAG, "ffmpeg -version failed (${process.exitValue()}): ${output.take(300)}")
+                false
             }
         } catch (e: Exception) {
             Log.w(TAG, "ffmpeg probe failed: ${e.message}")
             false
-        }.also { ffmpegRuns = it }
+        }.also { if (it) ffmpegRuns = true }
     }
 
 private fun isExecutable(file: File): Boolean = try {
         file.canExecute() || file.setExecutable(true, true)
     } catch (e: Exception) {
         false
+    }
+
+    /**
+     * Path to the bundled QuickJS binary (libqjs.so), or null if unusable.
+     *
+     * yt-dlp's JS challenge solver (`yt_dlp_ejs`) ships inside the bundled
+     * yt-dlp zipapp, so no remote component fetch is needed. What it does need is
+     * an interpreter, and with none available YouTube n-sig / player challenges
+     * fall back to the pure-Python interpreter and cost 30-40s. QuickJS is ~1MB
+     * and does it in a fraction of that.
+     *
+     * yt-dlp runs this as `libqjs.so --script <tmpfile>`, so it has to be
+     * executable, not merely present. Libraries unpacked into nativeLibraryDir
+     * are not guaranteed to carry the exec bit, so it is set explicitly rather
+     * than assumed.
+     *
+     * Only a positive result is cached. Like ffmpeg, the binary may not be
+     * unpacked yet on an early call, and remembering that miss would cost the
+     * whole process its JS runtime.
+     */
+    private fun quickJsPath(): String? {
+        if (quickJsProbed) return quickJsProbe
+        val nativeDir = reactApplicationContext.applicationInfo.nativeLibraryDir
+        val packages = File(reactApplicationContext.noBackupFilesDir, "youtubedl-android/packages")
+        val candidates = listOf(
+            File(nativeDir, "libqjs.so"),
+            File(packages, "quickjs/usr/bin/qjs"),
+            File(packages, "quickjs/bin/qjs"),
+            File(packages, "qjs"),
+        )
+        val found = candidates.firstOrNull { it.isFile && isExecutable(it) }
+        if (found != null) {
+            quickJsProbe = found.absolutePath
+            quickJsProbed = true
+            Log.d(TAG, "QuickJS binary (bundled in app): ${found.absolutePath}")
+        } else {
+            Log.w(TAG, "Bundled QuickJS not usable yet; will re-probe")
+        }
+        return found?.absolutePath
+    }
+
+    @Volatile
+    private var quickJsProbe: String? = null
+
+    @Volatile
+    private var quickJsProbed = false
+
+    /**
+     * True when the bundled QuickJS binary can actually be executed here.
+     *
+     * yt-dlp only reaches for a runtime when it has to solve a challenge, and it
+     * treats a runtime that fails to launch as a hard extraction error. Attaching
+     * a broken one would therefore break downloads that worked before, so the
+     * binary is executed once and only attached if it answers.
+     *
+     * Only a positive answer is cached: the libraries may still be unpacking on
+     * an early call, and caching that miss would cost the process its runtime.
+     */
+    private fun isQuickJsAvailable(): Boolean {
+        if (quickJsRuns == true) return true
+        val binary = quickJsPath() ?: return false
+        return try {
+            val process = ProcessBuilder(binary, "--help")
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+            if (!process.waitFor(8, java.util.concurrent.TimeUnit.SECONDS)) {
+                process.destroy()
+                false
+            } else if (process.exitValue() == 0) {
+                true
+            } else {
+                // The loader's message says exactly why (missing library,
+                // wrong page size, ...). Keep it in the log.
+                Log.w(TAG, "QuickJS --help failed (${process.exitValue()}): ${output.take(300)}")
+                false
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "QuickJS probe failed: ${e.message}")
+            false
+        }.also { if (it) quickJsRuns = true }
+    }
+
+    @Volatile
+    private var quickJsRuns: Boolean? = null
+
+    /**
+     * Attach the JS runtime so yt-dlp uses QuickJS instead of its slow
+     * pure-Python interpreter.
+     *
+     * `--no-js-runtimes` has to come first: only "deno" is enabled by default,
+     * and clearing the defaults before enabling QuickJS keeps the choice
+     * deterministic rather than depending on what happens to be installed.
+     */
+    private fun applyJsRuntime(request: YoutubeDLRequest) {
+        if (!isQuickJsAvailable()) return
+        val path = quickJsPath() ?: return
+        request.addOption("--no-js-runtimes")
+        request.addOption("--js-runtimes", "quickjs:$path")
     }
 
     // ---------------------------------------------------------------------
@@ -262,14 +383,9 @@ private fun isExecutable(file: File): Boolean = try {
     ): Int? {
         val binary = ffmpegBinary() ?: return null
         return try {
-            val nativeDir = reactApplicationContext.applicationInfo.nativeLibraryDir
-            val unpackedLibs = File(
-                reactApplicationContext.noBackupFilesDir,
-                "youtubedl-android/packages/ffmpeg/usr/lib"
-            ).absolutePath
             val builder = ProcessBuilder(listOf(binary.absolutePath) + args)
                 .redirectErrorStream(true)
-            builder.environment()["LD_LIBRARY_PATH"] = "$unpackedLibs:$nativeDir"
+            builder.environment()["LD_LIBRARY_PATH"] = ffmpegLibraryPath()
 
             val process = builder.start()
             activeCutProcesses[processId] = process
@@ -403,6 +519,7 @@ private fun isExecutable(file: File): Boolean = try {
                     probe.addOption("--user-agent", DESKTOP_USER_AGENT)
                     probe.addOption("--list-formats")
                     probe.addOption("--extractor-args", "youtube:player_client=$client")
+                    applyJsRuntime(probe)
                     val out = YoutubeDL.getInstance().execute(probe, null, true, null).out.orEmpty()
                     val rows = out.lineSequence().filter { it.contains('|') }.toList()
                     val usable = rows.count { !it.contains("storyboard") && !it.contains("images") }
@@ -472,6 +589,7 @@ private suspend fun probeVerbose(url: String, playerClients: String?) {
         if (!playerClients.isNullOrEmpty()) {
             probe.addOption("--extractor-args", "youtube:player_client=$playerClients")
         }
+        applyJsRuntime(probe)
         val response = YoutubeDL.getInstance().execute(probe, null, true, null)
         out = response.out.orEmpty()
         err = response.err.orEmpty()
@@ -1135,6 +1253,10 @@ host.contains("soundcloud") -> "SoundCloud"
                     request.addOption("--force-ipv4")
                     request.addOption("--no-check-certificate")
                     request.addOption("--socket-timeout", "30")
+
+                    // External JS runtime (QuickJS) for YouTube n-sig — without this
+                    // yt-dlp falls back to its pure-Python interpreter (~30-40s).
+                    applyJsRuntime(request)
                     
                     // Use a standard Desktop User-Agent to bypass simple bot protections for TikTok, Instagram, etc.
                     // Note: Do not use --impersonate as it requires curl-cffi which isn't available on Android
@@ -1174,6 +1296,7 @@ if (options?.hasKey("cookies") == true) {
                     if (platform == "YouTube" && !playerClients.isNullOrEmpty()) {
                         request.addOption("--extractor-args", "youtube:player_client=$playerClients")
                     }
+                    if (platform == "YouTube") applyJsRuntime(request)
                     request.addOption("--no-playlist")
                     
                     // No -f selector here on purpose. Two reasons:
@@ -1492,6 +1615,7 @@ withContext(Dispatchers.Main) {
                 request.addOption("--socket-timeout", "30")
                 request.addOption("--user-agent", DESKTOP_USER_AGENT)
                 request.addOption("-o", "${cacheDir.absolutePath}/$stem.%(ext)s")
+                applyJsRuntime(request)
 
                 if (url.contains("instagram.com")) {
                     request.addOption("--referer", "https://www.instagram.com/")
@@ -1874,6 +1998,7 @@ private fun publishSidecarFile(
                 // Longer timeout for stories (multiple entries to resolve)
                 request.addOption("--socket-timeout", if (isStoryUrl) "45" else "30")
                 request.addOption("--user-agent", DESKTOP_USER_AGENT)
+                applyJsRuntime(request)
                 request.addOption("--no-warnings")
                 
                 if (url.contains("instagram.com")) {
@@ -1986,6 +2111,9 @@ val isCutDownload = requestedCutStart != null && requestedCutEnd != null &&
                 Log.d(TAG, "Starting download to cache: ${cacheDir.absolutePath}")
 
                 val request = YoutubeDLRequest(url)
+
+                // External JS runtime for YouTube challenges (same as fetchInfo)
+                applyJsRuntime(request)
                 
                 if (options?.hasKey("cookies") == true) {
                     val cookiesPath = options.getString("cookies")
@@ -2152,6 +2280,7 @@ else -> {
         // here is rejected with "Requested format is not available".
         val playerClient = requestedPlayerClient?.takeIf { it.isNotBlank() } ?: "web_embedded"
         request.addOption("--extractor-args", "youtube:player_client=$playerClient")
+        applyJsRuntime(request)
       }
       if (isTwitch) {
         // Twitch quality ids are bare names ("1080p60", "720p60", "audio_only")
@@ -2184,6 +2313,7 @@ else -> {
                             // tv_embedded is skipped by yt-dlp and web is SABR-only,
                             // so web_embedded is the client that still resolves streams.
                             request.addOption("--extractor-args", "youtube:player_client=web_embedded")
+                            applyJsRuntime(request)
                             if (ffmpegAvailable) {
                                 request.addOption("-f", "bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best")
                                 request.addOption("--merge-output-format", "mp4")
@@ -2535,6 +2665,9 @@ platform.equals("Spotify", ignoreCase = true) ||
                 
                 val request = YoutubeDLRequest(ytSearchUrl)
                 val safeFileName = title.replace(Regex("[^a-zA-Z0-9 \\-_]"), "_").take(100)
+                // The search target is YouTube Music, so it needs the same JS
+                // runtime as any other YouTube extraction.
+                applyJsRuntime(request)
                 
                 val spotifyFfmpegLoc = getFFmpegLocation()
                 if (spotifyFfmpegLoc != null) {

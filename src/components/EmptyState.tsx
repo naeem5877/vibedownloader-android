@@ -86,59 +86,71 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
         ]).start();
 
         // Continuous Loop Animations
+        const loops: Animated.CompositeAnimation[] = [];
         const startLoops = () => {
             // Pulse
-            Animated.loop(
-                Animated.sequence([
-                    Animated.timing(pulseAnim, {
-                        toValue: 1.1,
-                        duration: 3000,
-                        easing: Easing.inOut(Easing.sin),
-                        useNativeDriver: true,
-                    }),
-                    Animated.timing(pulseAnim, {
-                        toValue: 1,
-                        duration: 3000,
-                        easing: Easing.inOut(Easing.sin),
-                        useNativeDriver: true,
-                    }),
-                ])
-            ).start();
-
-            // Rotation for hero rings
-            Animated.loop(
-                Animated.timing(rotateAnim, {
-                    toValue: 1,
-                    duration: 20000,
-                    easing: Easing.linear,
-                    useNativeDriver: true,
-                })
-            ).start();
-
-            // Orb Float
-            const createFloat = (val: Animated.Value, duration: number, distance: number) => {
+            loops.push(
                 Animated.loop(
                     Animated.sequence([
-                        Animated.timing(val, {
-                            toValue: distance,
-                            duration,
+                        Animated.timing(pulseAnim, {
+                            toValue: 1.1,
+                            duration: 3000,
                             easing: Easing.inOut(Easing.sin),
                             useNativeDriver: true,
                         }),
-                        Animated.timing(val, {
-                            toValue: 0,
-                            duration,
+                        Animated.timing(pulseAnim, {
+                            toValue: 1,
+                            duration: 3000,
                             easing: Easing.inOut(Easing.sin),
                             useNativeDriver: true,
                         }),
                     ])
-                ).start();
+                )
+            );
+
+            // Rotation for hero rings
+            loops.push(
+                Animated.loop(
+                    Animated.timing(rotateAnim, {
+                        toValue: 1,
+                        duration: 20000,
+                        easing: Easing.linear,
+                        useNativeDriver: true,
+                    })
+                )
+            );
+
+            // Orb Float
+            const createFloat = (val: Animated.Value, duration: number, distance: number) => {
+                loops.push(
+                    Animated.loop(
+                        Animated.sequence([
+                            Animated.timing(val, {
+                                toValue: distance,
+                                duration,
+                                easing: Easing.inOut(Easing.sin),
+                                useNativeDriver: true,
+                            }),
+                            Animated.timing(val, {
+                                toValue: 0,
+                                duration,
+                                easing: Easing.inOut(Easing.sin),
+                                useNativeDriver: true,
+                            }),
+                        ])
+                    )
+                );
             };
             createFloat(orbAnim1, 5000, 15);
             createFloat(orbAnim2, 7000, -20);
+
+            loops.forEach((l) => l.start());
         };
 
         startLoops();
+        // Without this the ambient loops outlive the screen: they keep the UI
+        // thread animating forever and re-run on every platform change.
+        return () => loops.forEach((l) => l.stop());
     }, [currentPlatform]);
 
     const rotation = rotateAnim.interpolate({

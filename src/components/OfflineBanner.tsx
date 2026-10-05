@@ -43,7 +43,7 @@ export const OfflineBanner: React.FC<OfflineBannerProps> = ({ onActionPress }) =
         });
 
         // Pulse Animation for Offline Indicator
-        Animated.loop(
+        const pulseLoop = Animated.loop(
             Animated.sequence([
                 Animated.timing(pulseAnim, {
                     toValue: 1.5,
@@ -57,9 +57,11 @@ export const OfflineBanner: React.FC<OfflineBannerProps> = ({ onActionPress }) =
                     useNativeDriver: true,
                 })
             ])
-        ).start();
+        );
+        pulseLoop.start();
 
         return () => {
+            pulseLoop.stop();
             if (unsubscribe) unsubscribe();
         };
     }, []);

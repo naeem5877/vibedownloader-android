@@ -75,8 +75,9 @@ export const BatchDownloadProgress: React.FC<BatchDownloadProgressProps> = ({
         ]).start();
 
         // Pulse when downloading
+        let pulseLoop: Animated.CompositeAnimation | null = null;
         if (!isComplete) {
-            Animated.loop(
+            pulseLoop = Animated.loop(
                 Animated.sequence([
                     Animated.timing(pulseAnim, {
                         toValue: 1.01,
@@ -91,8 +92,10 @@ export const BatchDownloadProgress: React.FC<BatchDownloadProgressProps> = ({
                         useNativeDriver: true,
                     }),
                 ])
-            ).start();
+            );
+            pulseLoop.start();
         }
+        return () => pulseLoop?.stop();
     }, [isComplete]);
 
     useEffect(() => {

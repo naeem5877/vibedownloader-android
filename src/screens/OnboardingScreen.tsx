@@ -49,7 +49,7 @@ const OnboardingScreen: React.FC<OnboardingProps> = ({ onDone }) => {
 
     useEffect(() => {
         // Scanline loop
-        Animated.loop(
+        const loop = Animated.loop(
             Animated.sequence([
                 Animated.timing(scanlineAnim, {
                     toValue: 1,
@@ -63,7 +63,9 @@ const OnboardingScreen: React.FC<OnboardingProps> = ({ onDone }) => {
                     useNativeDriver: true,
                 }),
             ])
-        ).start();
+        );
+        loop.start();
+        return () => loop.stop();
     }, []);
 
     const goToNext = () => {

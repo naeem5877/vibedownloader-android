@@ -35,6 +35,7 @@ export const URLInput: React.FC<URLInputProps> = ({
     const focusAnimation = useRef(new Animated.Value(0)).current;
     const pulseAnimation = useRef(new Animated.Value(1)).current;
     const rotateAnimation = useRef(new Animated.Value(0)).current;
+    const spinnerLoop = useRef<Animated.CompositeAnimation | null>(null);
 
     useEffect(() => {
         Animated.timing(focusAnimation, {
@@ -47,17 +48,25 @@ export const URLInput: React.FC<URLInputProps> = ({
 
     useEffect(() => {
         if (isLoading) {
-            Animated.loop(
+            const loop = Animated.loop(
                 Animated.timing(rotateAnimation, {
                     toValue: 1,
                     duration: 1000,
                     useNativeDriver: true,
                     easing: Easing.linear,
                 })
-            ).start();
+            );
+            spinnerLoop.current = loop;
+            loop.start();
         } else {
+            spinnerLoop.current?.stop();
+            spinnerLoop.current = null;
             rotateAnimation.setValue(0);
         }
+        return () => {
+            spinnerLoop.current?.stop();
+            spinnerLoop.current = null;
+        };
     }, [isLoading]);
 
     const clearInput = () => {

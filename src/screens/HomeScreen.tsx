@@ -1182,7 +1182,7 @@ let isStoryFetch = false;
                     }
                 }
 
-                const result = await actions.download(
+const result = await actions.download(
                     state.videoInfo.url,
                     typeof format === 'string' ? format : format.formatId,
                     {
@@ -1192,7 +1192,7 @@ let isStoryFetch = false;
                         cookies:       cookiesPath || undefined,
 thumbnailPath: thumbnailPath,
       audioFormatId: selectedAudioFormatId ?? undefined,
-      playerClient:   state.videoInfo.playerClient ?? undefined,
+playerClient:   state.videoInfo.playerClient ?? undefined,
       }
     );
             }
@@ -1223,7 +1223,7 @@ thumbnailPath: thumbnailPath,
             // Reflect the chosen output type in the quality list behind the sheet.
             setAudioOnlyIntent(selection.formatId.startsWith('audio'));
 
-            try {
+try {
                 await actions.download(state.videoInfo.url, selection.formatId, {
                     title: state.videoInfo.title,
                     artist: state.videoInfo.uploader || 'Unknown',

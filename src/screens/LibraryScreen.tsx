@@ -92,6 +92,11 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ isFocused = true }
     const [preview, setPreview] = useState<LibraryItem | null>(null);
     const [textViewer, setTextViewer] = useState<SubtitleViewerFile | null>(null);
 
+    // Re-scan when the tab becomes active. `reload` is already fire-and-forget
+    // and the gallery keeps showing the previous listing until the new one
+    // lands, so this never blanks the grid on the way in. Finished downloads
+    // also arrive through the library-changed signal, so by the time the app
+    // slides over here the new row is usually already in place.
     useEffect(() => {
         if (isFocused) gallery.reload();
         // eslint-disable-next-line react-hooks/exhaustive-deps

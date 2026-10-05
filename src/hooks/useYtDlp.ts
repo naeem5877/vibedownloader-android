@@ -8,6 +8,7 @@ import {
     SharedData,
     ytDlpEventEmitter,
 } from '../native/YtDlpModule';
+import { notifyLibraryChanged } from '../utils/librarySync';
 
 
 interface UseYtDlpState {
@@ -321,6 +322,9 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
 
                 const result = await YtDlpNative.download(url, formatId, processId, options);
         if (downloadTimeout !== null) clearTimeout(downloadTimeout);
+      // A new file just landed, so the Library can refresh itself instead of
+      // waiting for the user to open that tab.
+      notifyLibraryChanged();
                 setState((prev) => ({
                     ...prev,
                     isDownloading: false,
@@ -391,6 +395,7 @@ downloadLine: 'Searching for track...',
  
                 const result = await YtDlpNative.downloadSpotifyTrack(searchQuery, title, artist, album, thumbnail, processId);
                 clearTimeout(downloadTimeout);
+                notifyLibraryChanged();
                 setState((prev) => ({ ...prev, isDownloading: false, downloadProgress: 100 }));
                 return result;
             } catch (error: any) {

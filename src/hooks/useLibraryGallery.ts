@@ -9,6 +9,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { YtDlpNative, type BulkDeleteResult, type DownloadedFile } from '../native/YtDlpModule';
 import {
+    notifyLibraryChanged,
+    subscribeLibraryChanges,
+} from '../utils/librarySync';
+import {
     collectPlatforms,
     countByKind,
     filterAndSort,
@@ -18,6 +22,12 @@ import {
     type LibraryItem,
     type SortOrder,
 } from '../utils/libraryMedia';
+
+/**
+ * Bumped by anything that adds or removes files on disk (a finished download,
+ * a bulk delete, a cancelled run). The gallery subscribes to this instead of
+ * polling, so a finished download shows up without waiting for a tab switch.
+ */
 
 const toItem = (file: DownloadedFile): LibraryItem => ({
     name: file.name,
@@ -83,32 +93,84 @@ export function useLibraryGallery(): UseLibraryGallery {
     // native decode several times before the first one resolves.
     const pending = useRef<Set<string>>(new Set());
 
+    // Mirror of `all` so the scan can compare against the current listing
+    // without having to re-create the callback on every filter change.
+    const allRef = useRef<LibraryItem[]>([]);
+
+    // Guards against two scans overlapping (a tab focus and a finished download
+    // can land together) and against a slow older scan overwriting a newer one.
+    const scanSeq = useRef(0);
+
+    /**
+     * True when the rescan found exactly what is already on screen. Returning
+     * the same list again is the common case (focusing a tab that was already
+     * loaded), and re-setting state for it would re-render the whole grid and
+     * drop the decoded posters for nothing.
+     */
+    const sameListing = (a: LibraryItem[], b: LibraryItem[]) =>
+        a.length === b.length &&
+        a.every((item, i) => {
+            const other = b[i];
+            return (
+                item.path === other.path &&
+                item.size === other.size &&
+                item.modified === other.modified
+            );
+        });
+
     const load = useCallback(async (isRefresh: boolean) => {
+        const seq = ++scanSeq.current;
         if (isRefresh) setRefreshing(true);
         else setLoading(true);
         try {
             const files = await YtDlpNative.listDownloadedFiles();
+            // A newer scan already started; its result is the one that counts.
+            if (seq !== scanSeq.current) return;
+
             const next = files.map(toItem);
-            setAll(next);
-            // Seed whatever thumbnails the listing already resolved, which
-            // covers embedded artwork for audio and sidecar images for free.
-            const seeded: Record<string, string | null> = {};
-            for (const item of next) {
-                if (item.thumbnail) seeded[item.path] = item.thumbnail;
+            const alive = new Set(next.map((item) => item.path));
+
+            // Let a re-downloaded path request a poster again: the in-flight
+            // guard would otherwise still be holding the old path.
+            for (const path of pending.current) {
+                if (!alive.has(path)) pending.current.delete(path);
             }
-            setThumbnails(seeded);
+
+            setThumbnails((prev) => {
+                const merged: Record<string, string | null> = {};
+                for (const item of next) {
+                    // Prefer a poster we already decoded over asking native for
+                    // the same frame again on every reload.
+                    merged[item.path] = item.thumbnail || (prev[item.path] ?? null);
+                }
+                // Rebuilt from `next`, so entries for files that are gone drop
+                // out here and the map cannot grow without bound.
+                return merged;
+            });
+
+            if (!sameListing(allRef.current, next)) {
+                allRef.current = next;
+                setAll(next);
+            }
             setError(null);
         } catch (e) {
+            if (seq !== scanSeq.current) return;
             setError(e instanceof Error ? e.message : 'Could not read your library');
         } finally {
-            setLoading(false);
-            setRefreshing(false);
+            if (seq === scanSeq.current) {
+                setLoading(false);
+                setRefreshing(false);
+            }
         }
     }, []);
 
     useEffect(() => {
         load(false);
     }, [load]);
+
+    // Rescan the moment anything touches the folder, so a finished download
+    // appears without waiting for the user to switch tabs.
+    useEffect(() => subscribeLibraryChanges(() => load(true)), [load]);
 
     const visible = useMemo(() => filterAndSort(all, filters), [all, filters]);
     const sections = useMemo(() => groupByDate(visible), [visible]);
@@ -164,13 +226,19 @@ export function useLibraryGallery(): UseLibraryGallery {
             // rescan, and clear their cached posters so a stale frame cannot
             // reappear if the same path is downloaded again.
             const gone = new Set(result.deleted);
-            setAll((prev) => prev.filter((item) => !gone.has(item.path)));
+            setAll((prev) => {
+                const kept = prev.filter((item) => !gone.has(item.path));
+                allRef.current = kept;
+                return kept;
+            });
             setThumbnails((prev) => {
                 const next = { ...prev };
                 for (const path of gone) delete next[path];
                 return next;
             });
+            for (const path of gone) pending.current.delete(path);
             setSelected(new Set());
+            notifyLibraryChanged();
             return result;
         } finally {
             setDeleting(false);

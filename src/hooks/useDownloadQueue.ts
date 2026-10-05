@@ -4,6 +4,7 @@ import { YtDlpNative, ytDlpEventEmitter } from '../native/YtDlpModule';
 import { StoryNative } from '../native/StoryModule';
 import { isYouTubeMusicUrl, getYouTubeMusicAlbumArt } from '../services/YouTubeMusicService';
 import { normalizeUrl } from '../utils/batchUrls';
+import { notifyLibraryChanged } from '../utils/librarySync';
 
 export type QueueItemStatus = 'waiting' | 'downloading' | 'done' | 'failed' | 'cancelled';
 
@@ -251,6 +252,7 @@ export const useDownloadQueue = (): UseDownloadQueueReturn => {
                 updateItem(item.id, { status: 'cancelled' });
             } else {
                 updateItem(item.id, { status: 'done', progress: 100, eta: 0 });
+                notifyLibraryChanged();
             }
         } catch (error: any) {
             if (cancelledIds.current.has(item.id) || error?.code === 'CANCELLED') {

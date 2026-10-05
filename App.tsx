@@ -5,7 +5,7 @@
  * @format
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   StatusBar,
   StyleSheet,
@@ -136,34 +136,95 @@ function App(): React.JSX.Element {
     activeTabRef.current = activeTab;
   }, [activeTab]);
 
-  // PanResponder for swiping
+  // Resting position of each tab. A drag may only ever land on one of these two.
+const restX = (tab: TabType) => (tab === 'home' ? 0 : -width);
+
+  // Where the current drag began, so movement is measured from the finger's
+  // starting point rather than from a fixed origin.
+  const dragBase = useRef(0);
+
+  /**
+   * Snap to a tab.
+   *
+   * A short eased timing, not a spring: the old tension-50 spring was soft
+   * enough to wobble and overshoot, which read as lag right after a flick.
+   */
+  const animateToTab = useCallback(
+    (tab: TabType) => {
+      Animated.timing(slideAnim, {
+        toValue: restX(tab),
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    },
+    [slideAnim]
+  );
+
+  // Swiping between tabs. The content tracks the finger 1:1 and only commits to
+  // a tab on release, so the movement feels attached to the hand rather than
+  // being a jump that happens after the fact.
   const panResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        // Capture horizontal swipes
-        const isHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
-        return isHorizontal && Math.abs(gestureState.dx) > 20;
+      // Capture phase, and deliberately a low threshold: the old 20px dead zone
+      // meant short swipes were swallowed by the child ScrollView and the
+      // gesture only ever felt like "nothing happened, then it jumped".
+      onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+        const { dx, dy } = gestureState;
+        // Clearly horizontal, so a vertical scroll is never hijacked.
+        return Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy);
+      },
+      // Once we own the gesture, do not let a child ScrollView take it back
+      // mid-swipe and strand the screen half way across.
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: () => {
+        // Freeze any snap still in flight so it cannot fight the finger.
+        slideAnim.stopAnimation();
+        dragBase.current = restX(activeTabRef.current);
+      },
+      onPanResponderMove: (_, gestureState) => {
+        const raw = dragBase.current + gestureState.dx;
+        // Rubber-band past either edge instead of hitting a hard wall, which
+        // is what made the swipe feel like it had got stuck.
+        let next: number;
+        if (raw > 0) {
+          next = raw * 0.25;
+        } else if (raw < -width) {
+          next = -width + (raw + width) * 0.25;
+        } else {
+          next = raw;
+        }
+        slideAnim.setValue(next);
       },
       onPanResponderRelease: (_, gestureState) => {
-        const threshold = 50;
-        if (gestureState.dx < -threshold && activeTabRef.current === 'home') {
-          setActiveTab('library');
-        } else if (gestureState.dx > threshold && activeTabRef.current === 'library') {
-          setActiveTab('home');
+        const { dx, vx } = gestureState;
+        const from = activeTabRef.current;
+        // A fast flick counts even when it is short, and a slow deliberate
+        // drag has to cross a quarter of the screen.
+        const flicked = Math.abs(vx) > 0.35;
+        const dragged = Math.abs(dx) > width * 0.25;
+
+        const target: TabType =
+          flicked || dragged ? (dx < 0 ? 'library' : 'home') : from;
+
+        // Animate first so the snap starts on this frame instead of waiting
+        // for the re-render that setActiveTab schedules.
+        animateToTab(target);
+        if (target !== from) {
+          activeTabRef.current = target;
+          setActiveTab(target);
         }
       },
+      // A gesture stolen back by the system (a modal opening, a call coming in)
+      // should settle back rather than leave the screen parked mid-swipe.
+      onPanResponderTerminate: () => animateToTab(activeTabRef.current),
     })
   ).current;
 
   // Tab animation
   useEffect(() => {
-    Animated.spring(slideAnim, {
-      toValue: activeTab === 'home' ? 0 : -width,
-      tension: 50,
-      friction: 10,
-      useNativeDriver: true,
-    }).start();
-  }, [activeTab]);
+    animateToTab(activeTab);
+  }, [activeTab, animateToTab]);
 
   const handleSplashFinish = () => {
     // If storage hasn't been checked yet, wait a bit more

@@ -10,7 +10,7 @@ import {
   StatusBar,
   StyleSheet,
   View,
-  TouchableOpacity,
+  Pressable,
   Animated,
   Dimensions,
   PanResponder,
@@ -41,65 +41,130 @@ interface TabButtonProps {
 }
 
 const TabButton: React.FC<TabButtonProps> = ({ label, icon, activeIcon, isActive, onPress }) => {
-  const scaleAnim = useRef(new Animated.Value(isActive ? 1 : 0.94)).current;
-  const pillAnim = useRef(new Animated.Value(isActive ? 1 : 0)).current;
+  // One value drives the pill, the icon crossfade and the label together, so the
+  // button reads as a single movement rather than three independent ones.
+  const selected = useRef(new Animated.Value(isActive ? 1 : 0)).current;
+  // Kept separate from `selected` so a press dip can play without cancelling the
+  // selection animation that is already running.
+  const press = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.spring(scaleAnim, {
-        toValue: isActive ? 1 : 0.94,
-        tension: 280,
-        friction: 18,
-        useNativeDriver: true,
-      }),
-      Animated.timing(pillAnim, {
-        toValue: isActive ? 1 : 0,
-        duration: 240,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [isActive]);
+    Animated.spring(selected, {
+      toValue: isActive ? 1 : 0,
+      tension: 240,
+      friction: 20,
+      useNativeDriver: true,
+    }).start();
+  }, [isActive, selected]);
+
+  const dip = (toValue: number) => {
+    Animated.spring(press, {
+      toValue,
+      // Stiff and almost undamped, so the dip snaps back the instant it is
+      // released instead of drifting back over the top.
+      tension: 420,
+      friction: 16,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const fadeIn = selected;
+  const fadeOut = selected.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
 
   return (
-    <TouchableOpacity
+    <Pressable
       style={styles.tabButton}
       onPress={() => {
         Haptics.selection();
         onPress();
       }}
-      activeOpacity={0.85}
+      onPressIn={() => dip(0.9)}
+      onPressOut={() => dip(1)}
     >
-      <Animated.View style={[styles.tabInner, { transform: [{ scale: scaleAnim }] }]}>
+      <Animated.View
+        style={[
+          styles.tabInner,
+          {
+            transform: [
+              {
+                scale: Animated.multiply(
+                  selected.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }),
+                  press
+                ),
+              },
+            ],
+          },
+        ]}
+      >
         {/* Rounded highlight pill behind the active tab */}
-        <Animated.View style={[styles.activePill, { opacity: pillAnim }]} />
+        <Animated.View
+          style={[
+            styles.activePill,
+            {
+              opacity: fadeIn,
+              // Grows out from the middle as it appears, rather than only fading.
+              transform: [
+                {
+                  scale: selected.interpolate({
+                    inputRange: [0, 0.6, 1],
+                    outputRange: [0.72, 1.04, 1],
+                  }),
+                },
+              ],
+            },
+          ]}
+        />
 
         <View style={styles.tabContent}>
-          {isActive ? activeIcon : icon}
-          {isActive && (
+          {/* Both icons are stacked and crossfaded; swapping one for the other
+              used to make the glyph blink. */}
+          <View style={styles.iconSlot}>
+            <Animated.View style={[styles.iconLayer, { opacity: fadeOut }]}>
+              {icon}
+            </Animated.View>
+            <Animated.View style={[styles.iconLayer, { opacity: fadeIn }]}>
+              {activeIcon}
+            </Animated.View>
+          </View>
+
+          {/* The label is always mounted and always occupies the same slot, so
+              switching tabs no longer resizes the pill and re-centres the icon.
+              Two copies are stacked because `color` cannot be animated by the
+              native module. */}
+          <View style={styles.labelSlot}>
             <Animated.Text
               numberOfLines={1}
               style={[
                 styles.tabLabel,
+                styles.tabLabelDim,
                 {
-                  opacity: pillAnim,
+                  opacity: fadeOut,
                   transform: [
-                    {
-                      translateX: pillAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [-6, 0],
-                      }),
-                    },
+                    { translateY: fadeIn.interpolate({ inputRange: [0, 1], outputRange: [0, -3] }) },
                   ],
                 },
               ]}
             >
               {label}
             </Animated.Text>
-          )}
+            <Animated.Text
+              numberOfLines={1}
+              style={[
+                styles.tabLabel,
+                {
+                  opacity: fadeIn,
+                  transform: [
+                    { translateY: fadeIn.interpolate({ inputRange: [0, 1], outputRange: [3, 0] }) },
+                  ],
+                },
+              ]}
+            >
+              {label}
+            </Animated.Text>
+          </View>
         </View>
       </Animated.View>
-    </TouchableOpacity>
+    </Pressable>
   );
 };
 
@@ -391,17 +456,39 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: 'rgba(129, 140, 248, 0.16)',
   },
-  tabContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  tabLabel: {
-    fontSize: 14,
-    color: Colors.primaryLight,
-    fontWeight: '700',
-    letterSpacing: 0.2,
-  },
-});
+tabContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    // Fixed-size wrappers so the icon and label occupy the same footprint in
+    // both states. Letting them size to the active state made the pill change
+    // width and the icon jump sideways on every tab change.
+    iconSlot: {
+      width: 24,
+      height: 24,
+    },
+    iconLayer: {
+      ...StyleSheet.absoluteFillObject,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    labelSlot: {
+      width: 66,
+      height: 18,
+      justifyContent: 'center',
+    },
+    tabLabel: {
+      ...StyleSheet.absoluteFillObject,
+      fontSize: 14,
+      color: Colors.primaryLight,
+      fontWeight: '700',
+      letterSpacing: 0.2,
+      textAlign: 'center',
+    },
+    tabLabelDim: {
+      color: Colors.textMuted,
+    },
+  });
 
 export default App;

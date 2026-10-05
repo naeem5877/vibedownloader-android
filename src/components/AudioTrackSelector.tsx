@@ -38,7 +38,10 @@ export default function AudioTrackSelector({
     onSelect,
     isAudioOnly = false,
 }: AudioTrackSelectorProps) {
-    const [collapsed, setCollapsed] = useState(false);
+    // Collapsed by default, matching SubtitlePicker: most videos publish a single
+    // audio language and hide this card entirely, so opening it expanded on the
+    // rare ones leaves an empty panel on screen before anything is selected.
+    const [collapsed, setCollapsed] = useState(true);
 
     /** Original language first, then alphabetical, so the order is stable. */
     const ordered = useMemo(() => {

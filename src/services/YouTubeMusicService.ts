@@ -232,6 +232,9 @@ export async function getYouTubeMusicAlbumArt(
     try {
         const fallbackUrl = await getAlbumArtFallback(videoId);
         if (fallbackUrl) {
+            // Explicitly not real album art: this is the video thumbnail, so the
+            // caller is told the truth rather than embedding a still frame from
+            // the music video and calling it cover art.
             return { url: fallbackUrl, isRealAlbumArt: false, videoId };
         }
     } catch (_) {}

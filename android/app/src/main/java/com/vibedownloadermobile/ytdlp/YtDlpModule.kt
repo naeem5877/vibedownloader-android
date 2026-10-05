@@ -2357,7 +2357,17 @@ val isCutDownload = requestedCutStart != null && requestedCutEnd != null &&
                         )
                     }
                 } else if (!formatId.isNullOrEmpty()) {
-                     if (!ffmpegAvailable) {
+                    // Audio-only requests never carry a real itag: the UI sends
+                    // audio_best / audio_standard and, when the selector picked a
+                    // language, that language's itag. Both come from the same
+                    // client that produced the format list, so yt-dlp has to
+                    // re-extract through it or it resolves against its own
+                    // default client and finds no matching audio stream.
+                    if (url.contains("youtube.com") || url.contains("youtu.be")) {
+                        val audioClient = requestedPlayerClient?.takeIf { it.isNotBlank() } ?: "web_embedded"
+                        request.addOption("--extractor-args", "youtube:player_client=$audioClient")
+                    }
+                    if (!ffmpegAvailable) {
                         // No ffmpeg means no transcoding and no muxing, so take the
                         // source streams as they are. Transcoding is dropped rather
                         // than failing, and DASH video-only formats cannot be paired

@@ -1358,8 +1358,9 @@ cookies: cookiesPath || undefined,
                 >
                     <View style={styles.headerTop}>
                         <View style={styles.headerBrand}>
-                            <Text style={styles.logo}>Vibe</Text>
-                            <Text style={[styles.logo, { color: Colors.primary }]}>Downloader</Text>
+                            <View pointerEvents="none" style={styles.brandGlow} />
+                            <Text style={styles.logo} allowFontScaling={false}>Vibe</Text>
+                            <Text style={styles.logoAccent} allowFontScaling={false}>Downloader</Text>
                         </View>
 
                         {/* Header Actions */}
@@ -1392,7 +1393,9 @@ cookies: cookiesPath || undefined,
                         </View>
                     </View>
                     <View style={styles.taglineRow}>
-                        <View style={[styles.taglineDot, { backgroundColor: platformColor }]} />
+                        <View style={[styles.taglineDotRing, { backgroundColor: platformColor + '26' }]}>
+                            <View style={[styles.taglineDot, { backgroundColor: platformColor }]} />
+                        </View>
                         <Text style={styles.tagline}>
                             Download from any platform, instantly
                         </Text>
@@ -1831,8 +1834,8 @@ const styles = StyleSheet.create({
     // ── Modern Header ──
     header: {
         paddingTop: Spacing.lg,
-        paddingBottom: Spacing.sm,
-        paddingHorizontal: Spacing.md,
+        paddingBottom: Spacing.md,
+        paddingHorizontal: Spacing.lg,
     },
     headerTop: {
         flexDirection: 'row',
@@ -1845,28 +1848,48 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         position: 'relative',
     },
-
-
+    // soft brand-colored halo behind the wordmark
+    brandGlow: {
+        position: 'absolute',
+        left: -18,
+        top: -10,
+        width: 120,
+        height: 56,
+        borderRadius: 60,
+        backgroundColor: Colors.primary,
+        opacity: 0.1,
+    },
     logo: {
-        fontSize: 26,
-        fontWeight: '800',
+        fontSize: 28,
+        lineHeight: 34,
+        fontWeight: '900',
         color: Colors.textPrimary,
-        letterSpacing: -1,
+        letterSpacing: -1.4,
+        includeFontPadding: false,
+    },
+    // contrast in weight + tint gives the wordmark a refined two-tone feel
+    logoAccent: {
+        fontSize: 28,
+        lineHeight: 34,
+        fontWeight: '300',
+        color: Colors.primaryLight,
+        letterSpacing: -1.1,
+        includeFontPadding: false,
     },
     headerActions: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
+        gap: 10,
     },
     headerBtn: {
-        width: 40,
-        height: 40,
-        borderRadius: 12,
-        backgroundColor: '#161618',
+        width: 42,
+        height: 42,
+        borderRadius: 14,
+        backgroundColor: 'rgba(255, 255, 255, 0.045)',
         justifyContent: 'center',
         alignItems: 'center',
-        borderWidth: 1,
-        borderColor: '#252528',
+        borderWidth: StyleSheet.hairlineWidth * 2,
+        borderColor: 'rgba(255, 255, 255, 0.10)',
     },
     batchRow: {
         flexDirection: 'row',
@@ -1918,18 +1941,27 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 8,
-        marginTop: 6,
+        marginTop: 8,
+    },
+    taglineDotRing: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     taglineDot: {
-        width: 6,
-        height: 6,
+        width: 5,
+        height: 5,
         borderRadius: 3,
     },
     tagline: {
-        color: Colors.textMuted,
-        fontSize: 13.5,
+        color: '#7C7C88',
+        fontSize: 12.5,
+        lineHeight: 16,
         fontWeight: '500',
-        letterSpacing: -0.1,
+        letterSpacing: 0.25,
+        includeFontPadding: false,
     },
     // ── Input Section ──
     inputSection: {

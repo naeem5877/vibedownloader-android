@@ -218,7 +218,7 @@ const restX = (tab: TabType) => (tab === 'home' ? 0 : -width);
     (tab: TabType) => {
       Animated.timing(slideAnim, {
         toValue: restX(tab),
-        duration: 220,
+        duration: 280,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }).start();
@@ -276,6 +276,7 @@ const restX = (tab: TabType) => (tab === 'home' ? 0 : -width);
         // for the re-render that setActiveTab schedules.
         animateToTab(target);
         if (target !== from) {
+          Haptics.selection();
           activeTabRef.current = target;
           setActiveTab(target);
         }
@@ -290,6 +291,42 @@ const restX = (tab: TabType) => (tab === 'home' ? 0 : -width);
   useEffect(() => {
     animateToTab(activeTab);
   }, [activeTab, animateToTab]);
+
+  // Per-screen visuals derived from the same slide value as the drag, so the
+  // cross-fade and depth effect track the finger exactly. clamp keeps the
+  // rubber-band overscroll from pushing opacity/scale out of range.
+  const homeStyle = {
+    opacity: slideAnim.interpolate({
+      inputRange: [-width, -width * 0.55, 0],
+      outputRange: [0, 0.25, 1],
+      extrapolate: 'clamp' as const,
+    }),
+    transform: [
+      {
+        scale: slideAnim.interpolate({
+          inputRange: [-width, 0],
+          outputRange: [0.92, 1],
+          extrapolate: 'clamp' as const,
+        }),
+      },
+    ],
+  };
+  const libraryStyle = {
+    opacity: slideAnim.interpolate({
+      inputRange: [-width, -width * 0.45, 0],
+      outputRange: [1, 0.25, 0],
+      extrapolate: 'clamp' as const,
+    }),
+    transform: [
+      {
+        scale: slideAnim.interpolate({
+          inputRange: [-width, 0],
+          outputRange: [1, 0.92],
+          extrapolate: 'clamp' as const,
+        }),
+      },
+    ],
+  };
 
   const handleSplashFinish = () => {
     // If storage hasn't been checked yet, wait a bit more
@@ -346,13 +383,13 @@ const restX = (tab: TabType) => (tab === 'home' ? 0 : -width);
                 { transform: [{ translateX: slideAnim }] }
               ]}
             >
-              <View style={styles.screen}>
+              <Animated.View style={[styles.screen, homeStyle]}>
                 <HomeScreen onNavigateToLibrary={() => setActiveTab('library')} />
-              </View>
+              </Animated.View>
 
-              <View style={styles.screen}>
+              <Animated.View style={[styles.screen, libraryStyle]}>
                 <LibraryScreen isFocused={activeTab === 'library'} />
-              </View>
+              </Animated.View>
             </Animated.View>
           </View>
 

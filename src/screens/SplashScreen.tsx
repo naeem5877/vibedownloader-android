@@ -1,330 +1,183 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Dimensions, Image, Easing, StatusBar } from 'react-native';
-import { Colors, Typography, Spacing } from '../theme';
-import Svg, { Circle } from 'react-native-svg';
-
-const { width, height } = Dimensions.get('window');
+import { View, Text, StyleSheet, Animated, Image, Easing, StatusBar } from 'react-native';
+import { Colors } from '../theme';
 
 interface SplashScreenProps {
     onFinish: () => void;
 }
 
-const CircularLoader = () => {
-    const spinValue = useRef(new Animated.Value(0)).current;
+// Total on-screen time is roughly HOLD_MS + EXIT_MS.
+const HOLD_MS = 1500;
+const EXIT_MS = 260;
+const LOGO_SIZE = 96;
+
+/** A thin ring that expands from the logo and fades out. */
+const Ripple: React.FC<{ delay: number }> = ({ delay }) => {
+    const t = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
-        Animated.loop(
-            Animated.timing(spinValue, {
-                toValue: 1,
-                duration: 1500,
-                easing: Easing.bezier(0.4, 0.0, 0.2, 1),
-                useNativeDriver: true
-            })
-        ).start();
+        const loop = Animated.loop(
+            Animated.sequence([
+                Animated.delay(delay),
+                Animated.timing(t, {
+                    toValue: 1,
+                    duration: 2200,
+                    easing: Easing.out(Easing.cubic),
+                    useNativeDriver: true,
+                }),
+                Animated.timing(t, { toValue: 0, duration: 0, useNativeDriver: true }),
+            ])
+        );
+        loop.start();
+        return () => loop.stop();
     }, []);
 
-    const spin = spinValue.interpolate({
-        inputRange: [0, 1],
-        outputRange: ['0deg', '360deg']
-    });
-
     return (
-        <Animated.View style={{ transform: [{ rotate: spin }] }}>
-            <Svg width={48} height={48} viewBox="0 0 48 48">
-                <Circle
-                    cx="24"
-                    cy="24"
-                    r="20"
-                    stroke={`${Colors.primary}30`} // 30% opacity
-                    strokeWidth="4"
-                    fill="none"
-                />
-                <Circle
-                    cx="24"
-                    cy="24"
-                    r="20"
-                    stroke={Colors.primary}
-                    strokeWidth="4"
-                    fill="none"
-                    strokeDasharray="30 100"
-                    strokeLinecap="round"
-                />
-            </Svg>
-        </Animated.View>
+        <Animated.View
+            pointerEvents="none"
+            style={[
+                styles.ripple,
+                {
+                    opacity: t.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0, 0.35, 0] }),
+                    transform: [{ scale: t.interpolate({ inputRange: [0, 1], outputRange: [0.9, 2.6] }) }],
+                },
+            ]}
+        />
     );
 };
 
 const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
-    const fadeAnim = useRef(new Animated.Value(0)).current;
-    const logoScale = useRef(new Animated.Value(0.85)).current;
-    const logoTranslateY = useRef(new Animated.Value(30)).current;
-    const bgOpacity = useRef(new Animated.Value(0)).current;
-    const scanlineAnim = useRef(new Animated.Value(0)).current;
-    const textFade = useRef(new Animated.Value(0)).current;
+    const onFinishRef = useRef(onFinish);
+    onFinishRef.current = onFinish;
+
+    const logoOpacity = useRef(new Animated.Value(0)).current;
+    const logoScale = useRef(new Animated.Value(0.88)).current;
+    const wordOpacity = useRef(new Animated.Value(0)).current;
+    const wordLift = useRef(new Animated.Value(10)).current;
+    const tagOpacity = useRef(new Animated.Value(0)).current;
+    const screenOpacity = useRef(new Animated.Value(1)).current;
 
     useEffect(() => {
-        // Entrance sequence
-        Animated.stagger(200, [
-            // Stage 1: Ambient Background
-            Animated.timing(bgOpacity, {
-                toValue: 0.15,
-                duration: 1200,
-                useNativeDriver: true,
-            }),
-            // Stage 2: Logo Entrance
-            Animated.parallel([
-                Animated.timing(fadeAnim, {
-                    toValue: 1,
-                    duration: 1000,
-                    easing: Easing.out(Easing.cubic),
-                    useNativeDriver: true,
-                }),
-                Animated.spring(logoScale, {
-                    toValue: 1,
-                    friction: 8,
-                    tension: 40,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(logoTranslateY, {
-                    toValue: 0,
-                    duration: 1000,
-                    easing: Easing.out(Easing.back(1.5)),
-                    useNativeDriver: true,
-                }),
+        const ease = Easing.out(Easing.cubic);
+
+        Animated.parallel([
+            Animated.timing(logoOpacity, { toValue: 1, duration: 500, easing: ease, useNativeDriver: true }),
+            Animated.timing(logoScale, { toValue: 1, duration: 600, easing: ease, useNativeDriver: true }),
+            Animated.sequence([
+                Animated.delay(200),
+                Animated.parallel([
+                    Animated.timing(wordOpacity, { toValue: 1, duration: 450, easing: ease, useNativeDriver: true }),
+                    Animated.timing(wordLift, { toValue: 0, duration: 450, easing: ease, useNativeDriver: true }),
+                ]),
             ]),
-            // Stage 3: Text Fade
-            Animated.timing(textFade, {
-                toValue: 1,
-                duration: 800,
-                useNativeDriver: true,
-            }),
+            Animated.sequence([
+                Animated.delay(420),
+                Animated.timing(tagOpacity, { toValue: 1, duration: 450, useNativeDriver: true }),
+            ]),
         ]).start();
 
-        // Scanline loop
-        Animated.loop(
-            Animated.sequence([
-                Animated.timing(scanlineAnim, {
-                    toValue: 1,
-                    duration: 4000,
-                    easing: Easing.linear,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(scanlineAnim, {
-                    toValue: 0,
-                    duration: 0,
-                    useNativeDriver: true,
-                }),
-            ])
-        ).start();
-
-        // Exit sequence
         const timer = setTimeout(() => {
-            Animated.parallel([
-                Animated.timing(fadeAnim, {
-                    toValue: 0,
-                    duration: 500,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(logoScale, {
-                    toValue: 1.1,
-                    duration: 500,
-                    useNativeDriver: true,
-                }),
-            ]).start(() => onFinish());
-        }, 3200);
+            Animated.timing(screenOpacity, {
+                toValue: 0,
+                duration: EXIT_MS,
+                easing: Easing.in(Easing.quad),
+                useNativeDriver: true,
+            }).start(({ finished }) => {
+                if (finished) onFinishRef.current();
+            });
+        }, HOLD_MS);
 
         return () => clearTimeout(timer);
     }, []);
 
-    const scanlineTranslateY = scanlineAnim.interpolate({
-        inputRange: [0, 1],
-        outputRange: [-height, height],
-    });
-
     return (
-        <View style={styles.container}>
-            <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+        <Animated.View style={[styles.container, { opacity: screenOpacity }]}>
+            <StatusBar barStyle="light-content" backgroundColor="#0A0A0C" />
 
-            {/* Atmospheric Background Layers */}
-            <Animated.View style={[styles.bgPulse, { opacity: bgOpacity }]} />
-            <View style={styles.vignette} />
-
-            {/* Industrial Scanline Effect */}
-            <Animated.View
-                style={[
-                    styles.scanline,
-                    { transform: [{ translateY: scanlineTranslateY }] }
-                ]}
-            />
-
-            <View style={styles.contentContainer}>
-                {/* Logo with Glow */}
-                <Animated.View
-                    style={[
-                        styles.logoContainer,
-                        {
-                            opacity: fadeAnim,
-                            transform: [
-                                { scale: logoScale },
-                                { translateY: logoTranslateY }
-                            ]
-                        }
-                    ]}
-                >
-                    <View style={styles.logoShield}>
+            <View style={styles.center}>
+                {/* Logo with soft ripples behind it */}
+                <View style={styles.logoSlot}>
+                    <Ripple delay={0} />
+                    <Ripple delay={1100} />
+                    <Animated.View style={{ opacity: logoOpacity, transform: [{ scale: logoScale }] }}>
                         <Image
                             source={require('../../transparent_logo.png')}
-                            style={styles.logoImage}
+                            style={styles.logo}
                             resizeMode="contain"
                         />
-                    </View>
-                    <View style={styles.logoGlowRing} />
+                    </Animated.View>
+                </View>
+
+                <Animated.View style={[styles.wordRow, { opacity: wordOpacity, transform: [{ translateY: wordLift }] }]}>
+                    <Text style={styles.wordMain} allowFontScaling={false}>Vibe</Text>
+                    <Text style={styles.wordAccent} allowFontScaling={false}>Downloader</Text>
                 </Animated.View>
 
-                {/* Branding Text */}
-                <Animated.View style={[styles.textContainer, { opacity: textFade }]}>
-                    <View style={styles.brandRow}>
-                        <Text style={styles.logoTextMain}>VIBE</Text>
-                        <Text style={styles.logoTextAccent}>DOWNLOADER</Text>
-                    </View>
-                    <View style={styles.taglineWrapper}>
-                        <View style={styles.taglineLine} />
-                        <Text style={styles.taglineText}>PREMIUM ASSET CAPTURE</Text>
-                        <View style={styles.taglineLine} />
-                    </View>
-                </Animated.View>
-
-                {/* Technical Status Loader */}
-                <Animated.View style={[styles.loaderWrapper, { opacity: textFade }]}>
-                    <CircularLoader />
-                    <Text style={styles.statusText}>INITIALIZING SYSTEM...</Text>
-                </Animated.View>
+                <Animated.Text style={[styles.tagline, { opacity: tagOpacity }]} allowFontScaling={false}>
+                    DOWNLOAD FROM ANY PLATFORM
+                </Animated.Text>
             </View>
-
-            {/* Bottom Version Indicator */}
-            <View style={styles.footer}>
-                <Text style={styles.versionLabel}>BUILD v1.1.0 • ARM64</Text>
-            </View>
-        </View>
+        </Animated.View>
     );
 };
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#0A0A0C', // Deeper than standard background for splash
+        backgroundColor: '#0A0A0C',
         justifyContent: 'center',
         alignItems: 'center',
     },
-    bgPulse: {
-        position: 'absolute',
-        width: width * 1.5,
-        height: width * 1.5,
-        borderRadius: width,
-        backgroundColor: Colors.primary,
+    center: {
+        alignItems: 'center',
+        // sit slightly above true centre, which looks optically centred
+        marginTop: -40,
     },
-    vignette: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'transparent',
-        borderWidth: 100,
-        borderColor: 'rgba(0,0,0,0.4)',
-        borderRadius: 1,
-    },
-    scanline: {
-        position: 'absolute',
-        width: '100%',
-        height: 200,
-        backgroundColor: 'rgba(255, 255, 255, 0.01)',
-        borderTopWidth: 1,
-        borderBottomWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.02)',
-    },
-    contentContainer: {
+    logoSlot: {
+        width: LOGO_SIZE,
+        height: LOGO_SIZE,
         alignItems: 'center',
         justifyContent: 'center',
+        marginBottom: 36,
     },
-    logoContainer: {
-        width: 150,
-        height: 150,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 40,
+    logo: {
+        width: LOGO_SIZE,
+        height: LOGO_SIZE,
     },
-    logoShield: {
-        width: 120,
-        height: 120,
-        zIndex: 2,
-    },
-    logoImage: {
-        width: '100%',
-        height: '100%',
-    },
-    logoGlowRing: {
+    ripple: {
         position: 'absolute',
-        width: 160,
-        height: 160,
-        borderRadius: 80,
-        backgroundColor: Colors.primary,
-        opacity: 0.08,
-        zIndex: 1,
+        width: LOGO_SIZE,
+        height: LOGO_SIZE,
+        borderRadius: LOGO_SIZE / 2,
+        borderWidth: 1,
+        borderColor: Colors.primaryLight,
     },
-    textContainer: {
-        alignItems: 'center',
-    },
-    brandRow: {
+    wordRow: {
         flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
+        alignItems: 'baseline',
     },
-    logoTextMain: {
+    // Same two-tone wordmark as the Home header.
+    wordMain: {
         fontSize: 34,
-        fontWeight: Typography.weights.black,
-        color: Colors.textPrimary,
-        letterSpacing: Typography.letterSpacing.tight,
+        fontWeight: '800',
+        color: '#FFFFFF',
+        letterSpacing: -1.2,
+        includeFontPadding: false,
     },
-    logoTextAccent: {
+    wordAccent: {
         fontSize: 34,
-        fontWeight: Typography.weights.light,
-        color: Colors.textSecondary,
-        letterSpacing: Typography.letterSpacing.tight,
+        fontWeight: '300',
+        color: Colors.primaryLight,
+        letterSpacing: -1,
+        includeFontPadding: false,
     },
-    taglineWrapper: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginTop: 4,
-        gap: 12,
-    },
-    taglineLine: {
-        width: 20,
-        height: 1,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    },
-    taglineText: {
-        fontSize: 10,
-        fontWeight: Typography.weights.bold,
-        color: Colors.textMuted,
-        letterSpacing: 2,
-    },
-    loaderWrapper: {
-        marginTop: 60,
-        alignItems: 'center',
-        gap: 16,
-    },
-    statusText: {
-        fontSize: 9,
-        fontWeight: Typography.weights.semibold,
-        color: Colors.textMuted,
-        letterSpacing: 1.5,
-    },
-    footer: {
-        position: 'absolute',
-        bottom: 50,
-    },
-    versionLabel: {
-        fontSize: 10,
-        fontWeight: Typography.weights.medium,
-        color: 'rgba(255, 255, 255, 0.2)',
-        letterSpacing: 1.5,
+    tagline: {
+        marginTop: 14,
+        fontSize: 11,
+        fontWeight: '600',
+        color: '#6B6B78',
+        letterSpacing: 3,
+        includeFontPadding: false,
     },
 });
 

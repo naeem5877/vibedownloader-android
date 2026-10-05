@@ -50,6 +50,14 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         const val CHANNEL_NAME = "Download Complete"
         const val CHANNEL_PROGRESS_ID = "vibe_download_progress"
         const val CHANNEL_PROGRESS_NAME = "Download Progress"
+
+        /**
+         * Wall-clock ceiling for the InnerTube fast path. Comfortably above the
+         * ~250ms a healthy resolve costs, and far below the yt-dlp path it
+         * falls back to, so a stalled request can never make a fetch slower
+         * than it was before this existed.
+         */
+        private const val FAST_PATH_BUDGET_MS = 5_000L
         /** 8 MB - far above any real subtitle/lyrics file. */
         private const val MAX_TEXT_FILE_BYTES = 8L * 1024 * 1024
         
@@ -1559,6 +1567,107 @@ withContext(Dispatchers.Main) {
                     promise.reject("FETCH_ERROR", e.message ?: "Failed to fetch video info", e)
                 }
             }
+        }
+    }
+
+    /**
+     * Metadata fast path. Resolves the same VideoInfo shape as [fetchInfo] but
+     * through InnerTube instead of yt-dlp, which is roughly two orders of
+     * magnitude faster because no Python or JS runtime is involved.
+     *
+     * Resolves with null when this path cannot serve the request, which is the
+     * signal for the caller to fall back to [fetchInfo]. Deliberately never
+     * rejects, so the JS side needs no try/catch to stay functional.
+     *
+     * The whole attempt is capped at [FAST_PATH_BUDGET_MS]. A fast path that
+     * could hang would be slower than the ~15s yt-dlp path it replaces, so on
+     * budget exhaustion it gives up immediately and yields to the fallback.
+     */
+    @ReactMethod
+    fun fetchInfoFast(url: String, promise: Promise) {
+        scope.launch {
+            try {
+                val videoId = InnerTubeResolver.extractVideoId(url)
+                if (videoId == null) {
+                    Log.d(TAG, "fast path not applicable: no video id in url")
+                    withContext(Dispatchers.Main) { promise.resolve(null) }
+                    return@launch
+                }
+
+                val info = withTimeoutOrNull(FAST_PATH_BUDGET_MS) {
+                    InnerTubeResolver.resolve(reactApplicationContext, videoId)
+                }
+                if (info == null) {
+                    Log.d(TAG, "fast path gave up or declined, deferring to yt-dlp")
+                }
+                withContext(Dispatchers.Main) {
+                    if (info == null) promise.resolve(null) else promise.resolve(buildFastInfoMap(info, url))
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { promise.resolve(null) }
+            }
+        }
+    }
+
+    /** Mirrors the field names [fetchInfo] produces so the picker is unchanged. */
+    private fun buildFastInfoMap(info: InnerTubeResolver.Info, url: String): WritableNativeMap {
+        val thumbnails = InnerTubeResolver.bestThumbnail(info)
+
+        return WritableNativeMap().apply {
+            putString("id", info.id)
+            putString("title", info.title)
+            putString("description", "")
+            putString("uploader", info.author)
+            putString("uploaderUrl", "")
+            putDouble("duration", info.durationSeconds)
+            putDouble("viewCount", info.viewCount)
+            putDouble("likeCount", 0.0)
+            putString("uploadDate", "")
+            putString("extractor", "youtube")
+            putString("url", url)
+            putString("platform", "YouTube")
+            // Downloads re-run extraction through yt-dlp, so this must stay a client name
+            // yt-dlp understands. The format ids below are InnerTube itags, which
+            // are the same numbering yt-dlp reports, but the set is per-client, so
+            // web_embedded is claimed for the download step.
+            putString("playerClient", "web_embedded")
+            putBoolean("isLive", info.isLive)
+            putString("ext", "mp4")
+            putDouble("filesize", 0.0)
+            putString("resolution", "")
+            putInt("width", 0)
+            putInt("height", 0)
+            putDouble("fps", 0.0)
+            putString("thumbnail", thumbnails)
+            putString("artist", "")
+            putString("track", "")
+            putBoolean("isMusic", false)
+            putArray("categories", WritableNativeArray())
+
+            putArray("formats", WritableNativeArray().apply {
+                info.formats.forEach { format ->
+                    pushMap(WritableNativeMap().apply {
+                        putString("formatId", format.formatId)
+                        putString("formatNote", format.formatNote)
+                        putString("ext", format.ext)
+                        putDouble("filesize", format.filesize)
+                        putDouble("tbr", format.tbr)
+                        putInt("width", format.width)
+                        putInt("height", format.height)
+                        putString("resolution", format.resolution)
+                        putDouble("fps", format.fps)
+                        putString("vcodec", format.vcodec)
+                        putString("acodec", format.acodec)
+                        putBoolean("hasVideo", format.hasVideo)
+                        putBoolean("hasAudio", format.hasAudio)
+                    })
+                }
+            })
+
+            // Empty rather than absent: the picker hides these panels when the
+            // arrays are present but empty.
+            putArray("subtitles", WritableNativeArray())
+            putArray("audioTracks", WritableNativeArray())
         }
     }
 

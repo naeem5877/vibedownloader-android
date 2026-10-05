@@ -173,6 +173,13 @@ export interface SharedData {
 export interface YtDlpNativeModule {
     fetchInfo(url: string, options?: { cookies?: string; args?: string[] }): Promise<VideoInfo>;
     /**
+     * InnerTube fast path for YouTube metadata. Same VideoInfo shape as
+     * `fetchInfo`, but no Python or JS runtime is involved, so it is far
+     * faster. Resolves with `null` when it declines or times out, and the
+     * caller must then use `fetchInfo`. Never rejects.
+     */
+    fetchInfoFast(url: string): Promise<VideoInfo | null>;
+    /**
      * Title/uploader/thumbnail from oEmbed in a single request. Resolves with
      * `null` for platforms without an oEmbed endpoint. Lets the details screen
      * render while the full extraction is still running.

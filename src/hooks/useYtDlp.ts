@@ -235,7 +235,22 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 throw new Error('Native module not available. Please restart the app.');
             }
 
-            const info = await YtDlpNative.fetchInfo(url, options);
+            // Fast path is tried first and is bounded natively, so a decline or timeout
+            // costs a few hundred ms and then hands over to yt-dlp below.
+            // Cookies are a yt-dlp-only concept, so requests that carry them
+            // skip this and go straight to the authoritative path.
+            let info: VideoInfo | null = null;
+            if (!options?.cookies && YtDlpNative.fetchInfoFast) {
+                try {
+                    info = await YtDlpNative.fetchInfoFast(url);
+                } catch (e) {
+                    console.warn('fetchInfoFast unavailable, using yt-dlp:', e);
+                }
+            }
+
+            if (!info) {
+                info = await YtDlpNative.fetchInfo(url, options);
+            }
 
             if (!info) {
                 throw new Error('No video information found');

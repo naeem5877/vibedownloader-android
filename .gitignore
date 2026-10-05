@@ -85,3 +85,13 @@ LossLessKnowlageBase
 
 # Knolage Base for Story
 vibedownloader-updated-story
+# --- native build scratch trees (investigation leftovers, ~167MB) ---
+.tmp-*/
+
+# --- one-off investigation scripts ---
+align_check.py
+probe.sh
+webp_info.py
+
+# --- scratch notes, intentionally never committed ---
+FEATURE-GAP.md

@@ -136,13 +136,27 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToLibrary }) =
     // for one track would silently apply to the next.
     const [lyrics, setLyrics] = useState<LyricsResult | null>(null);
     const [lyricsLoading, setLyricsLoading] = useState(false);
-    const [selectedAudioFormatId, setSelectedAudioFormatId] = useState<string | null>(null);
+    const [selectedAudioKey, setSelectedAudioKey] = useState<string | null>(null);
+
     const [downloadingSubtitleKey, setDownloadingSubtitleKey] = useState<string | null>(null);
     const [downloadedSubtitleKey, setDownloadedSubtitleKey] = useState<string | null>(null);
     /** True once the last download tap asked for audio only, for the selector hint. */
     const [audioOnlyIntent, setAudioOnlyIntent] = useState(false);
 
     const [state, actions] = useYtDlp();
+
+    /**
+     * The itag yt-dlp is asked to use for the chosen audio language.
+     *
+     * Resolved from the selected key rather than stored directly, because an
+     * itag names a codec and bitrate rather than a language and is shared by
+     * every track with the same encoding.
+     */
+    const selectedAudioFormatId = useMemo(() => {
+        const tracks = state.videoInfo?.audioTracks;
+        if (!tracks || !selectedAudioKey) return null;
+        return tracks.find((t) => t.key === selectedAudioKey)?.formatId ?? null;
+    }, [state.videoInfo?.audioTracks, selectedAudioKey]);
 
     const [queuePanelVisible, setQueuePanelVisible] = useState(false);
 const [batchSheetVisible, setBatchSheetVisible] = useState(false);
@@ -714,7 +728,7 @@ let isStoryFetch = false;
     useEffect(() => {
         const info = state.videoInfo;
         if (!info) {
-            setSelectedAudioFormatId(null);
+            setSelectedAudioKey(null);
             setDownloadedSubtitleKey(null);
             setDownloadingSubtitleKey(null);
             setAudioOnlyIntent(false);
@@ -722,7 +736,7 @@ let isStoryFetch = false;
         }
 
         const original = info.audioTracks?.find((t) => t.isOriginal);
-        setSelectedAudioFormatId(original?.formatId ?? null);
+        setSelectedAudioKey(original?.key ?? null);
         setDownloadingSubtitleKey(null);
         setDownloadedSubtitleKey(null);
         setAudioOnlyIntent(false);
@@ -764,7 +778,7 @@ let isStoryFetch = false;
     }, [lyricsTarget?.id]);
 
     const handleSelectAudioTrack = useCallback((track: AudioTrack) => {
-        setSelectedAudioFormatId((prev) => (prev === track.formatId ? null : track.formatId));
+        setSelectedAudioKey((prev) => (prev === track.key ? null : track.key));
     }, []);
 
     const handleDownloadSubtitles = useCallback(
@@ -1713,7 +1727,7 @@ cookies: cookiesPath || undefined,
 
                                 <AudioTrackSelector
                                     tracks={state.videoInfo.audioTracks ?? []}
-                                    selectedId={selectedAudioFormatId}
+                                    selectedKey={selectedAudioKey}
                                     onSelect={handleSelectAudioTrack}
                                     isAudioOnly={audioOnlyIntent}
                                 />

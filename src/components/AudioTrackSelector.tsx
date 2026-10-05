@@ -13,8 +13,15 @@ import type { AudioTrack } from '../native/YtDlpModule';
 
 export interface AudioTrackSelectorProps {
     tracks: AudioTrack[];
-    /** Currently selected `formatId`, or null to let yt-dlp pick. */
-    selectedId: string | null;
+    /**
+     * Currently selected track `key`, or null to let yt-dlp pick.
+     *
+     * The selection is tracked by `key` rather than `formatId` because an itag
+     * identifies a codec and bitrate, not a language: several dubbed tracks
+     * routinely share one itag, so matching on it would light up every row at
+     * once.
+     */
+    selectedKey: string | null;
     onSelect: (track: AudioTrack) => void;
     /** True when the current download is audio-only, which changes what the choice means. */
     isAudioOnly?: boolean;
@@ -27,7 +34,7 @@ const EMERALD_TEXT = '#6EE7B7';
 
 export default function AudioTrackSelector({
     tracks,
-    selectedId,
+    selectedKey,
     onSelect,
     isAudioOnly = false,
 }: AudioTrackSelectorProps) {
@@ -42,8 +49,13 @@ export default function AudioTrackSelector({
     }, [tracks]);
 
     const activeTrack = useMemo(() => {
-        return tracks.find((t) => t.formatId === selectedId) || tracks.find((t) => t.isOriginal) || tracks[0];
-    }, [tracks, selectedId]);
+        return tracks.find((t) => t.key === selectedKey)
+            || tracks.find((t) => t.isOriginal)
+            || tracks[0];
+    }, [tracks, selectedKey]);
+
+    // Kept for readability at the call site; the choice itself is the language.
+    void isAudioOnly;
 
     if (tracks.length < 2) return null;
 
@@ -90,7 +102,7 @@ export default function AudioTrackSelector({
                     <View style={styles.divider} />
                     <View style={styles.trackList}>
                         {ordered.map((track) => {
-                            const isSelected = selectedId === track.formatId || (!selectedId && track.isOriginal);
+                            const isSelected = track.key === selectedKey;
                             const langCode = (track.lang || 'en').split('-')[0].toUpperCase();
 
                             return (

@@ -1256,7 +1256,10 @@ host.contains("soundcloud") -> "SoundCloud"
 
                     // External JS runtime (QuickJS) for YouTube n-sig — without this
                     // yt-dlp falls back to its pure-Python interpreter (~30-40s).
-                    applyJsRuntime(request)
+                    // Only YouTube needs it, and it is set once here rather than
+                    // at each use site: --no-js-runtimes clears the defaults, so a
+                    // second injection would reset the runtime chosen above.
+                    if (platform == "YouTube") applyJsRuntime(request)
                     
                     // Use a standard Desktop User-Agent to bypass simple bot protections for TikTok, Instagram, etc.
                     // Note: Do not use --impersonate as it requires curl-cffi which isn't available on Android
@@ -1296,7 +1299,6 @@ if (options?.hasKey("cookies") == true) {
                     if (platform == "YouTube" && !playerClients.isNullOrEmpty()) {
                         request.addOption("--extractor-args", "youtube:player_client=$playerClients")
                     }
-                    if (platform == "YouTube") applyJsRuntime(request)
                     request.addOption("--no-playlist")
                     
                     // No -f selector here on purpose. Two reasons:

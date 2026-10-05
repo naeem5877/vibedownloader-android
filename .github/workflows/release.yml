@@ -33,6 +33,14 @@ jobs:
         run: cd android && chmod +x gradlew
 
       - name: Build Android Release APK
+        env:
+          # Only the auth token is secret. It is read from the repository
+          # Actions secret and never written to the repo. android/sentry.properties
+          # is gitignored, so CI relies on these variables for org/project/url.
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: wrapple
+          SENTRY_PROJECT: vibedownloader-android
+          SENTRY_URL: https://sentry.io
         run: |
           cd android
           ./gradlew assembleRelease --no-daemon

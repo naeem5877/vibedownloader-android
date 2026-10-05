@@ -17,6 +17,11 @@ buildscript {
         classpath("com.android.tools.build:gradle")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+        // Uploads native (NDK/JNI) debug symbols so Kotlin/Java NDK crashes are
+        // readable. autoInstallation is disabled in app/build.gradle because
+        // @sentry/react-native owns the sentry-android version; letting this
+        // plugin add its own crashes at startup with a version-mix error.
+        classpath("io.sentry:sentry-android-gradle-plugin:6.23.0")
     }
 }
 

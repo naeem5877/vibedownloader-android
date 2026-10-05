@@ -35,6 +35,10 @@ local.properties
 !debug.keystore
 .kotlin/
 
+# Sentry: holds a live auth token used for source map / debug symbol upload.
+# Never commit it. Supply the token via the SENTRY_AUTH_TOKEN env var instead.
+sentry.properties
+
 # node.js
 #
 node_modules/

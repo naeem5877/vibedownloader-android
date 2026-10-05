@@ -174,8 +174,15 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
         if (ffmpegProbed) return ffmpegProbe?.let { File(it) }
         val nativeDir = reactApplicationContext.applicationInfo.nativeLibraryDir
         val base = File(reactApplicationContext.noBackupFilesDir, "youtubedl-android/packages/ffmpeg")
-        val candidates = listOf(
+        val candidates = listOfNotNull(
             File(nativeDir, "libffmpeg.so"),
+            // With extractNativeLibs the native binaries are unpacked into an ABI
+            // subdirectory (nativeLibraryDir/x86_64), not nativeLibraryDir itself,
+            // so this is where the runnable ffmpeg actually lives.
+            Build.SUPPORTED_ABIS.mapNotNull { abi ->
+                File(nativeDir, abi).takeIf { it.isDirectory }
+                    ?.let { File(it, "libffmpeg.so") }
+            }.firstOrNull(),
             File(base, "usr/bin/ffmpeg"),
             File(base, "bin/ffmpeg"),
             File(base, "ffmpeg"),
@@ -2498,9 +2505,17 @@ platform.equals("Spotify", ignoreCase = true) ||
                 if (ffmpegAvailable) {
                     request.addOption("--embed-metadata")
                     if (isAudioDownload) {
-                        // Embed thumbnail directly into MP3/M4A ID3 tags so music players show cover art
-                        request.addOption("--embed-thumbnail")
-                        if (overrideThumbnailPath != null) {
+                        // Embed thumbnail directly into MP3/M4A ID3 tags so music players show cover art.
+                        // WAV is excluded: yt-dlp's EmbedThumbnail postprocessor rejects it outright
+                        // ("Supported filetypes for thumbnail embedding are: mp3, mkv/mka,
+                        // ogg/opus/flac, m4a/mp4/m4v/mov") and fails the whole download. That
+                        // matches the WAV card's "No cover art" promise and the JAudioTagger
+                        // step below, which already skips wav. --embed-metadata stays on
+                        // because text tags are what WAV is actually used for here.
+                        if (formatId != "audio_wav") {
+                            request.addOption("--embed-thumbnail")
+                        }
+                        if (overrideThumbnailPath != null && formatId != "audio_wav") {
                             // Crux of the fix: forcefully stop yt-dlp from downloading its own 16:9 thumbnail
                             // so it's forced to use the 1:1 high-res art we just seeded manually.
                             request.addOption("--no-write-thumbnail")
@@ -2705,25 +2720,37 @@ platform.equals("Spotify", ignoreCase = true) ||
                     val contentType = getContentType(url, platform)
                     val finalFile = moveToPublicStorage(finalProcessingFile, platform, contentType)
                     
-                    // Preserve thumbnail to public Music folder (as per user request)
-                    // and also to internal app thumbnails cache
+                    // Publish the thumbnail alongside the file only when there is
+                    // no copy inside the file itself to read from.
                     if (finalThumbFile != null && finalThumbFile.exists() && finalFile != null) {
                         try {
                             // 1. Save to internal app storage (hidden from gallery)
-                            val thumbDir = File(reactApplicationContext.filesDir, "thumbnails")
-                            if (!thumbDir.exists()) {
-                                thumbDir.mkdirs()
-                                try { File(thumbDir, ".nomedia").createNewFile() } catch (e: Exception) {}
-                            }
+                            // A sidecar is only kept for audio whose artwork could
+                            // not be embedded, and even then never for wav: embedded
+                            // art is read out of the file itself and a video poster
+                            // is decoded from the video itself, so a second copy on
+                            // disk buys nothing. The sidecar directory is still
+                            // consulted as a fallback for libraries downloaded
+                            // before this, which is why existing files keep working.
                             val finalName = finalFile.nameWithoutExtension
-                            val targetThumb = File(thumbDir, "$finalName.jpg")
-                            finalThumbFile.copyTo(targetThumb, overwrite = true)
+                            val audioExt = finalFile.extension.lowercase()
+                            val keepSidecar = isAudioDownload && !artEmbedded && audioExt != "wav"
+
+                            if (keepSidecar) {
+                                val thumbDir = File(reactApplicationContext.filesDir, "thumbnails")
+                                if (!thumbDir.exists()) {
+                                    thumbDir.mkdirs()
+                                    try { File(thumbDir, ".nomedia").createNewFile() } catch (e: Exception) {}
+                                }
+                                val targetThumb = File(thumbDir, "$finalName.jpg")
+                                finalThumbFile.copyTo(targetThumb, overwrite = true)
+                            }
 
                             // When the art could not be embedded (no ffmpeg, so the track stayed
                             // m4a/webm), also publish a cover for the track.
                             // Otherwise the track has no artwork anywhere. WAV is
                             // excluded: artwork is explicitly unwanted on it.
-                            if (!artEmbedded && isAudioDownload && finalFile.extension.lowercase() != "wav") {
+                            if (!artEmbedded && isAudioDownload && audioExt != "wav") {
                                 val coverName = "$finalName.jpg"
                                 if (publishCoverImage(finalThumbFile, coverName, platform)) {
                                     Log.d(TAG, "Saved cover for ${finalFile.name} (art could not be embedded)")
@@ -2935,6 +2962,7 @@ platform.equals("Spotify", ignoreCase = true) ||
 // JAudioTagger reads and writes MP3/AIFF; MP4 artwork needs the "covr" atom
                         // which this library does not implement. WAV is excluded on
                         // purpose - no artwork is wanted there.
+                        var spotifyArtEmbedded = false
                         try {
                             val ext = downloadedFile.extension.lowercase()
                             if (ext == "wav") {
@@ -2962,6 +2990,7 @@ platform.equals("Spotify", ignoreCase = true) ||
                                 tag.deleteArtworkField()
                                 tag.setField(artwork)
                                 Log.d(TAG, "Spotify album art embedded successfully from ${preDownloadedThumb.name}")
+                                spotifyArtEmbedded = true
                             } else {
                                 Log.w(TAG, "No cover art found for Spotify track; skipping artwork")
                             }
@@ -2979,9 +3008,14 @@ platform.equals("Spotify", ignoreCase = true) ||
                     val finalFile = moveToPublicStorage(downloadedFile, "Spotify", "Music")
                     
                     if (finalFile != null) {
-                         // 2. Save sidecar thumbnail (as per user request)
+                         // 2. Save sidecar thumbnail only when the art is not inside
+                         // the file: the gallery reads embedded artwork out of the
+                         // track itself, so a copy here would duplicate it.
                          val preDownloadedThumb = File(cacheDir, "$safeFileName.jpg")
-                         if (!thumbnail.isNullOrEmpty()) {
+                         val finalAudioExt = finalFile.extension.lowercase()
+                         val spotifyNeedsSidecar =
+                             !spotifyArtEmbedded && !thumbnail.isNullOrEmpty() && finalAudioExt != "wav"
+                         if (spotifyNeedsSidecar) {
                             try {
                                 val thumbDir = File(reactApplicationContext.filesDir, "thumbnails")
                                 if (!thumbDir.exists()) {
@@ -3089,11 +3123,19 @@ platform.equals("Spotify", ignoreCase = true) ||
                                 else -> "Downloads"
                             }
                             
-                            // Resolve thumbnail: prefer sidecar file, but for audio files also
-                            // try the MediaStore album art URI (populated when --embed-thumbnail is used)
+                            // Resolve thumbnail: prefer sidecar file, but for media the gallery can
+                            // render itself leave it unset so getMediaThumbnail reads
+                            // the file. Audio serves the cover embedded in its tags and
+                            // video a decoded poster frame; handing back a sidecar path
+                            // here would pin the grid to the duplicate copy on disk and
+                            // never exercise the from-file read. Libraries downloaded
+                            // before this still resolve via the sidecar fallback there.
                             val thumbPath = File(thumbDir, "${file.nameWithoutExtension}.jpg")
                             val sidecarThumb = File(file.parentFile, "${file.nameWithoutExtension}.jpg")
+                            val mediaExt = file.extension.lowercase()
                             val thumbnail: String? = when {
+                                mediaExt in ARTISTIC_AUDIO_EXTENSIONS -> null
+                                mediaExt in VIDEO_EXTENSIONS -> null
                                 thumbPath.exists() -> "file://${thumbPath.absolutePath}"
                                 sidecarThumb.exists() -> "file://${sidecarThumb.absolutePath}"
                                 listOf("mp3", "m4a", "flac", "aac", "wav").contains(file.extension.lowercase()) -> {
@@ -3252,6 +3294,99 @@ fun cancelDownload(processId: String, promise: Promise) {
     private val VIDEO_EXTENSIONS = setOf("mp4", "webm", "mkv", "mov", "avi", "3gp", "m4v")
 
     /**
+     * Extensions whose artwork is read out of the file's own tags.
+     *
+     * WAV is excluded on purpose: it carries no artwork frame and we never embed
+     * any, so asking it for a picture would only cost a decode attempt.
+     */
+    private val ARTISTIC_AUDIO_EXTENSIONS = setOf("mp3", "m4a", "flac", "aac", "ogg", "opus")
+
+    /** Grid cells never show more than this, so nothing is cached larger. */
+    private val THUMBNAIL_MAX_WIDTH = 480
+
+    /**
+     * Cover art stored inside an audio file, cached on disk by path and mtime.
+     *
+     * A finished mp3 already carries its artwork in the ID3 APIC frame (or the MP4
+     * covr atom), so the gallery can read the picture straight out of the file
+     * instead of keeping a second copy on disk next to it. That removes a
+     * duplicate of every track's cover and makes the art travel with the file.
+     *
+     * Same caching contract as [videoThumbnail]: keyed by path and mtime so an
+     * edited or re-downloaded file regenerates rather than showing stale art, and
+     * cached because extracting it means decoding a full-size image per grid cell.
+     *
+     * @return a file:// URI for the cached JPEG, or null when the file carries no
+     *   artwork the retriever can read (caller falls back to the sidecar image).
+     */
+    private fun embeddedArtwork(file: File): String? {
+        if (file.extension.lowercase() !in ARTISTIC_AUDIO_EXTENSIONS) return null
+        if (!file.exists() || file.length() == 0L) return null
+
+        val cacheDir = File(reactApplicationContext.cacheDir, "audiothumbs").apply { mkdirs() }
+        val key = "${file.absolutePath.hashCode().toUInt()}-${file.lastModified()}-${file.length()}"
+        val cached = File(cacheDir, "$key.jpg")
+        if (cached.exists() && cached.length() > 0L) return "file://${cached.absolutePath}"
+
+        val retriever = android.media.MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            val bytes = retriever.embeddedPicture ?: return null
+            if (bytes.isEmpty()) return null
+
+            // Downscale before writing: grid cells never show the art at full
+            // resolution, and a 1500px cover per cell is real memory on a long list.
+            val decoded = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            if (decoded != null) {
+                writeThumbnailJpeg(decoded, cached)
+            } else {
+                // Undecodable bytes (an exotic tag encoding, say): keep them
+                // verbatim rather than dropping the cover entirely.
+                FileOutputStream(cached).use { it.write(bytes) }
+            }
+            Log.d(TAG, "Embedded artwork for ${file.name}: ${cached.name} (${cached.length()} bytes)")
+            "file://${cached.absolutePath}"
+        } catch (e: Exception) {
+            // Must not fail the listing; the caller falls back to the sidecar.
+            Log.w(TAG, "Embedded artwork failed for ${file.name}: ${e.message}")
+            null
+        } finally {
+            releaseRetriever(retriever)
+        }
+    }
+
+    /**
+     * Preview image for any gallery item, read from the file itself.
+     *
+     * Audio is served from the artwork embedded in the file (which the download
+     * step already wrote), video from a decoded poster frame. Only when the file
+     * yields nothing do we fall back to the sidecar .jpg that older downloads
+     * saved, so existing libraries keep their covers.
+     */
+    private fun mediaThumbnail(file: File, targetWidth: Int = 480): String? {
+        val ext = file.extension.lowercase()
+        if (ext in VIDEO_EXTENSIONS) {
+            return videoThumbnail(file, targetWidth)
+                ?: sidecarThumbnail(file)?.let { "file://${it.absolutePath}" }
+        }
+        return embeddedArtwork(file)
+            ?: sidecarThumbnail(file)?.let { "file://${it.absolutePath}" }
+    }
+
+    /** Cover saved alongside the file by the download step, if one exists. */
+    private fun sidecarThumbnail(file: File): File? {
+        val name = "${file.nameWithoutExtension}.jpg"
+        for (dir in listOf(
+            File(reactApplicationContext.filesDir, "thumbnails"),
+            File(reactApplicationContext.getExternalFilesDir(null), "thumbnails"),
+        )) {
+            val f = File(dir, name)
+            if (f.isFile && f.length() > 0L) return f
+        }
+        return null
+    }
+
+    /**
      * Duration in milliseconds for playable media, or -1.
      *
      * The gallery sorts and labels by length, and a bare filename carries no
@@ -3269,7 +3404,7 @@ fun cancelDownload(processId: String, promise: Promise) {
         } catch (e: Exception) {
             -1.0
         } finally {
-            try { retriever.release() } catch (ignored: Exception) {}
+            releaseRetriever(retriever)
         }
     }
 
@@ -3294,6 +3429,28 @@ fun cancelDownload(processId: String, promise: Promise) {
         val cached = File(cacheDir, "$key.jpg")
         if (cached.exists() && cached.length() > 0L) return "file://${cached.absolutePath}"
 
+        // Preferred path on API 29+: MediaStore has already indexed the file and
+        // keeps a thumbnail for it, so hand back that instead of decoding a frame.
+        // This is what the system gallery and Glide both end up doing, and it
+        // costs no decode at all. It can miss for a file that has not finished
+        // scanning, hence the fallbacks below rather than an error.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val bmp = android.media.ThumbnailUtils.createVideoThumbnail(
+                    file,
+                    android.util.Size(targetWidth, targetWidth),
+                    android.os.CancellationSignal()
+                )
+                if (bmp != null) {
+                    writeThumbnailJpeg(bmp, cached)
+                    Log.d(TAG, "Poster frame for ${file.name}: ${cached.name} (MediaStore, ${cached.length()} bytes)")
+                    return "file://${cached.absolutePath}"
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "MediaStore thumbnail unavailable for ${file.name}: ${e.message}")
+            }
+        }
+
         val retriever = android.media.MediaMetadataRetriever()
         return try {
             retriever.setDataSource(file.absolutePath)
@@ -3303,45 +3460,113 @@ fun cancelDownload(processId: String, promise: Promise) {
             // Sample away from the very start: the opening frames of a download
             // are frequently black, a fade-in, or a still slate.
             val at = (durationMs / 8).coerceAtLeast(1_000_000L)
-            val bitmap = retriever.getFrameAtTime(
-                at,
-                android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC
-            ) ?: retriever.frameAtTime
+
+            // Decode straight to the size the grid shows. Decoding a full 1080p
+            // frame and shrinking it afterwards allocates several MB per cell for
+            // no visible gain; the scaled path is markedly cheaper and faster.
+            val scaled = scaledVideoFrame(retriever, at, targetWidth)
+            val bitmap = scaled
+                ?: retriever.getFrameAtTime(at, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: retriever.frameAtTime
 
             if (bitmap != null) {
-                val scaled = if (bitmap.width > targetWidth) {
-                    val h = (bitmap.height.toLong() * targetWidth / bitmap.width).toInt().coerceAtLeast(1)
-                    android.graphics.Bitmap.createScaledBitmap(bitmap, targetWidth, h, true)
-                } else bitmap
-
-                FileOutputStream(cached).use { out ->
-                    scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out)
-                }
-                if (scaled !== bitmap) scaled.recycle()
-                bitmap.recycle()
+                writeThumbnailJpeg(bitmap, cached)
+                Log.d(TAG, "Poster frame for ${file.name}: ${cached.name} (${cached.length()} bytes)")
                 "file://${cached.absolutePath}"
-            } else null
+            } else {
+                // Some high-res/codec combos return no frame at all on certain
+                // devices. Caller falls back to the icon tile or a legacy sidecar.
+                Log.w(TAG, "No frame decodable for ${file.name}")
+                null
+            }
         } catch (e: Exception) {
-            // A corrupt or codec-unsupported video must not fail the whole
-            // listing, so the caller just falls back to the icon tile.
-            Log.w(TAG, "Video thumbnail failed for ${file.name}: ${e.message}")
+            Log.w(TAG, "Poster frame failed for ${file.name}: ${e.message}")
             null
         } finally {
-            try { retriever.release() } catch (ignored: Exception) {}
+            releaseRetriever(retriever)
         }
     }
 
     /**
-     * Creates a poster JPEG for a video and returns its file:// URI.
+     * Frame decoded directly at [targetWidth], or null when unavailable.
      *
-     * Exposed because the gallery requests posters lazily, one screenful at a
-     * time, instead of decoding every video up front during listing.
+     * getScaledFrameAtTime arrived in API 27, so older devices keep the
+     * decode-then-shrink path. A 90/270 degree rotation swaps the display axes,
+     * so the target has to be derived from the oriented dimensions or the
+     * result comes back letterboxed the wrong way round.
+     */
+    private fun scaledVideoFrame(
+        retriever: android.media.MediaMetadataRetriever,
+        timeUs: Long,
+        targetWidth: Int
+    ): android.graphics.Bitmap? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) return null
+        return try {
+            val rawW = retriever
+                .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                ?.toIntOrNull() ?: return null
+            val rawH = retriever
+                .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                ?.toIntOrNull() ?: return null
+            val rotation = retriever
+                .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                ?.toIntOrNull() ?: 0
+            val orientedW = if (rotation == 90 || rotation == 270) rawH else rawW
+            val orientedH = if (rotation == 90 || rotation == 270) rawW else rawH
+            if (orientedW <= 0 || orientedH <= 0) return null
+
+            val factor = targetWidth.toFloat() / orientedW
+            val dstW = Math.round(factor * orientedW).coerceIn(1, orientedW)
+            val dstH = Math.round(factor * orientedH).coerceIn(1, orientedH)
+            retriever.getScaledFrameAtTime(
+                timeUs,
+                android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                dstW,
+                dstH
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Scaled frame decode failed, falling back to full frame: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Writes a decoded frame or cover to the cache as a JPEG, downscaling first
+     * when the source is wider than the grid ever shows it.
+     */
+    private fun writeThumbnailJpeg(bitmap: android.graphics.Bitmap, target: File) {
+        val scaled = if (bitmap.width > THUMBNAIL_MAX_WIDTH) {
+            val h = (bitmap.height.toLong() * THUMBNAIL_MAX_WIDTH / bitmap.width).toInt().coerceAtLeast(1)
+            android.graphics.Bitmap.createScaledBitmap(bitmap, THUMBNAIL_MAX_WIDTH, h, true)
+        } else bitmap
+
+        FileOutputStream(target).use { out ->
+            scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out)
+        }
+        if (scaled !== bitmap) scaled.recycle()
+        bitmap.recycle()
+    }
+
+    /** close() replaced release() in API 29. */
+    private fun releaseRetriever(retriever: android.media.MediaMetadataRetriever) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) retriever.close()
+            else retriever.release()
+        } catch (ignored: Exception) {}
+    }
+
+    /**
+     * Creates a preview image for a media file and returns its file:// URI.
+     *
+     * Exposed because the gallery requests previews lazily, one screenful at a
+     * time, instead of decoding every file up front during listing. Audio is read
+     * from the artwork already embedded in the file; video gets a poster frame.
      */
     @ReactMethod
     fun getMediaThumbnail(filePath: String, promise: Promise) {
         scope.launch {
             try {
-                val uri = withContext(Dispatchers.IO) { videoThumbnail(File(filePath)) }
+                val uri = withContext(Dispatchers.IO) { mediaThumbnail(File(filePath)) }
                 withContext(Dispatchers.Main) { promise.resolve(uri) }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) { promise.reject("THUMBNAIL_ERROR", e.message) }
@@ -3475,15 +3700,18 @@ fun cancelDownload(processId: String, promise: Promise) {
                     }
                 }
 
-                // Drop the cached poster frame so a re-download of the same path
-                // cannot resurrect the old video's thumbnail.
-                try {
-                    val videoCache = File(reactApplicationContext.cacheDir, "videothumbs")
-                    videoCache.listFiles()
-                        ?.filter { it.name.startsWith("${file.absolutePath.hashCode().toUInt()}-") }
-                        ?.forEach { it.delete() }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to clear cached video thumbnail")
+                // Drop the cached preview so a re-download of the same path
+                // cannot resurrect the old poster frame or cover art. Both
+                // caches are keyed by the same path+mtime prefix.
+                for (cacheName in listOf("videothumbs", "audiothumbs")) {
+                    try {
+                        val cache = File(reactApplicationContext.cacheDir, cacheName)
+                        cache.listFiles()
+                            ?.filter { it.name.startsWith("${file.absolutePath.hashCode().toUInt()}-") }
+                            ?.forEach { it.delete() }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to clear cached $cacheName entry")
+                    }
                 }
 
                 // 2. Try direct file deletion (Works on legacy storage or app-private dirs)
@@ -3613,6 +3841,15 @@ fun cancelDownload(processId: String, promise: Promise) {
                 ?.forEach { it.delete() }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to clear cached video thumbnail")
+        }
+        // Same for artwork read back out of an audio file, or a re-download of
+        // the same path would keep showing the old track's cover.
+        try {
+            File(reactApplicationContext.cacheDir, "audiothumbs").listFiles()
+                ?.filter { it.name.startsWith("${file.absolutePath.hashCode().toUInt()}-") }
+                ?.forEach { it.delete() }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to clear cached artwork")
         }
 
         if (file.exists()) {

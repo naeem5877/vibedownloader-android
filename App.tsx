@@ -1,7 +1,7 @@
 /**
  * VibeDownloader Mobile
  * Android-only React Native app for downloading media from multiple platforms
- * 
+ *
  * @format
  */
 
@@ -18,11 +18,46 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { HomeScreen, LibraryScreen, SplashScreen, OnboardingScreen } from './src/screens';
-import { Colors, BorderRadius, Spacing, Typography, Shadows } from './src/theme';
+import {
+  HomeScreen,
+  LibraryScreen,
+  SplashScreen,
+  OnboardingScreen,
+} from './src/screens';
+import {
+  Colors,
+  BorderRadius,
+  Spacing,
+  Typography,
+  Shadows,
+} from './src/theme';
 import { HomeIcon, LibraryIcon, DownloadIcon } from './src/components/Icons';
 import { UpdateLog } from './src/components/UpdateLog';
 import { Haptics } from './src/utils/haptics';
+import { isTabSwipeLocked } from './src/utils/tabSwipeLock';
+import * as Sentry from '@sentry/react-native';
+
+Sentry.init({
+  dsn: 'https://fa5c35e23e58e082c1765c9ac8e62f0c@o4511882967121920.ingest.de.sentry.io/4512205901201488',
+
+  // Adds more context data to events (IP address, cookies, user, etc.)
+  // For more information, visit: https://docs.sentry.io/platforms/react-native/data-management/data-collected/
+  sendDefaultPii: true,
+
+  // Enable Logs
+  enableLogs: true,
+
+  // Configure Session Replay
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1,
+  integrations: [
+    Sentry.mobileReplayIntegration(),
+    Sentry.feedbackIntegration(),
+  ],
+
+  // uncomment the line below to enable Spotlight (https://spotlightjs.com)
+  // spotlight: __DEV__,
+});
 
 // Storage key constant
 const ONBOARDING_COMPLETE_KEY = 'hasLaunched';
@@ -40,7 +75,13 @@ interface TabButtonProps {
   onPress: () => void;
 }
 
-const TabButton: React.FC<TabButtonProps> = ({ label, icon, activeIcon, isActive, onPress }) => {
+const TabButton: React.FC<TabButtonProps> = ({
+  label,
+  icon,
+  activeIcon,
+  isActive,
+  onPress,
+}) => {
   // One value drives the pill, the icon crossfade and the label together, so the
   // button reads as a single movement rather than three independent ones.
   const selected = useRef(new Animated.Value(isActive ? 1 : 0)).current;
@@ -69,7 +110,10 @@ const TabButton: React.FC<TabButtonProps> = ({ label, icon, activeIcon, isActive
   };
 
   const fadeIn = selected;
-  const fadeOut = selected.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
+  const fadeOut = selected.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0],
+  });
 
   return (
     <Pressable
@@ -88,8 +132,11 @@ const TabButton: React.FC<TabButtonProps> = ({ label, icon, activeIcon, isActive
             transform: [
               {
                 scale: Animated.multiply(
-                  selected.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }),
-                  press
+                  selected.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.94, 1],
+                  }),
+                  press,
                 ),
               },
             ],
@@ -140,7 +187,12 @@ const TabButton: React.FC<TabButtonProps> = ({ label, icon, activeIcon, isActive
                 {
                   opacity: fadeOut,
                   transform: [
-                    { translateY: fadeIn.interpolate({ inputRange: [0, 1], outputRange: [0, -3] }) },
+                    {
+                      translateY: fadeIn.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, -3],
+                      }),
+                    },
                   ],
                 },
               ]}
@@ -154,7 +206,12 @@ const TabButton: React.FC<TabButtonProps> = ({ label, icon, activeIcon, isActive
                 {
                   opacity: fadeIn,
                   transform: [
-                    { translateY: fadeIn.interpolate({ inputRange: [0, 1], outputRange: [3, 0] }) },
+                    {
+                      translateY: fadeIn.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [3, 0],
+                      }),
+                    },
                   ],
                 },
               ]}
@@ -169,7 +226,9 @@ const TabButton: React.FC<TabButtonProps> = ({ label, icon, activeIcon, isActive
 };
 
 function App(): React.JSX.Element {
-  const [appState, setAppState] = useState<'splash' | 'onboarding' | 'main'>('splash');
+  const [appState, setAppState] = useState<'splash' | 'onboarding' | 'main'>(
+    'splash',
+  );
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [isFirstLaunch, setIsFirstLaunch] = useState<boolean | null>(null);
   const isFirstLaunchRef = useRef<boolean | null>(null);
@@ -202,7 +261,7 @@ function App(): React.JSX.Element {
   }, [activeTab]);
 
   // Resting position of each tab. A drag may only ever land on one of these two.
-const restX = (tab: TabType) => (tab === 'home' ? 0 : -width);
+  const restX = (tab: TabType) => (tab === 'home' ? 0 : -width);
 
   // Where the current drag began, so movement is measured from the finger's
   // starting point rather than from a fixed origin.
@@ -223,7 +282,7 @@ const restX = (tab: TabType) => (tab === 'home' ? 0 : -width);
         useNativeDriver: true,
       }).start();
     },
-    [slideAnim]
+    [slideAnim],
   );
 
   // Swiping between tabs. The content tracks the finger 1:1 and only commits to
@@ -235,6 +294,9 @@ const restX = (tab: TabType) => (tab === 'home' ? 0 : -width);
       // meant short swipes were swallowed by the child ScrollView and the
       // gesture only ever felt like "nothing happened, then it jumped".
       onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+        // A sheet or trim handle that needs horizontal drags for itself has
+        // asked the tab swipe to stand down (see tabSwipeLock).
+        if (isTabSwipeLocked()) return false;
         const { dx, dy } = gestureState;
         // Clearly horizontal, so a vertical scroll is never hijacked.
         return Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy);
@@ -284,7 +346,7 @@ const restX = (tab: TabType) => (tab === 'home' ? 0 : -width);
       // A gesture stolen back by the system (a modal opening, a call coming in)
       // should settle back rather than leave the screen parked mid-swipe.
       onPanResponderTerminate: () => animateToTab(activeTabRef.current),
-    })
+    }),
   ).current;
 
   // Tab animation
@@ -372,7 +434,9 @@ const restX = (tab: TabType) => (tab === 'home' ? 0 : -width);
 
       {appState === 'splash' && <SplashScreen onFinish={handleSplashFinish} />}
 
-      {appState === 'onboarding' && <OnboardingScreen onDone={handleOnboardingDone} />}
+      {appState === 'onboarding' && (
+        <OnboardingScreen onDone={handleOnboardingDone} />
+      )}
 
       {appState === 'main' && (
         <View style={styles.container}>
@@ -380,11 +444,13 @@ const restX = (tab: TabType) => (tab === 'home' ? 0 : -width);
             <Animated.View
               style={[
                 styles.screenWrapper,
-                { transform: [{ translateX: slideAnim }] }
+                { transform: [{ translateX: slideAnim }] },
               ]}
             >
               <Animated.View style={[styles.screen, homeStyle]}>
-                <HomeScreen onNavigateToLibrary={() => setActiveTab('library')} />
+                <HomeScreen
+                  onNavigateToLibrary={() => setActiveTab('library')}
+                />
               </Animated.View>
 
               <Animated.View style={[styles.screen, libraryStyle]}>
@@ -400,7 +466,9 @@ const restX = (tab: TabType) => (tab === 'home' ? 0 : -width);
                   id="home"
                   label="Download"
                   icon={<DownloadIcon size={24} color={Colors.textMuted} />}
-                  activeIcon={<DownloadIcon size={24} color={Colors.primaryLight} />}
+                  activeIcon={
+                    <DownloadIcon size={24} color={Colors.primaryLight} />
+                  }
                   isActive={activeTab === 'home'}
                   onPress={() => setActiveTab('home')}
                 />
@@ -409,7 +477,9 @@ const restX = (tab: TabType) => (tab === 'home' ? 0 : -width);
                   id="library"
                   label="Library"
                   icon={<LibraryIcon size={24} color={Colors.textMuted} />}
-                  activeIcon={<LibraryIcon size={24} color={Colors.primaryLight} />}
+                  activeIcon={
+                    <LibraryIcon size={24} color={Colors.primaryLight} />
+                  }
                   isActive={activeTab === 'library'}
                   onPress={() => setActiveTab('library')}
                 />
@@ -493,39 +563,39 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: 'rgba(129, 140, 248, 0.16)',
   },
-tabContent: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    // Fixed-size wrappers so the icon and label occupy the same footprint in
-    // both states. Letting them size to the active state made the pill change
-    // width and the icon jump sideways on every tab change.
-    iconSlot: {
-      width: 24,
-      height: 24,
-    },
-    iconLayer: {
-      ...StyleSheet.absoluteFillObject,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    labelSlot: {
-      width: 66,
-      height: 18,
-      justifyContent: 'center',
-    },
-    tabLabel: {
-      ...StyleSheet.absoluteFillObject,
-      fontSize: 14,
-      color: Colors.primaryLight,
-      fontWeight: '700',
-      letterSpacing: 0.2,
-      textAlign: 'center',
-    },
-    tabLabelDim: {
-      color: Colors.textMuted,
-    },
-  });
+  tabContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  // Fixed-size wrappers so the icon and label occupy the same footprint in
+  // both states. Letting them size to the active state made the pill change
+  // width and the icon jump sideways on every tab change.
+  iconSlot: {
+    width: 24,
+    height: 24,
+  },
+  iconLayer: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  labelSlot: {
+    width: 66,
+    height: 18,
+    justifyContent: 'center',
+  },
+  tabLabel: {
+    ...StyleSheet.absoluteFillObject,
+    fontSize: 14,
+    color: Colors.primaryLight,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+    textAlign: 'center',
+  },
+  tabLabelDim: {
+    color: Colors.textMuted,
+  },
+});
 
-export default App;
+export default Sentry.wrap(App);

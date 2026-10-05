@@ -1,33 +1,44 @@
 <div align="center">
-  <img src="transparent_logo.png" alt="VibeDownloader Logo" width="140" height="auto" />
+  <a href="https://github.com/naeem5877/vibedownloader-desktop">
+    <img src="transparent_logo.png" alt="VibeDownloader Logo" width="140" height="auto" />
+  </a>
   <br />
   <br />
 
-  <h1>VibeDownloader Mobile</h1>
+  <h1>VibeDownloader</h1>
   
   <p>
-    <strong>The premium open-source video downloader for Android.</strong>
+    <strong>An open-source video downloader for Windows, macOS, Linux, and Android.</strong>
   </p>
   
   <p>
-    Download videos, audio, and playlists from YouTube, Instagram, Tiktok, Spotify, and more — directly to your device, ad-free, and privacy-first.
+    Download videos, audio, subtitles, lyrics, and playlists from YouTube, Instagram, TikTok, Twitch, Facebook, X, SoundCloud, Spotify, and more — locally, ad-free, and privacy-first.
   </p>
 
   <p>
-    <a href="https://github.com/naeem5877/vibedownloader-android">
-      <img src="https://img.shields.io/badge/Get_it_on-GitHub-181717?style=for-the-badge&logo=github" alt="Get it on GitHub" />
-    </a>
     <a href="https://github.com/naeem5877/vibedownloader-desktop">
-      <img src="https://img.shields.io/badge/Desktop_Version-Available-blue?style=for-the-badge&logo=windows" alt="Desktop Version" />
+      <img src="https://img.shields.io/badge/Desktop-GitHub-181717?style=for-the-badge&logo=github" alt="Desktop on GitHub" />
+    </a>
+    <a href="https://github.com/naeem5877/vibedownloader-android">
+      <img src="https://img.shields.io/badge/Android-GitHub-3DDC84?style=for-the-badge&logo=android" alt="Android on GitHub" />
+    </a>
+    <a href="https://vibedownloader.me">
+      <img src="https://img.shields.io/badge/Visit-Website-blue?style=for-the-badge&logo=google-chrome" alt="Visit Website" />
     </a>
   </p>
 
   <p>
     <a href="https://github.com/naeem5877/vibedownloader-android/releases/latest">
-      <img src="https://img.shields.io/github/v/release/naeem5877/vibedownloader-android?style=for-the-badge" alt="Latest Release" />
+      <img src="https://img.shields.io/github/v/release/naeem5877/vibedownloader-android?style=for-the-badge&label=Android" alt="Latest Android Release" />
     </a>
     <a href="https://github.com/naeem5877/vibedownloader-android/releases">
-      <img src="https://img.shields.io/github/downloads/naeem5877/vibedownloader-android/total?style=for-the-badge&color=orange" alt="Total Downloads" />
+      <img src="https://img.shields.io/github/downloads/naeem5877/vibedownloader-android/total?style=for-the-badge&color=orange&label=Android%20Downloads" alt="Total Android Downloads" />
+    </a>
+    <a href="https://github.com/naeem5877/vibedownloader-desktop/releases/latest">
+      <img src="https://img.shields.io/github/v/release/naeem5877/vibedownloader-desktop?style=for-the-badge&label=Desktop" alt="Latest Desktop Release" />
+    </a>
+    <a href="https://img.shields.io/badge/build-check_actions-green?style=for-the-badge" alt="Build Status">
+      Build Status
     </a>
   </p>
 </div>
@@ -38,15 +49,68 @@
 
 ## 🌟 Why VibeDownloader?
 
-VibeDownloader Mobile is built for users who want **native performance, zero ads, and total control**.
+VibeDownloader is designed for users who value **control, speed, and privacy**.
 
-Unlike web-based downloaders cluttered with ads and trackers, VibeDownloader runs **entirely on your device**, powered by the robust `yt-dlp` engine under the hood.
+Unlike web-based downloaders cluttered with ads and trackers, VibeDownloader runs **entirely on your device**, powered by the industry-standard `yt-dlp` engine — with a fast metadata path that resolves most links before yt-dlp is even needed.
 
 <div align="center">
 
-### 🚫 No Ads • 🔒 No Tracking • ✨ Native Experience
+### 🚫 No Accounts • 🔒 Private by Design • ✨ No Nonsense
 
 </div>
+
+---
+
+## 🆕 What's New in v2.0.0
+
+The biggest release yet — real language control, a music section that actually works, and far more reliable YouTube downloads.
+
+### 🎬 YouTube Upgrades
+
+- **Subtitles Download** — videos with captions now show a **Subtitles** option. Pick a language and save the subtitles as an SRT file.
+- **Multi-Language Audio Tracks** — if a video has more than one audio track (for example Bangla, English, Hindi), you can now choose the exact language you want.
+- **Audio or Video in Your Language** — download the selected language as an audio file, or as a video with that audio track.
+- **Smarter Format Detection** — the app now checks the quality list YouTube returns. If it looks incomplete (for example only 360p), it tries again with a different player before showing you the result.
+- **Faster Metadata** — titles, formats, thumbnails, subtitles and audio tracks are resolved straight from YouTube's player response, so most links load much faster. yt-dlp is still used as a transparent fallback, and for every real download.
+
+### 🎵 Lyrics Download (Spotify & YouTube Music)
+
+- **Lyrics for Music Tracks** — when a song has lyrics available, a new lyrics option appears in the music section.
+- **Line by Line** — synced lyrics, one line at a time.
+- **Word by Word** — lyrics timed word by word, for karaoke-style use.
+- **Plain Text** — clean lyrics without timestamps.
+- **Translation** — download a translated version of the lyrics.
+
+### 🎧 Music Downloading
+
+- **WAV Format Added** — download songs as uncompressed WAV for the highest audio fidelity.
+- **Better Metadata Embedding** — downloaded songs now include **track, album and artist** details, so they show up correctly in your music player.
+- **Spotify: 4 Audio Formats** — Spotify downloads now offer four audio format options.
+- **Real Cover Art** — cover art is read from the file's embedded metadata, and video posters are generated by the app, so your library finally shows what you actually downloaded.
+
+### 📸 Stories
+
+- **Instagram Stories Fixed** — story downloading works again.
+- **Facebook Stories Fixed** — story downloading works again.
+
+### 🛡️ Bot Protection & Age Restriction
+
+- **Improved YouTube Reliability** — reworked how the app talks to YouTube to reduce "bot protection" and age-restriction errors, including on PCs where it previously failed.
+- **Automatic Player Fallback** — if one YouTube player is refused, the app tries another instead of showing an error.
+- **Better Error Messages** — the app reads the real reason yt-dlp reports, so you see a clearer message when something goes wrong.
+- **Stuck Requests Cancelled Properly** — a timed-out request now stops the downloader process instead of leaving it running in the background.
+- **More Secure Connections** — removed the setting that skipped certificate checks.
+
+### 🧰 Diagnostics & Debugging
+
+- **Sentry Error Reporting** — added to help find and fix crashes faster. Links and file paths are scrubbed before anything is sent.
+- **Private Logs** — video links are redacted from logs.
+- **`ffmpeg` & `ffprobe` Fixed** — the post-processing tools are now found reliably on every supported ABI, instead of silently skipping conversion.
+- **16 KB Page Size Support** — native libraries updated so the app runs correctly on 16 KB page size devices.
+
+---
+
+See the full list on the [**Releases page**](https://github.com/naeem5877/vibedownloader-android/releases/latest).
 
 ---
 
@@ -54,34 +118,52 @@ Unlike web-based downloaders cluttered with ads and trackers, VibeDownloader run
 
 <table>
 <tr>
-<td width="50%">
+<td width="50%" valign="top">
 
 ### 🎥 Multi-Platform Support
-Download from YouTube, Instagram (Reels, Stories), TikTok (No Watermark), Facebook, X (Twitter), Pinterest, and SoundCloud.
+Videos, reels, shorts, stories & playlists from YouTube, Instagram, TikTok, Facebook, X, Pinterest, SoundCloud and Twitch
 
-### 🎵 Spotify & Music
-Download tracks, albums, and playlists from Spotify with auto-tagged metadata and cover art.
+### 📖 Stories
+Download Instagram and Facebook stories directly
 
-### 🔄 Smart Link Detection
-**Share to Download:** Share any link directly from YouTube, Instagram, or Spotify to VibeDownloader for instant processing.
+### 💬 Subtitles & Audio Languages
+Download subtitles as SRT, pick the subtitle language, and choose the exact audio language when a video has multiple tracks — save it as audio or video
 
-### ⚡ Fast & Efficient
-Multi-threaded downloads for maximum speed with background processing support.
+### 🎤 Lyrics Download
+Line by line, word by word, plain text, or translated lyrics for Spotify and YouTube Music tracks
+
+### 🎵 Spotify & YouTube Music Downloads
+Tracks, albums & playlists with full metadata and cover art
+
+### 🎧 Studio-Quality Music
+WAV export plus embedded track, album and artist details, so songs look right in any music player
+
+### ✂️ Cut & Download
+Trim any video or song with the timeline editor before saving — clean output, no leftovers
 
 </td>
-<td width="50%">
+<td width="50%" valign="top">
 
-### 💎 Premium Design
-A sleek, modern dark mode interface with smooth animations and fluid transitions.
+### 📦 Batch Downloading
+Queue videos & audio with per-item quality controls, then watch progress per item
 
-### 🔐 Privacy-First
-Runs locally with no server-side processing. Your data stays on your phone.
+### 🔴 Live Recording
+Record a live broadcast until you stop — auto-finalized as a playable file
 
-### 📦 Smart Library
-Built-in file manager to view, play, and share media. Organized folders by platform (e.g., `Instagram/Reels`).
+### 📂 Smart Library
+A built-in library with real thumbnails, playback, share and delete — organized by platform and content type
 
 ### 🖼️ Gallery Integration
-Videos and photos are automatically saved to your system Gallery. Music goes straight to your audio library.
+Videos and photos are saved to your system Gallery, and music goes straight to your audio library
+
+### 🔄 Share to Download
+Share any link straight from YouTube, Instagram, TikTok or Spotify into VibeDownloader for instant processing
+
+### 💎 Modern UI
+Clean dark interface with smooth animations and fluid transitions
+
+### 🔐 Privacy-First
+Local processing — no accounts, no ads, no tracking of your downloads
 
 </td>
 </tr>
@@ -92,28 +174,20 @@ Videos and photos are automatically saved to your system Gallery. Music goes str
 ## 🖼️ Screenshots
 
 <div align="center">
-  <img src="Screenshots/screenshot1.jpeg" width="22%" />
-  <img src="Screenshots/screenshot2.jpeg" width="22%" />
-  <img src="Screenshots/screenshot3.jpeg" width="22%" />
-  <img src="Screenshots/screenshot4.jpeg" width="22%" />
+  <img src="Screenshots/screenshot1.jpeg" width="45%" />
+  <img src="Screenshots/screenshot2.jpeg" width="45%" />
   <br />
   <br />
-  <img src="Screenshots/screenshot5.jpeg" width="22%" />
-  <img src="Screenshots/screenshot6.jpeg" width="22%" />
-  <img src="Screenshots/screenshot7.jpeg" width="22%" />
-  <img src="Screenshots/screenshot8.jpeg" width="22%" />
-</div>
-
----
-
-## 💻 Also Available on Desktop
-
-Need to download 4K videos on your PC? Check out VibeDownloader Desktop for **Windows, macOS, and Linux**.
-
-<div align="center">
-  <a href="https://github.com/naeem5877/vibedownloader-desktop">
-    <img src="https://img.shields.io/badge/View_Desktop_Repository-2ea44f?style=for-the-badge&logo=github" alt="Desktop Repo" />
-  </a>
+  <img src="Screenshots/screenshot3.jpeg" width="45%" />
+  <img src="Screenshots/screenshot4.jpeg" width="45%" />
+  <br />
+  <br />
+  <img src="Screenshots/screenshot5.jpeg" width="45%" />
+  <img src="Screenshots/screenshot6.jpeg" width="45%" />
+  <br />
+  <br />
+  <img src="Screenshots/screenshot7.jpeg" width="45%" />
+  <img src="Screenshots/screenshot8.jpeg" width="45%" />
 </div>
 
 ---
@@ -126,20 +200,70 @@ Need to download 4K videos on your PC? Check out VibeDownloader Desktop for **Wi
 
 </div>
 
-1. Download the latest `.apk` file from the [**Releases page**](https://github.com/naeem5877/vibedownloader-android/releases/latest).
-2. Open the downloaded file.
-3. If prompted, allow installation from **Unknown Sources** (this is safe, the app is open source!).
-4. Click **Install**.
+<div align="center">
+  <a href="https://github.com/naeem5877/vibedownloader-android/releases/latest">
+    <img src="https://img.shields.io/badge/Download-APK-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Download Android APK" />
+  </a>
+</div>
 
-> **Note:** Since this app downloads from YouTube, it cannot be published on the Google Play Store due to their policies.
+1. Download the `.apk` file from the [**Android Releases page**](https://github.com/naeem5877/vibedownloader-android/releases/latest)
+2. Enable **Install from unknown sources** in your device settings
+3. Open the downloaded APK and install
+4. Launch VibeDownloader from your app drawer
+
+**Requirements:** Android 7.0 (API 24) or newer.
+
+> **Note:** The Android version is available exclusively through GitHub releases. We don't distribute through the Google Play Store to avoid restrictions and maintain full feature compatibility.
+
+---
+
+## 💻 Also Available on Desktop
+
+Need to download 4K videos on your PC? Check out VibeDownloader Desktop for **Windows, macOS, and Linux** — including the browser extension, batch queue, and Cut feature.
+
+<div align="center">
+  <a href="https://github.com/naeem5877/vibedownloader-desktop">
+    <img src="https://img.shields.io/badge/View_Desktop_Repository-181717?style=for-the-badge&logo=github" alt="Desktop Repo" />
+  </a>
+</div>
+
+---
+
+## 🍪 Cookies (Optional)
+
+Some content needs a signed-in session, such as age-restricted videos or private accounts. You can add your cookies for a platform in the app.
+
+- Cookies are stored **only on your phone** and are used only to authenticate your own downloads
+- They are never uploaded to any server
+- **Tip:** for the most reliable result, export your cookies from a **private/incognito window**, then close that window right away. A browser session that stays open can rotate its cookies and make the exported ones stop working.
+
+---
+
+## 🧰 Troubleshooting
+
+If a download fails or only shows low quality:
+
+1. Open **Settings** and make sure the downloader (yt-dlp) is up to date
+2. Try again without cookies, or with freshly exported cookies
+3. Turn off any VPN. Some VPN and shared IPs are blocked by YouTube
+4. If it still fails, open a [new issue](https://github.com/naeem5877/vibedownloader-android/issues) with the video link (a public one), your app version, and your device
+
+---
+
+## 🔐 Privacy
+
+- Downloads, conversions and cookies are processed **locally on your device**
+- No accounts, no ads
+- **Crash and error reports:** VibeDownloader can use [Sentry](https://sentry.io) to find and fix bugs. File paths and personal data are not attached, and cookies are never included
+- You can read exactly what is collected in this repository — the app is fully open source
 
 ---
 
 ## 🛠️ For Developers
 
-Built with **React Native** and **TypeScript**.
+Android is built with **React Native** and **TypeScript**, on top of **Kotlin** native modules for the download engine.
 
-### Setup Development Environment
+### Android Development
 
 ```bash
 # Clone the repository
@@ -149,30 +273,87 @@ cd vibedownloader-android
 # Install dependencies
 npm install
 
-# Run on Android
+# Start Metro
+npm start
+
+# Build & run on a device or emulator
 npm run android
 ```
 
-### Tech Stack
+#### Build & Test Commands
 
-- **Framework:** React Native (0.73+)
-- **Language:** TypeScript
-- **Engine:** yt-dlp (Python via Chaquopy)
-- **UI:** Custom Native Components
+```bash
+# Debug APK
+npm run build:debug
+
+# Release APK
+npm run build:release
+
+# Lint
+npm run lint
+
+# Tests
+npm test
+
+# Clean Gradle output
+npm run clean
+```
+
+#### Requirements
+
+- Node.js and npm
+- JDK 17
+- Android Studio with SDK Platform 36 and Build Tools
+- `minSdkVersion 24` · `targetSdkVersion 36` · `compileSdkVersion 36`
+
+#### Tech Stack
+
+- **Framework:** React Native 0.83 with TypeScript
+- **Native:** Kotlin modules for the download engine, MediaStore, and thumbnails
+- **Engine:** `yt-dlp` running on a bundled CPython runtime, with bundled `ffmpeg`/`ffprobe` (`io.github.junkfood02.youtubedl-android`)
+- **JS challenges:** QuickJS, so yt-dlp can solve YouTube's JS challenges without falling back to the slow pure-Python interpreter
+- **Metadata:** direct InnerTube player-response resolution with an automatic yt-dlp fallback
+- **Crash reporting:** `@sentry/react-native`
+
+#### Project Structure
+
+```
+vibedownloader-android/
+├── src/
+│   ├── components/     # Sheets, pickers and cards
+│   ├── hooks/          # Download, metadata and library hooks
+│   ├── screens/        # Home, Library, Splash, Onboarding
+│   ├── services/       # YouTube Music and platform services
+│   ├── theme/          # Colors, spacing and typography
+│   └── utils/          # Shared helpers
+├── android/
+│   └── app/src/main/java/com/vibedownloadermobile/
+│       ├── ytdlp/      # Download engine, InnerTube, thumbnails
+│       └── story/      # Story-only download path
+├── Screenshots/
+└── __tests__/
+```
+
+#### How downloads work
+
+1. A pasted or shared link is resolved through the InnerTube player response for fast metadata (formats, subtitles, audio tracks, thumbnails).
+2. If that path can't handle the link, the app transparently falls back to `yt-dlp`.
+3. `yt-dlp` runs on the bundled CPython runtime; `ffmpeg`/`ffprobe` handle post-processing, WAV export and metadata embedding.
+4. Finished files are written to the public Gallery/audio library through MediaStore, and the library generates cached thumbnails from the file itself.
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome!
+Contributions are welcome and appreciated! Here's how you can help:
 
-1. **Fork** the repository
+1. **Fork** the repository (Desktop or Android)
 2. Create a **feature branch** (`git checkout -b feature/amazing-feature`)
 3. **Commit** your changes (`git commit -m 'Add some amazing feature'`)
 4. **Push** to the branch (`git push origin feature/amazing-feature`)
 5. Open a **Pull Request**
 
-Please follow our [Code of Conduct](CODE_OF_CONDUCT.md).
+Please follow our [Code of Conduct](CODE_OF_CONDUCT.md) and coding standards.
 
 ### Areas We'd Love Help With:
 
@@ -220,23 +401,25 @@ If you create a fork or modified version:
 
 <div align="center">
 
-[![GitHub Issues](https://img.shields.io/github/issues/naeem5877/vibedownloader-android?style=for-the-badge)](https://github.com/naeem5877/vibedownloader-android/issues)
+[![Desktop Issues](https://img.shields.io/github/issues/naeem5877/vibedownloader-desktop?style=for-the-badge&label=Desktop%20Issues)](https://github.com/naeem5877/vibedownloader-desktop/issues)
+[![Android Issues](https://img.shields.io/github/issues/naeem5877/vibedownloader-android?style=for-the-badge&label=Android%20Issues)](https://github.com/naeem5877/vibedownloader-android/issues)
 [![GitHub Stars](https://img.shields.io/github/stars/naeem5877/vibedownloader-android?style=for-the-badge)](https://github.com/naeem5877/vibedownloader-android/stargazers)
 [![License](https://img.shields.io/badge/license-GPL%20v3.0-blue?style=for-the-badge)](LICENSE)
 
 </div>
 
-- 🐛 **Found a bug?** [Open an issue](https://github.com/naeem5877/vibedownloader-android/issues)
+- 🐛 **Found a bug?** [Desktop Issues](https://github.com/naeem5877/vibedownloader-desktop/issues) | [Android Issues](https://github.com/naeem5877/vibedownloader-android/issues)
 - 💡 **Have an idea?** [Start a discussion](https://github.com/naeem5877/vibedownloader-android/discussions)
-- ⭐ **Like the project?** Give it a star!
+- ⭐ **Like the project?** Give it a star on both repositories!
 
 ---
 
 ## 🙏 Acknowledgments
 
 - Built with [yt-dlp](https://github.com/yt-dlp/yt-dlp) - The powerful video downloader
-- Powered by [React Native](https://reactnative.dev/) - Cross-platform mobile framework
-- Python integration via [Chaquopy](https://chaquo.com/chaquopy/) - Python for Android
+- Android powered by [React Native](https://reactnative.dev/) - Mobile framework
+- Native download runtime via [youtubedl-android](https://github.com/junkfood02/youtubedl-android) - CPython and ffmpeg for Android
+- Desktop powered by [Electron](https://www.electronjs.org/) - Cross-platform desktop framework
 
 ---
 
@@ -246,6 +429,6 @@ If you create a fork or modified version:
 
 **If you find this project useful, consider giving it a ⭐**
 
-<sub>© 2025 VibeDownloader. Released under GPL v3.0 License.</sub>
+<sub>© 2026 VibeDownloader. Released under GPL v3.0 License.</sub>
 
 </div>

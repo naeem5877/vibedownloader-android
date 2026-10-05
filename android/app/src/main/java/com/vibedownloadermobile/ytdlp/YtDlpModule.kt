@@ -1666,8 +1666,35 @@ withContext(Dispatchers.Main) {
 
             // Empty rather than absent: the picker hides these panels when the
             // arrays are present but empty.
-            putArray("subtitles", WritableNativeArray())
-            putArray("audioTracks", WritableNativeArray())
+            putArray("subtitles", WritableNativeArray().apply {
+                info.subtitles.forEach { track ->
+                    pushMap(WritableNativeMap().apply {
+                        putString("key", track.key)
+                        putString("lang", track.lang)
+                        putString("label", track.label)
+                        putString("langLabel", track.langLabel)
+                        putBoolean("isAuto", track.isAuto)
+                        putArray("formats", WritableNativeArray().apply {
+                            track.formats.forEach { pushString(it) }
+                        })
+                    })
+                }
+            })
+
+            putArray("audioTracks", WritableNativeArray().apply {
+                info.audioTracks.forEach { track ->
+                    pushMap(WritableNativeMap().apply {
+                        putString("key", track.key)
+                        putString("lang", track.lang)
+                        putString("langLabel", track.langLabel)
+                        putBoolean("isOriginal", track.isOriginal)
+                        putString("formatId", track.formatId)
+                        putString("ext", track.ext)
+                        putString("acodec", track.acodec)
+                        putInt("abr", track.abr)
+                    })
+                }
+            })
         }
     }
 

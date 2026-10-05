@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Locale
 
 /**
  * Metadata-only fast path that bypasses Python, Chaquopy and any JS runtime.
@@ -82,16 +83,12 @@ object InnerTubeResolver {
         val viewCount: Double,
         val thumbnail: String,
         val isLive: Boolean,
-        val formats: List<Format>
+        val formats: List<Format>,
+        val subtitles: List<SubtitleTrack>,
+        val audioTracks: List<AudioTrack>
     )
 
     private fun parseJson(text: String): JsonObject = JsonParser.parseString(text).asJsonObject
-
-    private fun JsonObject.str(key: String): String =
-        get(key)?.takeIf { it.isJsonPrimitive }?.asString ?: ""
-
-    private fun JsonObject.num(key: String): Double? =
-        get(key)?.takeIf { it.isJsonPrimitive }?.asNumber?.toDouble()
 
     @Volatile
     private var cachedVisitorData: String? = null
@@ -268,6 +265,134 @@ object InnerTubeResolver {
         )
     }
 
+    /**
+     * Caption tracks, keyed and labelled exactly as [buildSubtitleTracks] does so
+     * both extraction paths feed the picker identical data.
+     *
+     * `kind == "asr"` is YouTube's auto-generated marker. Everything else is
+     * treated as author uploaded, which is the same rule yt-dlp applies when it
+     * splits `subtitles` from `automatic_captions`.
+     *
+     * A language can appear twice (for example two English tracks). The picker
+     * keys on language, so the first is kept rather than emitting a duplicate
+     * the user cannot tell apart.
+     */
+    private fun parseSubtitles(root: JsonObject): List<SubtitleTrack> {
+        val array = root.getAsJsonObject("captions")
+            ?.getAsJsonObject("playerCaptionsTracklistRenderer")
+            ?.get("captionTracks")
+            ?.takeIf { it.isJsonArray }
+            ?.asJsonArray
+            ?: return emptyList()
+
+        val out = LinkedHashMap<String, SubtitleTrack>()
+        array.forEach { element ->
+            if (!element.isJsonObject) return@forEach
+            val node = element.asJsonObject
+            val lang = node.str("languageCode")
+            if (lang.isBlank()) return@forEach
+
+            val isAuto = node.str("kind") == "asr"
+            val key = "${if (isAuto) "auto" else "manual"}:$lang"
+            if (out.containsKey(key)) return@forEach
+
+            val label = languageLabel(lang)
+            out[key] = SubtitleTrack(
+                key = key,
+                lang = lang,
+                label = if (isAuto) "$label (auto)" else label,
+                langLabel = label,
+                isAuto = isAuto,
+                // Only vtt is served directly. The picker still offers srt and
+                // downloadSubtitles converts through yt-dlp's --sub-format.
+                formats = listOf("vtt"),
+            )
+        }
+
+        return out.values.sortedWith(
+            compareBy<SubtitleTrack> { it.langLabel.lowercase(Locale.ROOT) }.thenBy { it.lang }
+        )
+    }
+
+    private val LANGUAGE_TAG = Regex("[a-z]{2,3}(-[A-Za-z]{2,4})?")
+
+    /**
+     * Best-effort language tag for a per-language audio stream.
+     *
+     * InnerTube identifies these by `audioTrack.id`, which is a locale-ish tag
+     * with a suffix (`en.4`, `hi.3`) rather than a clean BCP-47 code, and by a
+     * human `displayName`. The tag is preferred and the display name is the
+     * fallback, which [languageLabel] passes through unchanged if it cannot
+     * resolve it, so a track is never dropped over a missing label.
+     */
+    private fun languageOfAudioTrack(node: JsonObject): String {
+        val head = node.str("id").substringBefore('.').substringBefore('_').lowercase(Locale.ROOT)
+        if (LANGUAGE_TAG.matches(head)) return head
+        return node.str("displayName").trim().ifBlank { "und" }
+    }
+
+    /**
+     * One entry per audio language, original first. Returns empty unless the
+     * video publishes more than one, which is what keeps the picker hidden for
+     * the single-language videos that are the overwhelming majority.
+     */
+    private fun parseAudioTracks(streamingData: JsonObject?): List<AudioTrack> {
+        val adaptive = streamingData?.get("adaptiveFormats")
+            ?.takeIf { it.isJsonArray }
+            ?.asJsonArray
+            ?: return emptyList()
+
+        data class Candidate(val node: JsonObject, val lang: String, val mime: String)
+
+        val candidates = mutableListOf<Candidate>()
+        adaptive.forEach { element ->
+            if (!element.isJsonObject) return@forEach
+            val node = element.asJsonObject
+            val mime = node.str("mimeType")
+            if (!mime.startsWith("audio/")) return@forEach
+            if (node.str("url").isBlank()) return@forEach
+            val audioTrack = node.getAsJsonObject("audioTrack") ?: return@forEach
+            candidates.add(Candidate(node, languageOfAudioTrack(audioTrack), mime))
+        }
+        if (candidates.isEmpty()) return emptyList()
+
+        val languages = candidates.map { it.lang }.toSet()
+        if (languages.size < 2) return emptyList()
+
+        val tracks = candidates.groupBy { it.lang }.map { (lang, ofLang) ->
+            // AAC first: downloads are muxed to MP4, so an Opus stream would
+            // have to be re-encoded while AAC does not.
+            val best = ofLang.minByOrNull { if (it.mime.startsWith("audio/mp4")) 0 else 1 }!!
+            val node = best.node
+            val audioTrack = node.getAsJsonObject("audioTrack")!!
+            val isOriginal = audioTrack.bool("audioIsDefault") == true ||
+                audioTrack.str("audioTrackType") == "AUDIO_TRACK_TYPE_ORIGINAL"
+            val bitrate = node.num("bitrate")?.let { Math.round(it / 1000.0).toInt() } ?: 0
+
+            AudioTrack(
+                key = "audio:$lang",
+                lang = lang,
+                langLabel = languageLabel(lang),
+                isOriginal = isOriginal,
+                formatId = node.get("itag")?.asString.orEmpty(),
+                ext = if (best.mime.startsWith("audio/mp4")) "m4a" else "webm",
+                acodec = node.str("mimeType")
+                    .substringAfter("codecs=", "")
+                    .substringBefore(",")
+                    .trim()
+                    .ifBlank { "unknown" },
+                abr = bitrate,
+            )
+        }
+
+        if (tracks.size < 2) return emptyList()
+
+        return tracks.sortedWith(
+            compareByDescending<AudioTrack> { it.isOriginal }
+                .thenBy { it.langLabel.lowercase(Locale.ROOT) }
+        )
+    }
+
     private fun parseInfo(root: JsonObject, videoId: String, nowMillis: Long): Info? {
         val status = root.getAsJsonObject("playabilityStatus")
             ?.get("status")
@@ -306,7 +431,9 @@ object InnerTubeResolver {
             viewCount = (videoDetails?.str("viewCount")?.replace(",", "")?.toDoubleOrNull() ?: 0.0),
             thumbnail = selectThumbnail(thumbnails),
             isLive = videoDetails?.get("isLive")?.asBoolean ?: false,
-            formats = formats
+            formats = formats,
+            subtitles = parseSubtitles(root),
+            audioTracks = parseAudioTracks(streamingData)
         )
     }
 
@@ -343,7 +470,8 @@ object InnerTubeResolver {
                 Log.d(
                     TAG,
                     "resolve $videoId ok in ${System.currentTimeMillis() - startedAt}ms " +
-                        "formats=${info.formats.size} live=${info.isLive}"
+                        "formats=${info.formats.size} subs=${info.subtitles.size} " +
+                        "audioTracks=${info.audioTracks.size} live=${info.isLive}"
                 )
             }
             info

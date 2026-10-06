@@ -205,12 +205,7 @@ const TabButton: React.FC<TabButtonProps> = ({
 };
 
 function App(): React.JSX.Element {
-  // The splash is an overlay, not a screen the app waits behind. The real UI
-  // mounts underneath it while it plays (its animations run on the native
-  // driver, so the heavy first mount does not stutter them) and it leaves only
-  // once that is done. Unmounting the splash first and then mounting Home and
-  // Library is what used to leave a blank black screen for a few seconds.
-  const [splashDone, setSplashDone] = useState(false);
+  const [splashDone, setSplashDone] = useState(true);
   const [contentReady, setContentReady] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [isFirstLaunch, setIsFirstLaunch] = useState<boolean | null>(null);
@@ -483,9 +478,6 @@ function App(): React.JSX.Element {
         </View>
       )}
 
-      {/* Splash overlay: last child, so it sits on top of whatever is mounting.
-          zIndex/elevation are explicit because Onboarding's header has its own
-          zIndex and would otherwise draw over the splash on Android. */}
       {!splashDone && (
         <View style={styles.splashOverlay}>
           <SplashScreen ready={contentReady} onFinish={handleSplashFinish} />

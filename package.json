@@ -1,6 +1,6 @@
 {
   "name": "vibedownloader-android",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "scripts": {
     "android": "react-native run-android",
@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-native-community/netinfo": "^12.0.1",
     "@react-native-cookies/cookies": "^6.2.1",
     "@sentry/react-native": "^8.29.0",
     "buffer": "^6.0.3",

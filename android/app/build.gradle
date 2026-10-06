@@ -97,8 +97,8 @@ android {
         applicationId "com.vibedownloadermobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 13
-        versionName "2.0.0"
+        versionCode 14
+        versionName "2.1.0"
         
         // ABI filters for youtubedl-android
         ndk {
@@ -148,6 +148,9 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+    // Unified launch splash on every API level (Android 12+ system splash and
+    // the pre-12 fallback), so the native splash can match the JS one.
+    implementation("androidx.core:core-splashscreen:1.0.1")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

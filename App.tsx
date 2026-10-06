@@ -35,29 +35,8 @@ import { HomeIcon, LibraryIcon, DownloadIcon } from './src/components/Icons';
 import { UpdateLog } from './src/components/UpdateLog';
 import { Haptics } from './src/utils/haptics';
 import { isTabSwipeLocked } from './src/utils/tabSwipeLock';
-import * as Sentry from '@sentry/react-native';
-
-Sentry.init({
-  dsn: 'https://fa5c35e23e58e082c1765c9ac8e62f0c@o4511882967121920.ingest.de.sentry.io/4512205901201488',
-
-  // Adds more context data to events (IP address, cookies, user, etc.)
-  // For more information, visit: https://docs.sentry.io/platforms/react-native/data-management/data-collected/
-  sendDefaultPii: true,
-
-  // Enable Logs
-  enableLogs: true,
-
-  // Configure Session Replay
-  replaysSessionSampleRate: 0.1,
-  replaysOnErrorSampleRate: 1,
-  integrations: [
-    Sentry.mobileReplayIntegration(),
-    Sentry.feedbackIntegration(),
-  ],
-
-  // uncomment the line below to enable Spotlight (https://spotlightjs.com)
-  // spotlight: __DEV__,
-});
+// Sentry is initialized in index.js to avoid duplicate initialization and
+// to keep configuration in a single place.
 
 // Storage key constant
 const ONBOARDING_COMPLETE_KEY = 'hasLaunched';
@@ -226,11 +205,17 @@ const TabButton: React.FC<TabButtonProps> = ({
 };
 
 function App(): React.JSX.Element {
-  const [appState, setAppState] = useState<'splash' | 'onboarding' | 'main'>(
-    'splash',
-  );
+  // The splash is an overlay, not a screen the app waits behind. The real UI
+  // mounts underneath it while it plays (its animations run on the native
+  // driver, so the heavy first mount does not stutter them) and it leaves only
+  // once that is done. Unmounting the splash first and then mounting Home and
+  // Library is what used to leave a blank black screen for a few seconds.
+  const [splashDone, setSplashDone] = useState(false);
+  const [contentReady, setContentReady] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [isFirstLaunch, setIsFirstLaunch] = useState<boolean | null>(null);
+  const appState: 'loading' | 'onboarding' | 'main' =
+    isFirstLaunch === null ? 'loading' : isFirstLaunch ? 'onboarding' : 'main';
   const isFirstLaunchRef = useRef<boolean | null>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const storageChecked = useRef(false);
@@ -259,6 +244,33 @@ function App(): React.JSX.Element {
   useEffect(() => {
     activeTabRef.current = activeTab;
   }, [activeTab]);
+
+  // If storage never answers, do not leave the splash waiting on it forever.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (isFirstLaunchRef.current === null) {
+        isFirstLaunchRef.current = false;
+        setIsFirstLaunch(false);
+      }
+    }, 2500);
+    return () => clearTimeout(t);
+  }, []);
+
+  // The UI under the splash counts as ready once it has mounted and had two
+  // frames to lay out. (InteractionManager is not usable here: the splash's
+  // own looping animation would keep it waiting.)
+  useEffect(() => {
+    if (appState === 'loading' || contentReady) return;
+    let cancelled = false;
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (!cancelled) setContentReady(true);
+      }),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [appState, contentReady]);
 
   // Resting position of each tab. A drag may only ever land on one of these two.
   const restX = (tab: TabType) => (tab === 'home' ? 0 : -width);
@@ -390,27 +402,7 @@ function App(): React.JSX.Element {
     ],
   };
 
-  const handleSplashFinish = () => {
-    // If storage hasn't been checked yet, wait a bit more
-    if (isFirstLaunchRef.current === null) {
-      // Retry after a short delay
-      const retryTimer = setInterval(() => {
-        if (isFirstLaunchRef.current !== null) {
-          clearInterval(retryTimer);
-          setAppState(isFirstLaunchRef.current ? 'onboarding' : 'main');
-        }
-      }, 100);
-      // Fallback after 2 seconds
-      setTimeout(() => {
-        clearInterval(retryTimer);
-        if (isFirstLaunchRef.current === null) {
-          setAppState('main'); // Default to main if storage check fails
-        }
-      }, 2000);
-      return;
-    }
-    setAppState(isFirstLaunchRef.current ? 'onboarding' : 'main');
-  };
+  const handleSplashFinish = useCallback(() => setSplashDone(true), []);
 
   const handleOnboardingDone = async () => {
     try {
@@ -419,20 +411,18 @@ function App(): React.JSX.Element {
     } catch (e) {
       console.warn('Failed to save launch state:', e);
     }
+    // appState is derived from this, so it also switches onboarding -> main.
     setIsFirstLaunch(false);
     isFirstLaunchRef.current = false;
-    setAppState('main');
   };
 
   return (
-    <SafeAreaProvider>
+    <SafeAreaProvider style={styles.root}>
       <StatusBar
         barStyle="light-content"
         backgroundColor={Colors.background}
         translucent={false}
       />
-
-      {appState === 'splash' && <SplashScreen onFinish={handleSplashFinish} />}
 
       {appState === 'onboarding' && (
         <OnboardingScreen onDone={handleOnboardingDone} />
@@ -487,8 +477,18 @@ function App(): React.JSX.Element {
             </View>
           </SafeAreaView>
 
-          {/* Update Log Modal */}
-          <UpdateLog />
+          {/* Update Log Modal. A Modal is its own native window, so it would
+              draw over the splash overlay if it opened early. */}
+          {splashDone && <UpdateLog />}
+        </View>
+      )}
+
+      {/* Splash overlay: last child, so it sits on top of whatever is mounting.
+          zIndex/elevation are explicit because Onboarding's header has its own
+          zIndex and would otherwise draw over the splash on Android. */}
+      {!splashDone && (
+        <View style={styles.splashOverlay}>
+          <SplashScreen ready={contentReady} onFinish={handleSplashFinish} />
         </View>
       )}
     </SafeAreaProvider>
@@ -496,6 +496,18 @@ function App(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
+  // Same colour as the native launch window, so nothing can flash a different
+  // shade of black while screens mount.
+  root: {
+    flex: 1,
+    backgroundColor: '#0A0A0C',
+  },
+  splashOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1000,
+    elevation: 1000,
+    backgroundColor: '#0A0A0C',
+  },
   container: {
     flex: 1,
     backgroundColor: Colors.background,
@@ -598,4 +610,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default Sentry.wrap(App);
+export default App;

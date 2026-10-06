@@ -799,27 +799,40 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     }
   }, [actions, handleFetch]);
 
-  const requestPermissions = async () => {
-    if (Platform.OS !== 'android') return;
+  // Android shows one permission dialog at a time and drops a second request made
+  // while one is open ("Can request only one set of permissions at a time"), so
+  // overlapping calls share the request that is already in flight.
+  const permissionRequestRef = useRef<Promise<void> | null>(null);
 
-    try {
-      const sdkInt = Platform.Version;
+  const requestPermissions = () => {
+    if (Platform.OS !== 'android') return Promise.resolve();
+    if (permissionRequestRef.current) return permissionRequestRef.current;
 
-      if (sdkInt >= 33) {
-        await PermissionsAndroid.requestMultiple([
-          PermissionsAndroid.PERMISSIONS.READ_MEDIA_VIDEO,
-          PermissionsAndroid.PERMISSIONS.READ_MEDIA_AUDIO,
-          PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES,
-          PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
-        ]);
-      } else {
-        await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
-        );
+    const request = (async () => {
+      try {
+        const sdkInt = Platform.Version;
+
+        if (sdkInt >= 33) {
+          await PermissionsAndroid.requestMultiple([
+            PermissionsAndroid.PERMISSIONS.READ_MEDIA_VIDEO,
+            PermissionsAndroid.PERMISSIONS.READ_MEDIA_AUDIO,
+            PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES,
+            PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
+          ]);
+        } else {
+          await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+          );
+        }
+      } catch (err) {
+        console.warn('Permission request error:', err);
       }
-    } catch (err) {
-      console.warn('Permission request error:', err);
-    }
+    })().finally(() => {
+      permissionRequestRef.current = null;
+    });
+
+    permissionRequestRef.current = request;
+    return request;
   };
 
   const handleSaveThumbnail = useCallback(async () => {
@@ -853,6 +866,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             (c: string) => String(c).toLowerCase() === 'music',
           )),
     );
+  // Each field read above is listed individually; the whole-object dependency
+  // the lint rule asks for adds nothing.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     state.videoInfo?.isMusic,
     state.videoInfo?.url,
@@ -890,6 +906,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       duration: info.duration,
       platform: info.platform,
     };
+  // Every field read above is listed individually, so depending on the whole
+  // state.videoInfo object (what the lint rule asks for) would only recompute on
+  // unrelated changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     state.videoInfo?.id,
     state.videoInfo?.url,
@@ -899,6 +919,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     state.videoInfo?.uploader,
     state.videoInfo?.isMusic,
     state.videoInfo?.partial,
+    state.videoInfo?.duration,
+    state.videoInfo?.platform,
   ]);
 
   // Reset per-track selections when video changes
@@ -917,6 +939,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     setDownloadingSubtitleKey(null);
     setDownloadedSubtitleKey(null);
     setAudioOnlyIntent(false);
+    // Keyed on the id on purpose. The quick preview card has id '' and the full
+    // result carries the real id, so this runs exactly when the full data (with
+    // audioTracks) arrives. Depending on audioTracks or the whole object would
+    // wipe the user's subtitle/audio choices on unrelated updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.videoInfo?.id]);
 
   // Lookup lyrics on lyricsTarget identity change
@@ -952,6 +979,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     return () => {
       cancelled = true;
     };
+    // Keyed on the identity string on purpose: depending on the whole
+    // lyricsTarget object would repeat the network lookup whenever the memo
+    // returns a new object for the same track.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lyricsTarget?.id]);
 
   const handleSelectAudioTrack = useCallback((track: AudioTrack) => {
@@ -1199,9 +1230,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     return () => clearTimeout(timer);
   }, [url, actions, userSelectedPlatform]);
 
-  // Permissions and intent handling
+  // Ask for permissions once on mount. Kept apart from the share-intent effect
+  // below: that one re-runs whenever its callbacks change, and re-running it
+  // used to re-open the permission dialog each time.
   useEffect(() => {
+    // requestPermissions reads no props or state, so running once is correct.
     requestPermissions();
+  }, []);
+
+  // Intent handling
+  useEffect(() => {
     // Delay initial check to ensure bridge is ready
     const timer = setTimeout(() => checkShareIntent(), 300);
 
@@ -2222,10 +2260,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <UpdateModal
             visible={updateModalVisible}
             onClose={() => setUpdateModalVisible(false)}
-            version={updateInfo.version}
-            releaseUrl={updateInfo.releaseUrl}
-            downloadUrl={updateInfo.downloadUrl}
-            features={updateInfo.features}
+            info={updateInfo}
           />
         )}
 

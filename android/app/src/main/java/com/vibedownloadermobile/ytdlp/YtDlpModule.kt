@@ -99,26 +99,30 @@ class YtDlpModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
 
     override fun getName(): String = NAME
 
+    // Required by JS NativeEventEmitter. Events are delivered through
+    // DeviceEventManagerModule, so there is nothing to track here.
+    @ReactMethod
+    fun addListener(eventName: String) {}
+
+    @ReactMethod
+    fun removeListeners(count: Int) {}
+
     override fun initialize() {
         super.initialize()
-        initializeYtDlp()
+        // Off the module thread: waiting here for the unpack held up JS startup.
+        // Callers that need yt-dlp check isInitialized and wait on the shared
+        // lock in YtDlpBootstrap, so nothing is used before it is ready.
+        scope.launch { initializeYtDlp() }
         createNotificationChannel()
     }
     
+    @Synchronized
     private fun initializeYtDlp() {
         if (isInitialized) return
         try {
-            YoutubeDL.getInstance().init(reactApplicationContext)
-            try {
-                FFmpeg.getInstance().init(reactApplicationContext)
-            } catch (t: Throwable) {
-                try {
-                    FFmpeg.init(reactApplicationContext)
-                } catch (t2: Throwable) {
-                    Log.w(TAG, "FFmpeg fallback init: ${t2.message}")
-                }
-            }
-            Webp16kPatcher.apply(reactApplicationContext)
+            // Shared with MainApplication's background warm-up: whichever gets
+            // here first does the work, the other just waits for it.
+            YtDlpBootstrap.ensure(reactApplicationContext)
             isInitialized = true
             Log.d(TAG, "YtDlp & FFmpeg initialized successfully")
             
@@ -680,6 +684,41 @@ fun fetchQuickInfo(url: String, promise: Promise) {
         scope.launch {
             val available = withContext(Dispatchers.IO) { isFfmpegAvailable() }
             withContext(Dispatchers.Main) { promise.resolve(available) }
+        }
+    }
+
+    /**
+     * What is actually installed, straight from the package manager.
+     *
+     * The update check used to compare against a hardcoded JS constant, so a
+     * user who updated from 1.3.0 to 2.0.0 was still "on 1.3.0" and got the
+     * update prompt forever. `abi` is the ABI this process runs as (a 32-bit
+     * build on a 64-bit phone reports armeabi-v7a), which is the APK flavour an
+     * update has to match.
+     */
+    @ReactMethod
+    fun getAppInfo(promise: Promise) {
+        try {
+            val ctx = reactApplicationContext
+            val info = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+            val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                info.longVersionCode
+            } else {
+                @Suppress("DEPRECATION") info.versionCode.toLong()
+            }
+            val is64 = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) android.os.Process.is64Bit() else false
+            val runningAbis = if (is64) Build.SUPPORTED_64_BIT_ABIS else Build.SUPPORTED_32_BIT_ABIS
+            val abi = runningAbis.firstOrNull() ?: Build.SUPPORTED_ABIS.firstOrNull() ?: ""
+
+            val result = Arguments.createMap().apply {
+                putString("versionName", info.versionName ?: "")
+                putDouble("versionCode", versionCode.toDouble())
+                putString("abi", abi)
+                putArray("supportedAbis", Arguments.fromArray(Build.SUPPORTED_ABIS))
+            }
+            promise.resolve(result)
+        } catch (e: Exception) {
+            promise.reject("APP_INFO_ERROR", e.message, e)
         }
     }
 

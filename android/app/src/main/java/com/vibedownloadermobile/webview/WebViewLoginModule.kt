@@ -27,6 +27,14 @@ class WebViewLoginModule(reactContext: ReactApplicationContext) : ReactContextBa
 
     override fun getName(): String = NAME
 
+    // Required by JS NativeEventEmitter. Events are delivered through
+    // DeviceEventManagerModule, so there is nothing to track here.
+    @ReactMethod
+    fun addListener(eventName: String) {}
+
+    @ReactMethod
+    fun removeListeners(count: Int) {}
+
     /**
      * Open sandboxed WebView for login
      * @param platform - "instagram", "facebook", "tiktok", "youtube"

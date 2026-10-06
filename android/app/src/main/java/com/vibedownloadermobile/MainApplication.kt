@@ -7,13 +7,11 @@ import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.vibedownloadermobile.ytdlp.YtDlpPackage
-import com.vibedownloadermobile.ytdlp.Webp16kPatcher
+import com.vibedownloadermobile.ytdlp.YtDlpBootstrap
+import com.vibedownloadermobile.splash.SplashPackage
 import com.vibedownloadermobile.cookie.CookiePackage
 import com.vibedownloadermobile.story.StoryPackage
 import com.vibedownloadermobile.webview.WebViewLoginPackage
-import com.yausername.youtubedl_android.YoutubeDL
-import com.yausername.ffmpeg.FFmpeg
-import android.util.Log
 
 class MainApplication : Application(), ReactApplication {
 
@@ -30,6 +28,8 @@ class MainApplication : Application(), ReactApplication {
           add(StoryPackage())
           // WebView login to automatically extract cookies
           add(WebViewLoginPackage())
+          // Lets the JS splash tell the native launch splash it can hand over
+          add(SplashPackage())
         },
     )
   }
@@ -37,22 +37,11 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
-    try {
-      YoutubeDL.getInstance().init(this)
-      try {
-        FFmpeg.getInstance().init(this)
-      } catch (t: Throwable) {
-        try {
-          FFmpeg.init(this)
-        } catch (t2: Throwable) {
-          Log.w("MainApplication", "FFmpeg init fallback: ${t2.message}")
-        }
-      }
-      Webp16kPatcher.apply(this)
-      Log.d("MainApplication", "YoutubeDL & FFmpeg initialized in Application.onCreate")
-    } catch (e: Exception) {
-      Log.e("MainApplication", "Failed to initialize YoutubeDL in Application.onCreate", e)
-    }
+    // Unpacking python/ffmpeg takes seconds on a first launch or after an
+    // update. Doing it here on the main thread kept the launch window blank
+    // before React Native had even started, so it runs on a worker instead;
+    // anything that needs yt-dlp early waits on the same lock (YtDlpBootstrap).
+    YtDlpBootstrap.warmUpAsync(this)
     loadReactNative(this)
   }
 }

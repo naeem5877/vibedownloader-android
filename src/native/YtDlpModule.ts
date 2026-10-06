@@ -190,6 +190,14 @@ export interface YtDlpNativeModule {
    * False on devices whose page size the bundled ffmpeg does not support.
    */
   isFfmpegAvailable(): Promise<boolean>;
+
+  /** Installed version and the ABI this app runs as, from the package manager. */
+  getAppInfo(): Promise<{
+    versionName: string;
+    versionCode: number;
+    abi: string;
+    supportedAbis: string[];
+  }>;
   /** Reads a UTF-8 text file (lyrics/subtitles) for the in-app viewer. */
   readTextFile(filePath: string): Promise<string>;
     /**

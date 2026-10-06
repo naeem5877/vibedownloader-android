@@ -40,6 +40,14 @@ class StoryModule(
 
     override fun getName(): String = NAME
 
+    // Required by JS NativeEventEmitter. Events are delivered through
+    // DeviceEventManagerModule, so there is nothing to track here.
+    @ReactMethod
+    fun addListener(eventName: String) {}
+
+    @ReactMethod
+    fun removeListeners(count: Int) {}
+
     private fun sendEvent(eventName: String, params: WritableMap?) {
         reactApplicationContext
             .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)

@@ -2,6 +2,8 @@ package com.vibedownloadermobile
 
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.bridge.Arguments
@@ -17,6 +19,13 @@ class MainActivity : ReactActivity() {
         var pendingSharedUrl: String? = null
         @Volatile
         var pendingPlatform: String? = null
+
+        // Set by SplashModule once the JS splash has drawn its first frame.
+        @Volatile
+        var jsSplashShown: Boolean = false
+
+        // The native splash never outlives this, even if JS fails to report in.
+        private const val MAX_NATIVE_SPLASH_MS = 4_000L
     }
 
     /**
@@ -31,6 +40,17 @@ class MainActivity : ReactActivity() {
         DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Must run before super.onCreate. Holds the native splash (same logo,
+        // same colour as the JS one) until JS reports its first frame, so the
+        // launch is one continuous screen rather than system splash -> blank
+        // window -> JS splash.
+        val splash = installSplashScreen()
+        val startedAt = SystemClock.uptimeMillis()
+        // jsSplashShown is process-wide and never reset: a re-created activity in
+        // a warm process (JS splash already shown) must not wait for it again.
+        splash.setKeepOnScreenCondition {
+            !jsSplashShown && SystemClock.uptimeMillis() - startedAt < MAX_NATIVE_SPLASH_MS
+        }
         super.onCreate(savedInstanceState)
         handleIntent(intent)
     }

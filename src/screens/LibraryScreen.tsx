@@ -42,6 +42,7 @@ import {
 } from '../components/Icons';
 import { EmptyState } from '../components/EmptyState';
 import { MediaPreviewModal } from '../components/MediaPreviewModal';
+import { BottomFade } from '../components/BottomFade';
 import SubtitleViewerModal, {
   type SubtitleViewerFile,
 } from '../components/SubtitleViewerModal';
@@ -278,10 +279,8 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
             </View>
           )}
 
-          {/* Bottom gradient fade for text legibility */}
-          <View style={styles.fadeLayer1} pointerEvents="none" />
-          <View style={styles.fadeLayer2} pointerEvents="none" />
-          <View style={styles.fadeLayer3} pointerEvents="none" />
+          {/* Smooth bottom fade for text legibility */}
+          <BottomFade />
 
           {isSel && (
             <View
@@ -880,30 +879,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  fadeLayer1: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '62%',
-    backgroundColor: 'rgba(0,0,0,0.15)',
-  },
-  fadeLayer2: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '42%',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-  },
-  fadeLayer3: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '28%',
-    backgroundColor: 'rgba(0,0,0,0.65)',
   },
   selOverlay: {
     ...StyleSheet.absoluteFillObject,

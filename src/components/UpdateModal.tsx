@@ -1,7 +1,9 @@
 /**
- * Update Modal - Shown when a newer version is available on GitHub
+ * Update Modal - shown when a newer release is available on GitHub.
+ * Everything shown comes from the release itself: version, date, the APK that
+ * matches this device, its size, and the full structured notes.
  */
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
 import {
     View,
     Text,
@@ -9,150 +11,137 @@ import {
     StyleSheet,
     Modal,
     Animated,
-    Dimensions,
     Linking,
     ScrollView,
+    useWindowDimensions,
 } from 'react-native';
 import { Colors, Typography, Shadows } from '../theme';
 import { SparkleIcon, DownloadIcon } from './Icons';
-
-const { width } = Dimensions.get('window');
+import { ReleaseNotesView } from './ReleaseNotesView';
+import { UpdateInfo, dismissUpdate } from '../services/GitHubUpdateService';
+import { acquireTabSwipeLock } from '../utils/tabSwipeLock';
 
 interface UpdateModalProps {
     visible: boolean;
     onClose: () => void;
-    version: string;
-    releaseUrl: string;
-    downloadUrl?: string;
-    features?: string[];
+    info: UpdateInfo;
 }
 
-export const UpdateModal: React.FC<UpdateModalProps> = ({
-    visible,
-    onClose,
-    version,
-    releaseUrl,
-    downloadUrl,
-    features = [],
-}) => {
-    const scaleAnim = useRef(new Animated.Value(0.92)).current;
+const ABI_LABELS: Record<string, string> = {
+    'arm64-v8a': 'arm64',
+    'armeabi-v7a': 'arm 32-bit',
+    x86_64: 'x86_64',
+    x86: 'x86',
+    universal: 'universal',
+};
+
+const formatSize = (bytes?: number): string => {
+    if (!bytes || bytes <= 0) return '';
+    const mb = bytes / (1024 * 1024);
+    return mb >= 10 ? `${Math.round(mb)} MB` : `${mb.toFixed(1)} MB`;
+};
+
+const formatDate = (iso?: string | null): string => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
+export const UpdateModal: React.FC<UpdateModalProps> = ({ visible, onClose, info }) => {
+    const { height } = useWindowDimensions();
+    const scaleAnim = useRef(new Animated.Value(0.94)).current;
     const opacityAnim = useRef(new Animated.Value(0)).current;
-    const translateY = useRef(new Animated.Value(24)).current;
 
     useEffect(() => {
         if (visible) {
             Animated.parallel([
-                Animated.spring(scaleAnim, {
-                    toValue: 1,
-                    tension: 90,
-                    friction: 13,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(opacityAnim, {
-                    toValue: 1,
-                    duration: 260,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(translateY, {
-                    toValue: 0,
-                    duration: 280,
-                    useNativeDriver: true,
-                }),
+                Animated.spring(scaleAnim, { toValue: 1, tension: 90, friction: 13, useNativeDriver: true }),
+                Animated.timing(opacityAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
             ]).start();
         } else {
-            scaleAnim.setValue(0.92);
+            scaleAnim.setValue(0.94);
             opacityAnim.setValue(0);
-            translateY.setValue(24);
         }
+    }, [visible, scaleAnim, opacityAnim]);
+
+    // In a Modal inside the Download <-> Library swipe area: keep the screen behind still.
+    useEffect(() => {
+        if (!visible) return;
+        return acquireTabSwipeLock();
     }, [visible]);
 
-    const handleUpdate = () => {
-        const url = downloadUrl || releaseUrl;
-        Linking.openURL(url);
+    const meta = useMemo(() => {
+        const parts: string[] = [];
+        const date = formatDate(info.publishedAt);
+        if (date) parts.push(date);
+        if (info.downloadUrl && info.assetAbi) {
+            const size = formatSize(info.assetSize);
+            const abi = ABI_LABELS[info.assetAbi] ?? info.assetAbi;
+            parts.push(size ? `${abi} \u00b7 ${size}` : abi);
+        }
+        return parts.join('   \u2022   ');
+    }, [info]);
+
+    const handleLater = () => {
+        dismissUpdate(info.version);
+        onClose();
+    };
+
+    const handleDownload = () => {
+        Linking.openURL(info.downloadUrl || info.releaseUrl).catch(() => { /* no browser */ });
         onClose();
     };
 
     if (!visible) return null;
 
     return (
-        <Modal
-            transparent
-            visible={visible}
-            animationType="none"
-            onRequestClose={onClose}
-            statusBarTranslucent
-        >
+        <Modal transparent visible={visible} animationType="none" onRequestClose={handleLater} statusBarTranslucent>
             <View style={styles.overlay}>
                 <Animated.View
                     style={[
-                        styles.modalContainer,
-                        {
-                            opacity: opacityAnim,
-                            transform: [{ scale: scaleAnim }, { translateY }],
-                        },
+                        styles.card,
+                        { maxHeight: height * 0.82, opacity: opacityAnim, transform: [{ scale: scaleAnim }] },
                     ]}
                 >
-                    <View style={styles.bgGlow} />
-
-                    <View style={styles.content}>
-                        {/* Header */}
-                        <View style={styles.header}>
-                            <View style={styles.iconWrap}>
-                                <SparkleIcon size={28} color={Colors.primary} />
-                            </View>
-                            <Text style={styles.label}>UPDATE AVAILABLE</Text>
-                            <Text style={styles.title}>Version {version}</Text>
-                            <Text style={styles.subtitle}>
-                                A newer build is ready to download
+                    {/* Header */}
+                    <View style={styles.header}>
+                        <View style={styles.iconWrap}>
+                            <SparkleIcon size={22} color={Colors.primary} />
+                        </View>
+                        <View style={styles.headerText}>
+                            <Text style={styles.label}>Update available</Text>
+                            <Text style={styles.title}>
+                                v{info.currentVersion}
+                                <Text style={styles.arrow}>{'  \u2192  '}</Text>
+                                v{info.version}
                             </Text>
+                            {!!meta && <Text style={styles.meta}>{meta}</Text>}
                         </View>
+                    </View>
 
-                        {/* Features */}
-                        <View style={styles.featuresBlock}>
-                            <Text style={styles.featuresHeading}>What's included</Text>
-                            <ScrollView
-                                style={styles.featuresScroll}
-                                showsVerticalScrollIndicator={false}
-                                contentContainerStyle={styles.featuresInner}
-                                bounces={false}
-                            >
-                                {features.length > 0 ? (
-                                    features.map((feature, index) => (
-                                        <View key={index} style={styles.featureRow}>
-                                            <View style={styles.bullet} />
-                                            <Text style={styles.featureText}>{feature}</Text>
-                                        </View>
-                                    ))
-                                ) : (
-                                    <View style={styles.featureRow}>
-                                        <View style={styles.bullet} />
-                                        <Text style={styles.featureText}>
-                                            Performance and stability improvements
-                                        </Text>
-                                    </View>
-                                )}
-                            </ScrollView>
-                        </View>
+                    {/* Notes */}
+                    <ScrollView
+                        style={styles.notes}
+                        contentContainerStyle={styles.notesInner}
+                        showsVerticalScrollIndicator={false}
+                        nestedScrollEnabled
+                    >
+                        <ReleaseNotesView notes={info.notes} />
+                        <TouchableOpacity onPress={() => Linking.openURL(info.releaseUrl).catch(() => {})} style={styles.fullNotes}>
+                            <Text style={styles.fullNotesText}>View full release on GitHub</Text>
+                        </TouchableOpacity>
+                    </ScrollView>
 
-                        {/* Actions */}
-                        <View style={styles.actions}>
-                            <TouchableOpacity
-                                style={styles.primaryBtn}
-                                onPress={handleUpdate}
-                                activeOpacity={0.85}
-                            >
-                                <DownloadIcon size={18} color="#FFF" />
-                                <Text style={styles.primaryBtnText}>Download update</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={styles.secondaryBtn}
-                                onPress={onClose}
-                                activeOpacity={0.7}
-                            >
-                                <Text style={styles.secondaryBtnText}>Not now</Text>
-                            </TouchableOpacity>
-                        </View>
+                    {/* Actions */}
+                    <View style={styles.actions}>
+                        <TouchableOpacity style={styles.secondaryBtn} onPress={handleLater} activeOpacity={0.7}>
+                            <Text style={styles.secondaryBtnText}>Not now</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.primaryBtn} onPress={handleDownload} activeOpacity={0.85}>
+                            <DownloadIcon size={18} color="#FFF" />
+                            <Text style={styles.primaryBtnText}>Download</Text>
+                        </TouchableOpacity>
                     </View>
                 </Animated.View>
             </View>
@@ -163,14 +152,14 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
 const styles = StyleSheet.create({
     overlay: {
         flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.9)',
+        backgroundColor: 'rgba(0, 0, 0, 0.82)',
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 22,
+        padding: 20,
     },
-    modalContainer: {
+    card: {
         width: '100%',
-        maxWidth: 360,
+        maxWidth: 400,
         backgroundColor: Colors.surfaceHigh,
         borderRadius: 24,
         borderWidth: 1,
@@ -178,130 +167,84 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         ...Shadows.xl,
     },
-    bgGlow: {
-        position: 'absolute',
-        width: width * 0.7,
-        height: width * 0.7,
-        borderRadius: width * 0.35,
-        backgroundColor: Colors.primary,
-        opacity: 0.06,
-        top: -width * 0.25,
-        alignSelf: 'center',
-        left: '15%',
-    },
-    content: {
-        padding: 22,
-        zIndex: 2,
-    },
     header: {
+        flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 20,
+        gap: 14,
+        paddingHorizontal: 22,
+        paddingTop: 22,
+        paddingBottom: 16,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: Colors.innerBorder,
     },
     iconWrap: {
-        width: 56,
-        height: 56,
-        borderRadius: 16,
-        backgroundColor: `${Colors.primary}15`,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 14,
+        width: 48,
+        height: 48,
+        borderRadius: 15,
+        backgroundColor: `${Colors.primary}18`,
         borderWidth: 1,
-        borderColor: `${Colors.primary}28`,
+        borderColor: `${Colors.primary}30`,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
+    headerText: { flex: 1 },
     label: {
-        fontSize: 10,
-        fontWeight: '800',
+        fontSize: 11,
+        fontWeight: Typography.weights.bold,
         color: Colors.primary,
-        letterSpacing: 1.6,
-        marginBottom: 4,
+        letterSpacing: 1,
+        textTransform: 'uppercase',
+        marginBottom: 2,
     },
     title: {
-        fontSize: 22,
-        fontWeight: '800',
+        fontSize: 20,
+        fontWeight: Typography.weights.bold,
         color: Colors.textPrimary,
-        letterSpacing: -0.4,
-        marginBottom: 4,
+        letterSpacing: -0.3,
     },
-    subtitle: {
+    arrow: { color: Colors.textMuted, fontWeight: Typography.weights.medium },
+    meta: { fontSize: 12, color: Colors.textMuted, marginTop: 4 },
+
+    notes: { flexGrow: 0, flexShrink: 1 },
+    notesInner: { paddingHorizontal: 22, paddingTop: 18, paddingBottom: 10 },
+    fullNotes: { marginTop: 10, paddingVertical: 8, alignSelf: 'flex-start' },
+    fullNotesText: {
         fontSize: 13,
-        color: Colors.textMuted,
-        fontWeight: '500',
+        color: Colors.primaryLight,
+        fontWeight: Typography.weights.semibold,
+        textDecorationLine: 'underline',
     },
-    featuresBlock: {
-        marginBottom: 22,
-    },
-    featuresHeading: {
-        fontSize: 11,
-        fontWeight: '700',
-        color: Colors.textMuted,
-        letterSpacing: 0.6,
-        marginBottom: 10,
-        textTransform: 'uppercase',
-    },
-    featuresScroll: {
-        maxHeight: 160,
-    },
-    featuresInner: {
-        gap: 8,
-    },
-    featureRow: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        backgroundColor: 'rgba(255,255,255,0.03)',
-        paddingVertical: 10,
-        paddingHorizontal: 12,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: Colors.innerBorder,
-    },
-    bullet: {
-        width: 6,
-        height: 6,
-        borderRadius: 3,
-        backgroundColor: Colors.primary,
-        marginTop: 5,
-        marginRight: 10,
-        flexShrink: 0,
-    },
-    featureText: {
-        flex: 1,
-        fontSize: 13,
-        color: Colors.textSecondary,
-        lineHeight: 18,
-        fontWeight: '500',
-    },
+
     actions: {
+        flexDirection: 'row',
         gap: 10,
+        padding: 16,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: Colors.innerBorder,
     },
+    secondaryBtn: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 14,
+        borderRadius: 14,
+        backgroundColor: 'rgba(255,255,255,0.04)',
+        borderWidth: 1,
+        borderColor: Colors.innerBorderLight,
+    },
+    secondaryBtnText: { color: Colors.textSecondary, fontSize: 14, fontWeight: '700' },
     primaryBtn: {
+        flex: 1.4,
         backgroundColor: Colors.primary,
         borderRadius: 14,
-        paddingVertical: 15,
+        paddingVertical: 14,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         gap: 8,
         ...Shadows.glow(Colors.primary),
     },
-    primaryBtnText: {
-        color: '#FFF',
-        fontSize: 15,
-        fontWeight: '800',
-        letterSpacing: 0.2,
-    },
-    secondaryBtn: {
-        alignItems: 'center',
-        paddingVertical: 12,
-        borderRadius: 14,
-        backgroundColor: 'rgba(255,255,255,0.04)',
-        borderWidth: 1,
-        borderColor: Colors.innerBorderLight,
-    },
-    secondaryBtnText: {
-        color: Colors.textMuted,
-        fontSize: 13,
-        fontWeight: '700',
-    },
+    primaryBtnText: { color: '#FFF', fontSize: 15, fontWeight: '800', letterSpacing: 0.2 },
 });
 
 export default UpdateModal;

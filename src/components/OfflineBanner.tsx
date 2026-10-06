@@ -42,7 +42,19 @@ export const OfflineBanner: React.FC<OfflineBannerProps> = ({ onActionPress }) =
             }).start();
         });
 
-        // Pulse Animation for Offline Indicator
+        return () => {
+            if (unsubscribe) unsubscribe();
+        };
+        // slideAnim is a stable ref value.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Pulse animation for the offline indicator. Only runs while the banner is
+    // actually shown, so an online app does not keep a native animation looping.
+    useEffect(() => {
+        if (isConnected !== false) return;
+
+        pulseAnim.setValue(1);
         const pulseLoop = Animated.loop(
             Animated.sequence([
                 Animated.timing(pulseAnim, {
@@ -62,11 +74,11 @@ export const OfflineBanner: React.FC<OfflineBannerProps> = ({ onActionPress }) =
 
         return () => {
             pulseLoop.stop();
-            if (unsubscribe) unsubscribe();
         };
-    }, []);
+    }, [isConnected, pulseAnim]);
 
-    if (isConnected === true) return null;
+    // Hidden while online and while the state is still unknown (null).
+    if (isConnected !== false) return null;
 
     return (
         <Animated.View style={[styles.container, { transform: [{ translateY: slideAnim }] }]}>

@@ -25,25 +25,15 @@ Sentry.init({
   debug: __DEV__,
 
   // With `debug` on, the SDK forwards the native Sentry SDK's own log lines to
-  // JS and, by default, prints the error-level ones with console.error - which
-  // React Native turns into a red "Console Error" LogBox screen. Two of those
-  // are harmless SDK-internal noise, not app faults:
-  //  - "addListener of NativeEventEmitter can't be used on Android!" is the
-  //    native module's stub for the NativeEventEmitter contract, logged when the
-  //    log listener itself subscribes.
-  //  - "Failed to delete '<cache>/sentry/....envelope' after trying to capture
-  //    it" is the offline cache losing a race with a file that is already gone.
-  // Known noise is dropped; anything else stays visible in Metro/logcat but as a
-  // plain log, so it can no longer cover the app with a red error screen.
-  onNativeLog: ({ level, component, message }) => {
-    if (
-      /addListener of NativeEventEmitter can't be used on Android/i.test(message) ||
-      /Failed to delete .*\.envelope/i.test(message)
-    ) {
-      return;
-    }
-    console.log(`[Sentry native ${level}] [${component}] ${message}`);
-  },
+  // JS through this callback. Do NOT print them with console.log/console.error:
+  // Sentry records every console call as a breadcrumb, the breadcrumb is synced
+  // back to the native SDK, and the native SDK logs "Serializing object: ..."
+  // for it - which comes straight back here. That loop nests each message
+  // inside the next, floods the JS thread with tens of thousands of lines per
+  // second and makes the UI stop responding to taps. (console.error also
+  // raised a red LogBox screen.) Native lines are already in logcat under the
+  // RNSentry tag, so this callback intentionally drops everything.
+  onNativeLog: () => {},
 
   beforeSend(event) {
     // yt-dlp downloads and MediaStore writes surface expected conditions as

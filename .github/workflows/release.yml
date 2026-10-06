@@ -1,4 +1,4 @@
-﻿name: Release Android
+name: Release Android
 
 on:
   push:
@@ -66,30 +66,30 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           generate_release_notes: false
           body: |
-            ## ðŸš€ VibeDownloader Android ${{ github.ref_name }}
+            ## ????????? VibeDownloader Android ${{ github.ref_name }}
 
-            ### âœ¨ New
-            - ðŸŽ¨ **Cleaner onboarding**: A simpler, friendlier first-run introduction
-            - ðŸ“š **Batch Download redesign**: Link list with platform colours, remove single links, paste more, live progress while links are checked, and a Stop button
-            - ðŸ”” **Real update details**: The update dialog now shows the full release notes with headings, bullets and links, the release date, and the size of the APK that fits your phone
-            - ðŸ†• **What's new after updating**: After an update the app shows that version's release notes, fetched straight from GitHub
-            - âš¡ **Faster YouTube loading**: Video formats load without the long wait. A built-in JavaScript engine now solves YouTube's checks on the phone, so the app no longer needs a slow second attempt
-            - ðŸ“¡ **Offline mode that works**: When you lose connection the app shows an offline banner and a "Network Interrupted" screen with a shortcut to your Library, and returns to normal as soon as you reconnect
+            ### ?????? New
+            - ???????? **Cleaner onboarding**: A simpler, friendlier first-run introduction
+            - ????????? **Batch Download redesign**: Link list with platform colours, remove single links, paste more, live progress while links are checked, and a Stop button
+            - ?????????? **Real update details**: The update dialog now shows the full release notes with headings, bullets and links, the release date, and the size of the APK that fits your phone
+            - ?????????? **What's new after updating**: After an update the app shows that version's release notes, fetched straight from GitHub
+            - ?????? **Faster YouTube loading**: Video formats load without the long wait. A built-in JavaScript engine now solves YouTube's checks on the phone, so the app no longer needs a slow second attempt
+            - ????????? **Offline mode that works**: When you lose connection the app shows an offline banner and a "Network Interrupted" screen with a shortcut to your Library, and returns to normal as soon as you reconnect
             
-            ### ðŸž Fixed
-            - ðŸ” **Endless "update available"**: The app compared against a version baked into the code, so it kept asking you to update even on the latest version. It now reads the version that is really installed
-            - ðŸ“¦ **Wrong APK offered**: Updates now download the build that matches your device (arm64-v8a, armeabi-v7a, x86 or x86_64) instead of always the universal file
-            - âœ‚ï¸ **Trim handles**: Dragging the clip handles no longer swipes the Download and Library screens instead
-            - ðŸŽžï¸ **ffmpeg "cannot start on this device"**: Clip trimming and merging now start correctly on normal phones, including newer Android devices that use 16 KB memory pages
-            - âšª **X (Twitter) links**: Buttons and text on X links were white on white. They are now readable
-            - ðŸ§¹ **Sentry noise**: Removed harmless red error screens caused by Sentry's own debug logging in development builds
+            ### ???????? Fixed
+            - ????????? **Endless "update available"**: The app compared against a version baked into the code, so it kept asking you to update even on the latest version. It now reads the version that is really installed
+            - ????????? **Wrong APK offered**: Updates now download the build that matches your device (arm64-v8a, armeabi-v7a, x86 or x86_64) instead of always the universal file
+            - ????????????? **Trim handles**: Dragging the clip handles no longer swipes the Download and Library screens instead
+            - ?????????????? **ffmpeg "cannot start on this device"**: Clip trimming and merging now start correctly on normal phones, including newer Android devices that use 16 KB memory pages
+            - ?????? **X (Twitter) links**: Buttons and text on X links were white on white. They are now readable
+            - ???????? **Sentry noise**: Removed harmless red error screens caused by Sentry's own debug logging in development builds
             
-            ### ðŸ“¦ Download Guide
+            ### ????????? Download Guide
             Choose the correct APK for your device:
-            - **arm64-v8a** (Recommended) â€” For most modern Android phones (last 5â€“6 years)
-            - **armeabi-v7a** â€” For older or low-end Android devices
-            - **universal** â€” Works on ALL devices (larger file size) and emulators
-            - **x86_64 / x86** â€” Primarily for emulators or specific tablets
+            - **arm64-v8a** (Recommended) ???????? For most modern Android phones (last 5????????6 years)
+            - **armeabi-v7a** ???????? For older or low-end Android devices
+            - **universal** ???????? Works on ALL devices (larger file size) and emulators
+            - **x86_64 / x86** ???????? Primarily for emulators or specific tablets
 
             ---
             Requires Android 7.0 (API 24) or newer.

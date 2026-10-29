@@ -6,22 +6,22 @@ const fontConfig = {
     fontFamily: 'System',
 };
 
-// VibeDownloader Custom Colors (Vibrant Purple/Indigo Base)
+// VibeDownloader Custom Colors (monochrome: white on black)
 const vibeColors = {
-    primary: '#6366F1', // Indigo 500
-    onPrimary: '#FFFFFF',
-    primaryContainer: '#4338CA', // Indigo 700
-    onPrimaryContainer: '#E0E7FF', // Indigo 100
+    primary: '#FFFFFF',
+    onPrimary: '#000000',
+    primaryContainer: '#27272A', // Neutral dark chip / pill
+    onPrimaryContainer: '#FFFFFF',
 
-    secondary: '#8B5CF6', // Violet 500
-    onSecondary: '#FFFFFF',
-    secondaryContainer: '#5B21B6', // Violet 800
-    onSecondaryContainer: '#EDE9FE', // Violet 50
+    secondary: '#E4E4E7',
+    onSecondary: '#000000',
+    secondaryContainer: '#27272A',
+    onSecondaryContainer: '#F4F4F5',
 
-    tertiary: '#F472B6', // Pink 400
+    tertiary: '#D4D4D8',
     onTertiary: '#000000',
-    tertiaryContainer: '#831843', // Pink 900
-    onTertiaryContainer: '#FCE7F3', // Pink 100
+    tertiaryContainer: '#27272A',
+    onTertiaryContainer: '#F4F4F5',
 
     error: '#EF4444',
     onError: '#FFFFFF',
@@ -66,7 +66,7 @@ export const AppThemeLight = {
     ...PaperLightTheme,
     colors: {
         ...PaperLightTheme.colors,
-        primary: '#4F46E5',
+        primary: '#000000',
         onPrimary: '#FFFFFF',
         background: '#FFFFFF',
         surface: '#F3F4F6',

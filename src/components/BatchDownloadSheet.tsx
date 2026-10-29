@@ -501,14 +501,14 @@ export const BatchDownloadSheet: React.FC<BatchDownloadSheetProps> = ({
             >
               {resolving ? (
                 <>
-                  <ActivityIndicator color="#fff" size="small" />
+                  <ActivityIndicator color={Colors.onPrimary} size="small" />
                   <Text style={styles.primaryText}>
                     {'Reading links\u2026'}
                   </Text>
                 </>
               ) : (
                 <>
-                  <LayersIcon size={16} color="#fff" />
+                  <LayersIcon size={16} color={Colors.onPrimary} />
                   <Text style={styles.primaryText}>
                     {urls.length > 0
                       ? `Add ${urls.length} to queue`
@@ -802,7 +802,7 @@ const styles = StyleSheet.create({
   },
   primaryBtnDisabled: { opacity: 0.4 },
   primaryText: {
-    color: '#fff',
+    color: Colors.onPrimary,
     fontSize: Typography.sizes.sm,
     fontWeight: Typography.weights.bold,
   },

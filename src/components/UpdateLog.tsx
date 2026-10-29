@@ -143,7 +143,7 @@ export const UpdateLog = () => {
                         </TouchableOpacity>
 
                         <TouchableOpacity onPress={handleClose} style={styles.primaryBtn} activeOpacity={0.85}>
-                            <CheckIcon size={16} color="#FFF" />
+                            <CheckIcon size={16} color={Colors.onPrimary} />
                             <Text style={styles.primaryBtnText}>Got it</Text>
                         </TouchableOpacity>
                     </View>
@@ -244,5 +244,5 @@ const styles = StyleSheet.create({
         borderRadius: 14,
         backgroundColor: Colors.primary,
     },
-    primaryBtnText: { color: '#FFF', fontSize: 15, fontWeight: '800' },
+    primaryBtnText: { color: Colors.onPrimary, fontSize: 15, fontWeight: '800' },
 });

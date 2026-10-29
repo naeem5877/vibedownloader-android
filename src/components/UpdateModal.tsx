@@ -139,7 +139,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ visible, onClose, info
                             <Text style={styles.secondaryBtnText}>Not now</Text>
                         </TouchableOpacity>
                         <TouchableOpacity style={styles.primaryBtn} onPress={handleDownload} activeOpacity={0.85}>
-                            <DownloadIcon size={18} color="#FFF" />
+                            <DownloadIcon size={18} color={Colors.onPrimary} />
                             <Text style={styles.primaryBtnText}>Download</Text>
                         </TouchableOpacity>
                     </View>
@@ -244,7 +244,7 @@ const styles = StyleSheet.create({
         gap: 8,
         ...Shadows.glow(Colors.primary),
     },
-    primaryBtnText: { color: '#FFF', fontSize: 15, fontWeight: '800', letterSpacing: 0.2 },
+    primaryBtnText: { color: Colors.onPrimary, fontSize: 15, fontWeight: '800', letterSpacing: 0.2 },
 });
 
 export default UpdateModal;

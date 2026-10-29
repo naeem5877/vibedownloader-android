@@ -323,7 +323,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
                     : styles.checkEmpty,
                 ]}
               >
-                {isSel && <CheckIcon size={13} color="#FFF" />}
+                {isSel && <CheckIcon size={13} color={Colors.onPrimary} />}
               </View>
             ) : duration && kind !== 'image' ? (
               <View style={styles.durationBadge}>
@@ -370,7 +370,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
                 pressed && styles.editBtnPressed,
               ]}
             >
-              <WandIcon size={15} color="#FFF" />
+              <WandIcon size={15} color={Colors.onPrimary} />
             </Pressable>
           )}
         </Pressable>
@@ -819,11 +819,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   segmentTextActive: {
-    color: '#FFF',
+    color: Colors.onPrimary,
     fontWeight: '700',
   },
   segmentCount: {
-    color: 'rgba(255,255,255,0.7)',
+    color: 'rgba(0,0,0,0.55)',
     fontSize: 11,
     fontWeight: '700',
   },
@@ -1011,19 +1011,19 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(217,70,239,0.85)',
+    backgroundColor: 'rgba(255,255,255,0.94)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
+    borderColor: 'rgba(255,255,255,0.5)',
     zIndex: 6,
     elevation: 4,
-    shadowColor: '#d946ef',
-    shadowOpacity: 0.5,
+    shadowColor: '#FFFFFF',
+    shadowOpacity: 0.35,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 3 },
   },
   editBtnPressed: {
     transform: [{ scale: 0.92 }],
-    backgroundColor: 'rgba(217,70,239,1)',
+    backgroundColor: '#FFFFFF',
   },
   tileTitle: {
     color: '#FFFFFF',

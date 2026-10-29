@@ -452,7 +452,7 @@ function App(): React.JSX.Element {
                   label="Download"
                   icon={<DownloadIcon size={24} color={Colors.textMuted} />}
                   activeIcon={
-                    <DownloadIcon size={24} color={Colors.primaryLight} />
+                    <DownloadIcon size={24} color={Colors.onPrimary} />
                   }
                   isActive={activeTab === 'home'}
                   onPress={() => setActiveTab('home')}
@@ -463,7 +463,7 @@ function App(): React.JSX.Element {
                   label="Library"
                   icon={<LibraryIcon size={24} color={Colors.textMuted} />}
                   activeIcon={
-                    <LibraryIcon size={24} color={Colors.primaryLight} />
+                    <LibraryIcon size={24} color={Colors.onPrimary} />
                   }
                   isActive={activeTab === 'library'}
                   onPress={() => setActiveTab('library')}
@@ -565,7 +565,7 @@ const styles = StyleSheet.create({
   activePill: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: 24,
-    backgroundColor: 'rgba(129, 140, 248, 0.16)',
+    backgroundColor: Colors.primary, // Solid white pill
   },
   tabContent: {
     flexDirection: 'row',
@@ -592,7 +592,7 @@ const styles = StyleSheet.create({
   tabLabel: {
     ...StyleSheet.absoluteFillObject,
     fontSize: 14,
-    color: Colors.primaryLight,
+    color: Colors.onPrimary,
     fontWeight: '700',
     letterSpacing: 0.2,
     textAlign: 'center',

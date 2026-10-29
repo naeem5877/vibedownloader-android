@@ -5,12 +5,15 @@
 
 export const Colors = {
   // Brand - Logo-Inspired Vibrant Palette
-  primary: '#6366F1', // Vibrant Purple from logo
-  primaryLight: '#818CF8',
-  primaryDark: '#4338CA',
-  secondary: '#3B82F6', // Blue from logo gradient
-  secondaryLight: '#60A5FA',
-  secondaryDark: '#2563EB',
+  // Monochrome: pure white on black. White is the brand colour now, so anything
+  // drawn ON a primary fill (button label, icon, checkmark) must use onPrimary.
+  primary: '#FFFFFF',
+  primaryLight: '#F4F4F5',
+  primaryDark: '#D4D4D8',
+  onPrimary: '#000000', // Content on top of a primary fill
+  secondary: '#E4E4E7', // Soft white for secondary accents
+  secondaryLight: '#F4F4F5',
+  secondaryDark: '#A1A1AA',
   accent: '#F97316', // Orange accent from logo
 
   // Background - Deep Pure Blacks
@@ -44,21 +47,21 @@ export const Colors = {
   // UI
   border: '#2F2F2F',
   borderLight: '#3D3D3D',
-  borderAccent: 'rgba(99, 102, 241, 0.4)', // Purple border
+  borderAccent: 'rgba(255, 255, 255, 0.4)', // White border
   overlay: 'rgba(0, 0, 0, 0.9)',
   overlayLight: 'rgba(0, 0, 0, 0.7)',
 
   // Gradients Colors (matching logo)
-  gradientPurple: '#6366F1',
-  gradientBlue: '#3B82F6',
-  gradientIndigo: '#4F46E5',
+  gradientPurple: '#FFFFFF',
+  gradientBlue: '#D4D4D8',
+  gradientIndigo: '#E4E4E7',
   gradientOrange: '#F97316',
 
   // Premium Depth System
   surfaceLow: '#0A0A0B', // Base background layer
   surfaceMedium: '#141417', // Secondary cards
   surfaceHigh: '#1E1E22', // Modals and popups
-  surfaceAccent: 'rgba(99, 102, 241, 0.1)', // Subtle primary tint for areas
+  surfaceAccent: 'rgba(255, 255, 255, 0.08)', // Subtle primary tint for areas
 
   innerBorder: 'rgba(255, 255, 255, 0.05)', // The "Premium" 1px highlight
   innerBorderLight: 'rgba(255, 255, 255, 0.08)',

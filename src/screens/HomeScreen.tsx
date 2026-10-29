@@ -1851,7 +1851,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   ]}
                   onPress={onNavigateToLibrary}
                 >
-                  <LibraryIcon size={18} color="#FFF" />
+                  <LibraryIcon size={18} color={Colors.onPrimary} />
                   <Text style={styles.offlineBtnText}>OPEN LIBRARY</Text>
                 </TouchableOpacity>
               )}
@@ -2689,7 +2689,7 @@ const styles = StyleSheet.create({
     ...Shadows.md,
   },
   offlineBtnText: {
-    color: '#FFF',
+    color: Colors.onPrimary,
     fontSize: 14,
     fontWeight: '800',
     letterSpacing: 0.5,

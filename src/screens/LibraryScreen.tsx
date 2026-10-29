@@ -4,7 +4,8 @@
  * Two-column grid with kind/platform chips, search, sort, long-press multi-select,
  * and in-app preview for video & images.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { LiveTilePreview, PreviewGate } from '../components/TilePreview';
 import {
   Alert,
   FlatList,
@@ -105,6 +106,30 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
   const [preview, setPreview] = useState<LibraryItem | null>(null);
   const [editing, setEditing] = useState<LibraryItem | null>(null);
   const [textViewer, setTextViewer] = useState<SubtitleViewerFile | null>(null);
+
+  // Live previews: at most 2 visible video tiles play (low-end phones have few
+  // hardware decoders), and only while the list is still and no modal is open.
+  // State lives in a gate (not useState) so scrolling never re-renders the grid.
+  const gate = useMemo(() => new PreviewGate(), []);
+  useEffect(() => () => gate.dispose(), [gate]);
+  useEffect(() => {
+    gate.setBlocked(
+      !isFocused || !!preview || !!editing || gallery.selectionMode,
+    );
+  }, [gate, isFocused, preview, editing, gallery.selectionMode]);
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: any[] }) => {
+    // With numColumns > 1 each viewable "item" is a row (array of tiles).
+    const next = viewableItems
+      .flatMap(v => (Array.isArray(v.item) ? v.item : v.item ? [v.item] : []))
+      .filter(it => it && deriveMediaKind(it.extension) === 'video')
+      .slice(0, 2)
+      .map(it => it.path as string);
+    gate.setViewable(next);
+  }).current;
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 70,
+    minimumViewTime: 250,
+  }).current;
 
   // Re-scan when the tab becomes active. `reload` is already fire-and-forget
   // and the gallery keeps showing the previous listing until the new one
@@ -284,6 +309,8 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
             </View>
           )}
 
+          {kind === 'video' && <LiveTilePreview gate={gate} path={item.path} />}
+
           {/* Smooth bottom fade for text legibility */}
           <BottomFade />
 
@@ -376,7 +403,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
         </Pressable>
       );
     },
-    [tileWidth, gallery, openItem, platformLabel, setEditing],
+    [tileWidth, gallery, openItem, platformLabel, setEditing, gate],
   );
 
   const header = useMemo(
@@ -633,6 +660,12 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
             colors={[Colors.primary]}
           />
         }
+        onViewableItemsChanged={onViewableItemsChanged}
+        viewabilityConfig={viewabilityConfig}
+        onScrollBeginDrag={gate.scrollStart}
+        onMomentumScrollBegin={gate.scrollStart}
+        onScrollEndDrag={gate.scrollEnd}
+        onMomentumScrollEnd={gate.scrollEnd}
         removeClippedSubviews
         initialNumToRender={12}
         maxToRenderPerBatch={12}

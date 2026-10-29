@@ -37,6 +37,7 @@ import { parseBatchUrls, detectPlatform } from '../utils/batchUrls';
 import { YtDlpNative } from '../native/YtDlpModule';
 import { CookieManagerService } from '../services/CookieManagerService';
 import { acquireTabSwipeLock } from '../utils/tabSwipeLock';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export interface BatchResolvedItem {
   title: string;
@@ -86,6 +87,7 @@ export const BatchDownloadSheet: React.FC<BatchDownloadSheetProps> = ({
   onClose,
   onStart,
 }) => {
+  const insets = useSafeAreaInsets();
   const [raw, setRaw] = useState('');
   const [resolving, setResolving] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number }>({
@@ -237,6 +239,7 @@ export const BatchDownloadSheet: React.FC<BatchDownloadSheetProps> = ({
     <Modal
       visible={visible}
       transparent
+      statusBarTranslucent
       animationType="slide"
       onRequestClose={handleClose}
     >
@@ -249,7 +252,12 @@ export const BatchDownloadSheet: React.FC<BatchDownloadSheetProps> = ({
           activeOpacity={1}
           onPress={resolving ? undefined : handleClose}
         />
-        <View style={styles.sheet}>
+        <View
+          style={[
+            styles.sheet,
+            { paddingBottom: Spacing.xl + insets.bottom },
+          ]}
+        >
           <View style={styles.grabber} />
 
           <View style={styles.header}>

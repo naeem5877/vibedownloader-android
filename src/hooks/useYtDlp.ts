@@ -18,6 +18,10 @@ interface UseYtDlpState {
     downloadProgress: number;
     downloadEta: number;
     downloadLine: string;
+    /** Latest transfer rate / stream size / raw yt-dlp line; kept between events that omit them. */
+    downloadSpeed?: string;
+    downloadSize?: string;
+    downloadRawLine?: string;
     fetchError: string | null;
     downloadError: string | null;
     /**
@@ -130,6 +134,11 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                             downloadProgress: clampedProgress,
                             downloadEta: event.eta || 0,
                             downloadLine: statusLine,
+                            // yt-dlp only reports speed/size on some lines, so a gap
+                            // keeps the last real value instead of blanking it.
+                            downloadSpeed: event.speed || prev.downloadSpeed,
+                            downloadSize: event.size || prev.downloadSize,
+                            downloadRawLine: event.rawLine || prev.downloadRawLine,
                         }));
 
                         // Clear existing stale timeout
@@ -297,6 +306,9 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 downloadProgress: 0,
                 downloadEta: 0,
                 downloadLine: 'Preparing download...',
+                downloadSpeed: undefined,
+                downloadSize: undefined,
+                downloadRawLine: undefined,
                 downloadError: null,
                 cutWarning: null,
             }));
@@ -386,6 +398,9 @@ export const useYtDlp = (): [UseYtDlpState, UseYtDlpActions] => {
                 downloadProgress: 0,
                 downloadEta: 0,
 downloadLine: 'Searching for track...',
+                downloadSpeed: undefined,
+                downloadSize: undefined,
+                downloadRawLine: undefined,
                   downloadError: null,
                   cutWarning: null,
               }));

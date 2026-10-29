@@ -2,22 +2,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   TextInput,
-  TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
   Text,
   Animated,
-  Easing,
 } from 'react-native';
-import {
-  Colors,
-  BorderRadius,
-  Spacing,
-  Typography,
-  Shadows,
-  getOnPlatformColor,
-} from '../theme';
-import { SearchIcon, CloseIcon, ArrowRightIcon } from './Icons';
+import { Colors, getOnPlatformColor } from '../theme';
+import { SearchIcon, CloseIcon, ClipboardIcon, DownloadIcon } from './Icons';
+import { PressScale, Ease } from './Motion';
 
 interface URLInputProps {
   value: string;
@@ -29,6 +21,11 @@ interface URLInputProps {
   placeholder?: string;
 }
 
+/**
+ * Field + one primary action.
+ * Empty field  -> the button reads "Paste link" and pastes from the clipboard.
+ * Filled field -> the button reads "Download" and fetches.
+ */
 export const URLInput: React.FC<URLInputProps> = ({
   value,
   onChangeText,
@@ -36,78 +33,65 @@ export const URLInput: React.FC<URLInputProps> = ({
   isLoading,
   onPaste,
   platformColor = Colors.primary,
-  placeholder = 'Paste any video link...',
+  placeholder = 'Paste a link',
 }) => {
   const [isFocused, setIsFocused] = useState(false);
-  const focusAnimation = useRef(new Animated.Value(0)).current;
-  const pulseAnimation = useRef(new Animated.Value(1)).current;
-  const rotateAnimation = useRef(new Animated.Value(0)).current;
-  const spinnerLoop = useRef<Animated.CompositeAnimation | null>(null);
+  const focus = useRef(new Animated.Value(0)).current;
+  const fill = useRef(new Animated.Value(0)).current;
+  const hasValue = value.length > 0;
 
   useEffect(() => {
-    Animated.timing(focusAnimation, {
+    Animated.timing(focus, {
       toValue: isFocused ? 1 : 0,
-      duration: 200,
+      duration: 220,
+      easing: Ease.out,
       useNativeDriver: false,
-      easing: Easing.out(Easing.cubic),
     }).start();
-  }, [isFocused]);
+  }, [focus, isFocused]);
 
   useEffect(() => {
-    if (isLoading) {
-      const loop = Animated.loop(
-        Animated.timing(rotateAnimation, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-          easing: Easing.linear,
-        }),
-      );
-      spinnerLoop.current = loop;
-      loop.start();
-    } else {
-      spinnerLoop.current?.stop();
-      spinnerLoop.current = null;
-      rotateAnimation.setValue(0);
-    }
-    return () => {
-      spinnerLoop.current?.stop();
-      spinnerLoop.current = null;
-    };
-  }, [isLoading]);
+    Animated.timing(fill, {
+      toValue: hasValue ? 1 : 0,
+      duration: 260,
+      easing: Ease.out,
+      useNativeDriver: false,
+    }).start();
+  }, [fill, hasValue]);
 
-  const clearInput = () => {
-    onChangeText('');
-  };
-
-  const borderColor = focusAnimation.interpolate({
+  const borderColor = focus.interpolate({
     inputRange: [0, 1],
-    outputRange: [Colors.border, platformColor],
+    outputRange: ['rgba(255,255,255,0.08)', `${platformColor}80`],
   });
-
-  // The button is filled with the platform colour only when it is active; X's
-  // is white, so its arrow must be black there and white on the dark idle state.
-  const onFillColor =
-    value && !isLoading ? getOnPlatformColor(platformColor) : '#FFF';
+  const glowOpacity = focus.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 0.35],
+  });
+  const buttonBg = fill.interpolate({
+    inputRange: [0, 1],
+    outputRange: [Colors.glassFillStrong, platformColor],
+  });
+  const onFill = hasValue ? getOnPlatformColor(platformColor) : '#FFFFFF';
 
   return (
-    <View style={styles.container}>
+    <View>
       <Animated.View
         style={[
-          styles.inputWrapper,
+          styles.field,
           {
-            borderColor: borderColor,
+            borderColor,
+            shadowColor: platformColor,
+            shadowOpacity: glowOpacity as unknown as number,
+            shadowRadius: 14,
+            shadowOffset: { width: 0, height: 0 },
           },
         ]}
       >
-        {/* Search Icon */}
-        <View style={styles.iconContainer}>
+        <View style={styles.icon}>
           <SearchIcon
             size={20}
-            color={isFocused ? platformColor : Colors.textMuted}
+            color={isFocused || hasValue ? platformColor : Colors.textMuted}
           />
         </View>
-
         <TextInput
           style={styles.input}
           value={value}
@@ -123,132 +107,91 @@ export const URLInput: React.FC<URLInputProps> = ({
           selectionColor={platformColor}
           editable={!isLoading}
         />
-
-        {/* Right Actions */}
-        <View style={styles.rightActions}>
-          {value.length > 0 ? (
-            <TouchableOpacity
-              onPress={clearInput}
-              style={styles.clearButton}
-              activeOpacity={0.7}
-            >
-              <CloseIcon size={16} color={Colors.textMuted} />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              onPress={onPaste}
-              style={styles.pasteButton}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.pasteText}>PASTE</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+        {hasValue && !isLoading && (
+          <PressScale
+            onPress={() => onChangeText('')}
+            scaleTo={0.85}
+            hitSlop={10}
+          >
+            <View style={styles.clear}>
+              <CloseIcon size={14} color={Colors.textSecondary} />
+            </View>
+          </PressScale>
+        )}
       </Animated.View>
 
-      {/* Submit Button */}
-      <TouchableOpacity
-        style={[
-          styles.actionButton,
-          (!value || isLoading) && styles.actionButtonDisabled,
-        ]}
-        onPress={onSubmit}
-        disabled={!value || isLoading}
-        activeOpacity={0.8}
+      <PressScale
+        onPress={hasValue ? onSubmit : onPaste}
+        disabled={isLoading}
+        scaleTo={0.97}
+        haptic
+        containerStyle={styles.buttonWrap}
       >
-        <View
-          style={[
-            styles.actionButtonInner,
-            {
-              backgroundColor:
-                value && !isLoading ? platformColor : Colors.surfaceElevated,
-            },
-          ]}
-        >
+        <Animated.View style={[styles.button, { backgroundColor: buttonBg }]}>
           {isLoading ? (
-            <ActivityIndicator color={onFillColor} size="small" />
+            <ActivityIndicator color={onFill} size="small" />
           ) : (
-            <ArrowRightIcon size={22} color={onFillColor} />
+            <>
+              {hasValue ? (
+                <DownloadIcon size={20} color={onFill} />
+              ) : (
+                <ClipboardIcon size={20} color={onFill} />
+              )}
+              <Text style={[styles.buttonText, { color: onFill }]}>
+                {hasValue ? 'Download' : 'Paste link'}
+              </Text>
+            </>
           )}
-        </View>
-      </TouchableOpacity>
+        </Animated.View>
+      </PressScale>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    paddingHorizontal: 0,
+  field: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    height: 56,
+    borderRadius: 16,
+    borderWidth: 1,
+    backgroundColor: Colors.glassFill,
+    paddingLeft: 6,
+    paddingRight: 12,
+    elevation: 0,
   },
-  inputWrapper: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#121214',
-    borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: '#222225',
-    height: 64,
-    ...Shadows.sm,
-  },
-  iconContainer: {
-    paddingLeft: 16,
-    paddingRight: 10,
-  },
+  icon: { width: 40, alignItems: 'center' },
   input: {
     flex: 1,
     color: Colors.textPrimary,
-    fontSize: 15,
-    height: '100%',
+    fontSize: 16,
+    fontWeight: '400',
+    letterSpacing: -0.2,
     paddingVertical: 0,
-    fontWeight: '600',
-    letterSpacing: 0.1,
+    height: '100%',
   },
-  rightActions: {
+  clear: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buttonWrap: { marginTop: 10 },
+  button: {
+    height: 54,
+    borderRadius: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingRight: 12,
-  },
-  clearButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.surfaceElevated,
     justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
+    gap: 10,
   },
-  pasteButton: {
-    backgroundColor: 'rgba(99, 102, 241, 0.12)',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(99, 102, 241, 0.2)',
-  },
-  pasteText: {
-    color: '#818CF8',
-    fontSize: 11,
-    fontWeight: '900',
+  buttonText: {
+    fontSize: 14,
+    fontWeight: '800',
     letterSpacing: 1.2,
-  },
-  actionButton: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
-    overflow: 'hidden',
-  },
-  actionButtonInner: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  actionButtonDisabled: {
-    opacity: 0.4,
+    textTransform: 'uppercase',
   },
 });
 

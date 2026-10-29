@@ -1,580 +1,463 @@
-import React, { useRef, useEffect, useMemo } from 'react';
-import { View, StyleSheet, Animated, Easing, Text, Dimensions, TouchableOpacity } from 'react-native';
-import { Colors, Spacing, Typography, PlatformThemes, Shadows, BorderRadius } from '../theme';
+/**
+ * EmptyState - the desktop app's empty state: a hero with a pulsing light and
+ * two slowly turning rings, three "how to download" cards, and a
+ * "Supported content" card.
+ */
+import React, { useEffect, useMemo, useRef } from 'react';
+import { View, StyleSheet, Text, Animated, Easing } from 'react-native';
+import { Colors, PlatformThemes } from '../theme';
 import {
-    SparkleIcon,
-    VideoIcon,
-    MusicIcon,
-    WaveformIcon,
-    StarIcon,
-    DownloadIcon,
-    FacebookIcon,
-    XIcon,
-    FolderIcon,
-    LinkIcon,
-    ClipboardIcon,
-    CheckIcon,
-    YouTubeIcon,
-    InstagramIcon,
-    TikTokIcon,
-    SpotifyIcon,
-    PinterestIcon,
-    SoundCloudIcon
+  SparkleIcon,
+  FacebookIcon,
+  XIcon,
+  YouTubeIcon,
+  InstagramIcon,
+  TikTokIcon,
+  SpotifyIcon,
+  PinterestIcon,
+  SoundCloudIcon,
+  TwitchIcon,
+  LinkIcon,
+  ClipboardIcon,
+  DownloadIcon,
 } from './Icons';
-import { ShinyText } from './ShinyText';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+import { Reveal } from './Motion';
 
 interface EmptyStateProps {
-    platform?: string | null;
-    isOffline?: boolean;
-    isLoggedIn?: boolean;
-    title?: string;
-    subtitle?: string;
-    support?: string;
-    features?: string[];
-    icon?: React.ReactNode;
+  platform?: string | null;
+  isOffline?: boolean;
+  isLoggedIn?: boolean;
+  title?: string;
+  subtitle?: string;
+  support?: string;
+  features?: string[];
+  icon?: React.ReactNode;
 }
 
+type Meta = {
+  title: string;
+  name: string;
+  subtitle: string;
+  features: string[];
+  Icon: React.ComponentType<{ size?: number; color?: string }>;
+  color: string;
+  hint?: [string, string]; // [logged out, logged in]
+};
+
+const META: Record<string, Meta> = {
+  youtube: {
+    title: 'YouTube Downloader',
+    name: 'YouTube',
+    subtitle: 'Shorts, Long Videos & Playlists',
+    features: ['🎬 Videos', '🎞️ Shorts', '📋 Playlists', '🎵 Music'],
+    Icon: YouTubeIcon,
+    color: PlatformThemes.YouTube.primary,
+    hint: [
+      'Log in for private and age-restricted videos',
+      'Private and age-restricted access on',
+    ],
+  },
+  spotify: {
+    title: 'Spotify Downloader',
+    name: 'Spotify',
+    subtitle: 'Music, Lossless & Hi-Res',
+    features: ['🎵 Music', '📀 Lossless', '💎 Hi-Res', '📋 Playlists'],
+    Icon: SpotifyIcon,
+    color: PlatformThemes.Spotify.primary,
+  },
+  soundcloud: {
+    title: 'SoundCloud Downloader',
+    name: 'SoundCloud',
+    subtitle: 'Tracks & Playlists',
+    features: ['🎵 Tracks', '📋 Playlists', '🔥 Artists', '🎧 HQ Stream'],
+    Icon: SoundCloudIcon,
+    color: PlatformThemes.SoundCloud.primary,
+  },
+  instagram: {
+    title: 'Instagram Downloader',
+    name: 'Instagram',
+    subtitle: 'Reels, Posts & Stories',
+    features: ['🎬 Reels', '📷 Posts', '📖 Stories', '🖼️ Photos'],
+    Icon: InstagramIcon,
+    color: PlatformThemes.Instagram.primary,
+    hint: [
+      'Log in and paste a username for stories',
+      'Stories and private posts ready',
+    ],
+  },
+  tiktok: {
+    title: 'TikTok Downloader',
+    name: 'TikTok',
+    subtitle: 'Videos & Sounds',
+    features: ['🎬 Videos', '🎵 Sounds', '🎥 No Mark', '🚀 Fast'],
+    Icon: TikTokIcon,
+    color: PlatformThemes.TikTok.primary,
+    hint: ['Log in for private videos', 'Private videos ready'],
+  },
+  facebook: {
+    title: 'Facebook Downloader',
+    name: 'Facebook',
+    subtitle: 'Videos & Stories',
+    features: ['📹 Reels', '📖 Stories', '🔒 Private', '⚡ HD'],
+    Icon: FacebookIcon,
+    color: PlatformThemes.Facebook.primary,
+    hint: ['Log in for private videos and stories', 'Private access on'],
+  },
+  x: {
+    title: 'X Downloader',
+    name: 'X',
+    subtitle: 'Videos & Photos',
+    features: ['🎬 4K Video', '🖼️ HD Photos', '🏃 Fast Sync', '📂 GIFs'],
+    Icon: XIcon,
+    color: '#FFFFFF',
+    hint: ['Log in to X for private content', 'Private access on'],
+  },
+  twitch: {
+    title: 'Twitch Downloader',
+    name: 'Twitch',
+    subtitle: 'Live Streams, VODs & Clips',
+    features: ['🔴 Live', '🎬 VODs', '✂️ Clips', '⚡ HD'],
+    Icon: TwitchIcon,
+    color: PlatformThemes.Twitch.primary,
+  },
+  pinterest: {
+    title: 'Pinterest Downloader',
+    name: 'Pinterest',
+    subtitle: 'Pins & Videos',
+    features: ['📌 Pins', '🎬 Videos', '🖼️ HD', '🎨 Save'],
+    Icon: PinterestIcon,
+    color: PlatformThemes.Pinterest.primary,
+  },
+};
+
+const STEP_ICONS = [
+  { Icon: LinkIcon, color: '#60A5FA' },
+  { Icon: ClipboardIcon, color: '#C084FC' },
+  { Icon: DownloadIcon, color: '#4ADE80' },
+];
+
 export const EmptyState: React.FC<EmptyStateProps> = ({
-    platform,
-    isOffline = false,
-    isLoggedIn = false,
-    title,
-    subtitle,
-    support,
-    features,
-    icon
+  platform,
+  isOffline = false,
+  isLoggedIn = false,
+  title,
+  subtitle,
+  features,
+  icon,
 }) => {
-    // Animations
-    const fadeAnim = useRef(new Animated.Value(0)).current;
-    const slideAnim = useRef(new Animated.Value(20)).current;
-    const pulseAnim = useRef(new Animated.Value(1)).current;
-    const rotateAnim = useRef(new Animated.Value(0)).current;
-    const stepsAnim = useRef(new Animated.Value(0)).current;
-    const orbAnim1 = useRef(new Animated.Value(0)).current;
-    const orbAnim2 = useRef(new Animated.Value(0)).current;
+  const key =
+    (platform || '').toLowerCase() === 'twitter'
+      ? 'x'
+      : (platform || '').toLowerCase();
+  const meta = useMemo<Meta>(
+    () =>
+      META[key] || {
+        title: 'VibeDownloader',
+        name: 'any supported site',
+        subtitle: 'The Elite Downloader',
+        features: ['🎬 Video', '🎵 Audio', '📸 Photos', '📂 Files'],
+        Icon: SparkleIcon,
+        color: Colors.primary,
+      },
+    [key],
+  );
+  const color = meta.color;
+  const chips = features || meta.features;
 
-    const currentPlatform = platform || 'Universal';
+  // Pulsing light + two counter-rotating rings (all native-driven).
+  const pulse = useRef(new Animated.Value(0)).current;
+  const spin = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const p = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 1500,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 1500,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    const s = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 22000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    p.start();
+    s.start();
+    return () => {
+      p.stop();
+      s.stop();
+    };
+  }, [pulse, spin]);
 
-    useEffect(() => {
-        // Reset and trigger entry
-        fadeAnim.setValue(0);
-        slideAnim.setValue(20);
-        stepsAnim.setValue(0);
+  const rotate = spin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+  const rotateBack = spin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '-360deg'],
+  });
+  const lightOpacity = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.05, 0.13],
+  });
 
-        Animated.parallel([
-            Animated.timing(fadeAnim, {
-                toValue: 1,
-                duration: 800,
-                useNativeDriver: true,
-                easing: Easing.out(Easing.cubic)
-            }),
-            Animated.spring(slideAnim, {
-                toValue: 0,
-                friction: 8,
-                tension: 40,
-                useNativeDriver: true
-            }),
-            Animated.timing(stepsAnim, {
-                toValue: 1,
-                duration: 1000,
-                delay: 300,
-                useNativeDriver: true,
-                easing: Easing.out(Easing.back(1.2))
-            })
-        ]).start();
+  const steps: [string, string][] = [
+    ['Copy the link', `Copy the media URL from ${meta.name}`],
+    ['Paste it above', 'Use the Paste button or manual input'],
+    ['Choose & download', 'Select quality and start downloading'],
+  ];
 
-        // Continuous Loop Animations
-        const loops: Animated.CompositeAnimation[] = [];
-        const startLoops = () => {
-            // Pulse
-            loops.push(
-                Animated.loop(
-                    Animated.sequence([
-                        Animated.timing(pulseAnim, {
-                            toValue: 1.1,
-                            duration: 3000,
-                            easing: Easing.inOut(Easing.sin),
-                            useNativeDriver: true,
-                        }),
-                        Animated.timing(pulseAnim, {
-                            toValue: 1,
-                            duration: 3000,
-                            easing: Easing.inOut(Easing.sin),
-                            useNativeDriver: true,
-                        }),
-                    ])
-                )
-            );
-
-            // Rotation for hero rings
-            loops.push(
-                Animated.loop(
-                    Animated.timing(rotateAnim, {
-                        toValue: 1,
-                        duration: 20000,
-                        easing: Easing.linear,
-                        useNativeDriver: true,
-                    })
-                )
-            );
-
-            // Orb Float
-            const createFloat = (val: Animated.Value, duration: number, distance: number) => {
-                loops.push(
-                    Animated.loop(
-                        Animated.sequence([
-                            Animated.timing(val, {
-                                toValue: distance,
-                                duration,
-                                easing: Easing.inOut(Easing.sin),
-                                useNativeDriver: true,
-                            }),
-                            Animated.timing(val, {
-                                toValue: 0,
-                                duration,
-                                easing: Easing.inOut(Easing.sin),
-                                useNativeDriver: true,
-                            }),
-                        ])
-                    )
-                );
-            };
-            createFloat(orbAnim1, 5000, 15);
-            createFloat(orbAnim2, 7000, -20);
-
-            loops.forEach((l) => l.start());
-        };
-
-        startLoops();
-        // Without this the ambient loops outlive the screen: they keep the UI
-        // thread animating forever and re-run on every platform change.
-        return () => loops.forEach((l) => l.stop());
-    }, [currentPlatform]);
-
-    const rotation = rotateAnim.interpolate({
-        inputRange: [0, 1],
-        outputRange: ['0deg', '360deg']
-    });
-
-    const rotationRev = rotateAnim.interpolate({
-        inputRange: [0, 1],
-        outputRange: ['0deg', '-360deg']
-    });
-
-    // Platform Data Configuration matching desktop
-    const platformData = useMemo(() => ({
-        YouTube: {
-            title: 'YouTube Downloader',
-            subtitle: 'Shorts, Long Videos & Playlists',
-            support: 'Supported Content',
-            features: ['🎬 Videos', '🎞️ Shorts', '📋 Playlists', '🎵 Music'],
-            icon: <YouTubeIcon size={44} color={PlatformThemes.YouTube.primary} />,
-            color: PlatformThemes.YouTube.primary,
-            loginMessage: isLoggedIn 
-                ? '✅ Private and age-restricted access enabled.' 
-                : '💡 Login to download private and age-restricted videos.'
-        },
-        Spotify: {
-            title: 'Spotify Downloader',
-            subtitle: 'Tracks, Albums & Playlists',
-            support: 'Supported Content',
-            features: ['🎵 Music', '📋 Playlists', '💿 Albums', '🎨 Cover Art'],
-            icon: <SpotifyIcon size={44} color={PlatformThemes.Spotify.primary} />,
-            color: PlatformThemes.Spotify.primary
-        },
-        SoundCloud: {
-            title: 'SoundCloud Downloader',
-            subtitle: 'Tracks & Playlists',
-            support: 'Supported Content',
-            features: ['🎵 Tracks', '📋 Playlists', '🎧 HQ Stream', '🔥 Artists'],
-            icon: <SoundCloudIcon size={44} color={PlatformThemes.SoundCloud.primary} />,
-            color: PlatformThemes.SoundCloud.primary
-        },
-        Instagram: {
-            title: 'Instagram Downloader',
-            subtitle: 'Reels, Posts & Stories',
-            support: 'Supported Content',
-            features: ['🎬 Reels', '📷 Posts', '📖 Stories', '🖼️ Photos'],
-            icon: <InstagramIcon size={44} color={PlatformThemes.Instagram.primary} />,
-            color: PlatformThemes.Instagram.primary,
-            loginMessage: isLoggedIn 
-                ? '✅ Stories and private posts ready to download.' 
-                : '💡 Login and paste username to download stories.'
-        },
-        TikTok: {
-            title: 'TikTok Downloader',
-            subtitle: 'Videos & Sounds',
-            support: 'Supported Content',
-            features: ['🎬 Videos', '🎵 Sounds', '🎥 No Mark', '🚀 Clean'],
-            icon: <TikTokIcon size={44} color={PlatformThemes.TikTok.primary} />,
-            color: PlatformThemes.TikTok.primary,
-            loginMessage: isLoggedIn 
-                ? '✅ Private TikTok access ready.' 
-                : '💡 Login to TikTok for private videos.'
-        },
-        Facebook: {
-            title: 'Facebook Downloader',
-            subtitle: 'Videos & Stories',
-            support: 'Supported Content',
-            features: ['📹 Reels', '📖 Stories', '🔒 Private', '⚡ HD'],
-            icon: <FacebookIcon size={44} color={PlatformThemes.Facebook.primary} />,
-            color: PlatformThemes.Facebook.primary,
-            loginMessage: isLoggedIn 
-                ? '✅ Now you can download private videos and stories.' 
-                : '💡 Login to access private videos and stories.'
-        },
-        X: {
-            title: 'X Downloader',
-            subtitle: 'Videos & Photos',
-            support: 'Supported Content',
-            features: ['🎬 4K Video', '🖼️ HD Photos', '🏃 Fast Sync', '📂 GIFs'],
-            icon: <XIcon size={44} color={PlatformThemes.X.primary} />,
-            color: PlatformThemes.X.primary,
-            loginMessage: isLoggedIn 
-                ? '✅ Private X content access ready.' 
-                : '💡 Login to X (Twitter) for private content.'
-        },
-        Pinterest: {
-            title: 'Pinterest Downloader',
-            subtitle: 'Pins & Videos',
-            support: 'Supported Content',
-            features: ['📌 Pins', '🎬 Videos', '🖼️ HD', '🎨 Save'],
-            icon: <PinterestIcon size={44} color={PlatformThemes.Pinterest.primary} />,
-            color: PlatformThemes.Pinterest.primary
-        }
-    }), [isLoggedIn]);
-
-    const data = useMemo(() => {
-        // Find matching platform data case-insensitively
-        const platformKey = Object.keys(platformData).find(
-            key => key.toLowerCase() === currentPlatform.toLowerCase()
-        );
-
-        const baseData = (platformData as any)[platformKey || ''] || {
-            title: 'Universal Downloader',
-            subtitle: 'Multi-platform Media Extraction',
-            support: 'Supported Content',
-            features: ['🎬 Video', '🎵 Audio', '📸 Photos', '📂 Files'],
-            icon: <SparkleIcon size={40} color={Colors.primary} />,
-            color: Colors.primary,
-            displayName: 'any platform'
-        };
-
-        return {
-            title: title || baseData.title,
-            subtitle: subtitle || baseData.subtitle,
-            support: baseData.support,
-            features: baseData.features,
-            icon: icon || baseData.icon,
-            color: baseData.color,
-            loginMessage: baseData.loginMessage,
-            displayName: baseData.displayName || (platformKey || currentPlatform)
-        };
-    }, [currentPlatform, platformData, title, subtitle, icon]);
-
-    const renderStep = (index: number, icon: React.ReactNode, stepTitle: string, desc: string, iconBg: string, iconColor: string) => (
-        <Animated.View
+  return (
+    <View style={styles.container}>
+      {/* Hero */}
+      <Reveal index={0} style={styles.hero}>
+        <View style={styles.display}>
+          <Animated.View
             style={[
-                styles.stepCard,
-                {
-                    opacity: stepsAnim,
-                    transform: [
-                        { translateY: stepsAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) },
-                        { scale: stepsAnim.interpolate({ inputRange: [0, 1], outputRange: [0.95, 1] }) }
-                    ]
-                }
+              styles.light,
+              { backgroundColor: color, opacity: lightOpacity },
             ]}
-        >
-            <View style={[styles.stepIconContainer, { backgroundColor: `${iconColor}15` }]}>
-                {icon}
-            </View>
-            <View style={styles.stepInfo}>
-                <Text style={styles.stepTitle}>{stepTitle}</Text>
-                <Text style={styles.stepDesc}>{desc}</Text>
-            </View>
-            <View style={styles.stepNumberBadge}>
-                <Text style={styles.stepNumberText}>{index}</Text>
-            </View>
-        </Animated.View>
-    );
+          />
+          <Animated.View
+            style={[
+              styles.ringOuter,
+              { borderColor: `${color}40`, transform: [{ rotate }] },
+            ]}
+          />
+          <Animated.View
+            style={[
+              styles.ringInner,
+              { borderColor: `${color}55`, transform: [{ rotate: rotateBack }] },
+            ]}
+          />
+          {icon || <meta.Icon size={44} color={color} />}
+        </View>
+        <Text style={styles.title}>{title || meta.title}</Text>
+        <Text style={styles.subtitle}>{subtitle || meta.subtitle}</Text>
+      </Reveal>
 
-    return (
-        <Animated.View style={[
-            styles.container,
-            { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }
-        ]}>
-            {/* Background Orbs */}
-            <Animated.View style={[styles.orb, styles.orbPrimary, { backgroundColor: data.color, transform: [{ translateY: orbAnim1 }] }]} />
-            <Animated.View style={[styles.orb, styles.orbSecondary, { backgroundColor: data.color, transform: [{ translateY: orbAnim2 }] }]} />
-
-            {/* Desktop-like Hero Section */}
-            <View style={styles.heroSection}>
-                <Animated.View
-                    style={[
-                        styles.heroPulse,
-                        { backgroundColor: data.color, transform: [{ scale: pulseAnim }] }
-                    ]}
-                />
-                <Animated.View style={[styles.outerRing, { borderColor: `${data.color}20`, transform: [{ rotate: rotation }] }]}>
-                    <Animated.View style={[styles.innerRing, { borderColor: `${data.color}40`, backgroundColor: `${data.color}0A`, transform: [{ rotate: rotationRev }] }]}>
-                        {data.icon}
-                    </Animated.View>
-                </Animated.View>
-                <Text style={styles.title}>{data.title}</Text>
-                <Text style={styles.subtitle}>{data.subtitle}</Text>
-                
-                {data.loginMessage && (
-                    <View style={[styles.loginHint, { borderColor: `${data.color}30` }]}>
-                        <Text style={styles.loginHintText}>{data.loginMessage}</Text>
-                    </View>
-                )}
+      {/* How to download */}
+      <Reveal index={1} style={styles.steps}>
+        <Text style={styles.overline}>HOW TO DOWNLOAD</Text>
+        {steps.map(([t, d], i) => {
+          const { Icon, color: ic } = STEP_ICONS[i];
+          return (
+            <View key={t} style={styles.card}>
+              <View style={styles.iconBox}>
+                <Icon size={20} color={ic} />
+              </View>
+              <View style={styles.cardBody}>
+                <Text style={styles.stepTitle}>{t}</Text>
+                <Text style={styles.stepDesc}>{d}</Text>
+              </View>
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{i + 1}</Text>
+              </View>
             </View>
+          );
+        })}
+      </Reveal>
 
-            {/* How to Download Section */}
-            <View style={styles.stepsSection}>
-                <Text style={styles.sectionLabel}>HOW TO DOWNLOAD</Text>
-                {renderStep(
-                    1,
-                    <LinkIcon size={20} color="#60A5FA" />,
-                    'Copy the link',
-                    `Copy the media URL from ${data.displayName}`,
-                    '#3B82F6',
-                    '#60A5FA'
-                )}
-                {renderStep(
-                    2,
-                    <ClipboardIcon size={20} color="#A78BFA" />,
-                    'Paste it above',
-                    'Use the Paste button or manual input',
-                    '#8B5CF6',
-                    '#A78BFA'
-                )}
-                {renderStep(
-                    3,
-                    <DownloadIcon size={20} color="#34D399" />,
-                    'Choose & download',
-                    'Select quality and start downloading',
-                    '#10B981',
-                    '#34D399'
-                )}
+      {/* Supported content */}
+      <Reveal index={2} style={styles.support}>
+        <View style={styles.supportHead}>
+          <SparkleIcon size={13} color="rgba(250,204,21,0.6)" />
+          <Text style={styles.supportLabel}>SUPPORTED CONTENT</Text>
+        </View>
+        <View style={styles.chips}>
+          {chips.map(f => (
+            <View key={f} style={styles.chip}>
+              <Text style={styles.chipText}>{f}</Text>
             </View>
+          ))}
+        </View>
+        {meta.hint && (
+          <View style={styles.hintRow}>
+            <View
+              style={[
+                styles.hintDot,
+                { backgroundColor: isLoggedIn ? Colors.success : '#F59E0B' },
+              ]}
+            />
+            <Text style={styles.hintText}>
+              {isLoggedIn ? meta.hint[1] : meta.hint[0]}
+            </Text>
+          </View>
+        )}
+      </Reveal>
 
-            {/* Supported Content Chips */}
-            <View style={styles.supportedSection}>
-                <View style={styles.supportedHeader}>
-                    <SparkleIcon size={14} color="#FBBF24" />
-                    <Text style={styles.sectionLabelCompact}>SUPPORTED CONTENT</Text>
-                </View>
-                <View style={styles.chipsContainer}>
-                    {data.features.map((feature: string, i: number) => (
-                        <View key={i} style={styles.chip}>
-                            <Text style={styles.chipText}>{feature}</Text>
-                        </View>
-                    ))}
-                </View>
-            </View>
-
-            {isOffline && (
-                <View style={styles.offlineLine}>
-                    <Text style={styles.offlineText}>OFFLINE MODE ACTIVE</Text>
-                </View>
-            )}
-        </Animated.View>
-    );
+      {isOffline && (
+        <Reveal index={3} style={styles.offline}>
+          <Text style={styles.offlineText}>You’re offline</Text>
+        </Reveal>
+      )}
+    </View>
+  );
 };
 
 const styles = StyleSheet.create({
-    container: {
-        alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingTop: 40,
-        paddingBottom: 20,
-    },
-    orb: {
-        position: 'absolute',
-        borderRadius: 100,
-        opacity: 0.05,
-    },
-    orbPrimary: {
-        width: 200,
-        height: 200,
-        top: -40,
-        left: -60,
-    },
-    orbSecondary: {
-        width: 150,
-        height: 150,
-        bottom: 100,
-        right: -40,
-    },
-    heroSection: {
-        alignItems: 'center',
-        marginBottom: 35,
-    },
-    heroPulse: {
-        position: 'absolute',
-        width: 130,
-        height: 130,
-        borderRadius: 65,
-        top: -5,
-        opacity: 0.15,
-    },
-    outerRing: {
-        width: 120,
-        height: 120,
-        borderRadius: 60,
-        borderWidth: 1,
-        borderStyle: 'dashed',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 20,
-    },
-    innerRing: {
-        width: 90,
-        height: 90,
-        borderRadius: 45,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 1.5,
-    },
-    title: {
-        color: Colors.textPrimary,
-        fontSize: 22,
-        fontWeight: '900',
-        letterSpacing: -0.5,
-        marginBottom: 6,
-    },
-    subtitle: {
-        color: Colors.textMuted,
-        fontSize: 14,
-        fontWeight: '500',
-    },
-    stepsSection: {
-        width: '100%',
-        gap: 12,
-        marginBottom: 30,
-    },
-    sectionLabel: {
-        color: Colors.textMuted,
-        fontSize: 10,
-        fontWeight: '900',
-        letterSpacing: 1.5,
-        textAlign: 'center',
-        marginBottom: 15,
-        opacity: 0.6,
-    },
-    stepCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 14,
-        backgroundColor: `${Colors.surface}80`,
-        borderRadius: 20,
-        borderWidth: 1,
-        borderColor: '#FFFFFF10',
-        gap: 15,
-    },
-    stepIconContainer: {
-        width: 44,
-        height: 44,
-        borderRadius: 14,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    stepInfo: {
-        flex: 1,
-    },
-    stepTitle: {
-        color: Colors.textPrimary,
-        fontSize: 14,
-        fontWeight: '700',
-        marginBottom: 2,
-    },
-    stepDesc: {
-        color: Colors.textMuted,
-        fontSize: 12,
-        lineHeight: 16,
-    },
-    stepNumberBadge: {
-        width: 22,
-        height: 22,
-        borderRadius: 11,
-        backgroundColor: '#FFFFFF10',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    stepNumberText: {
-        color: Colors.textMuted,
-        fontSize: 10,
-        fontWeight: '900',
-    },
-    supportedSection: {
-        width: '100%',
-        backgroundColor: '#FFFFFF05',
-        borderRadius: 24,
-        padding: 16,
-        borderWidth: 1,
-        borderColor: '#FFFFFF08',
-    },
-    supportedHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        marginBottom: 12,
-    },
-    sectionLabelCompact: {
-        color: '#FFFFFF',
-        fontSize: 10,
-        fontWeight: '900',
-        letterSpacing: 1,
-        opacity: 0.5,
-    },
-    chipsContainer: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 8,
-    },
-    chip: {
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        backgroundColor: '#FFFFFF10',
-        borderRadius: 10,
-    },
-    chipText: {
-        color: Colors.textSecondary,
-        fontSize: 11,
-        fontWeight: '600',
-    },
-    offlineLine: {
-        marginTop: 30,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 8,
-        backgroundColor: `${Colors.error}10`,
-        borderWidth: 1,
-        borderColor: `${Colors.error}30`,
-    },
-    offlineText: {
-        color: Colors.error,
-        fontSize: 10,
-        fontWeight: '900',
-        letterSpacing: 1,
-    },
-    loginHint: {
-        marginTop: 15,
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 12,
-        backgroundColor: '#FFFFFF08',
-        borderWidth: 1,
-        maxWidth: 280,
-    },
-    loginHintText: {
-        color: Colors.textSecondary,
-        fontSize: 12,
-        fontWeight: '600',
-        textAlign: 'center',
-        opacity: 0.9,
-    }
+  container: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20 },
+  hero: { alignItems: 'center', marginBottom: 28 },
+  display: {
+    width: 128,
+    height: 128,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  light: { ...StyleSheet.absoluteFillObject, borderRadius: 64 },
+  ringOuter: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 64,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  ringInner: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    right: 16,
+    bottom: 16,
+    borderRadius: 48,
+    borderWidth: 1,
+    backgroundColor: 'rgba(255,255,255,0.01)',
+  },
+  title: {
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: '900',
+    letterSpacing: -0.4,
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: 6,
+    textAlign: 'center',
+  },
+
+  steps: { marginBottom: 20 },
+  overline: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 2.2,
+    color: 'rgba(255,255,255,0.25)',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: 14,
+    marginBottom: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  iconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardBody: { flex: 1 },
+  stepTitle: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  stepDesc: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: 2,
+  },
+  badge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: 'rgba(255,255,255,0.25)',
+  },
+
+  support: {
+    padding: 20,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(255,255,255,0.02)',
+  },
+  supportHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 14,
+  },
+  supportLabel: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.5,
+    color: 'rgba(255,255,255,0.3)',
+  },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  chipText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.5)',
+  },
+  hintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.03)',
+  },
+  hintDot: { width: 6, height: 6, borderRadius: 3 },
+  hintText: {
+    flex: 1,
+    fontSize: 10,
+    fontStyle: 'italic',
+    color: 'rgba(255,255,255,0.3)',
+  },
+
+  offline: {
+    marginTop: 24,
+    alignSelf: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: `${Colors.error}1A`,
+  },
+  offlineText: { fontSize: 12, color: Colors.errorLight },
 });

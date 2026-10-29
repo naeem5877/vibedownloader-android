@@ -1,4 +1,19 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+/**
+ * CutDownloadSheet - the desktop "Cut & Download" modal, for the phone.
+ *
+ * Same design language as the desktop dialog: a dark #0f0f11 surface with a
+ * colour wash that follows the output type (purple for video, emerald for
+ * audio), a preview with a duration badge, a sliding Video/Audio switch, the
+ * accent-coloured waveform trimmer, quick presets, a Clip / Range / Saved
+ * summary, quality chips and a gradient Cut & Download button.
+ */
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   View,
   Text,
@@ -8,19 +23,31 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Image,
+  Animated,
   Platform,
 } from 'react-native';
-import { Colors, Spacing, Typography, BorderRadius } from '../theme';
+import Svg, {
+  Defs,
+  LinearGradient,
+  RadialGradient,
+  Rect,
+  Stop,
+} from 'react-native-svg';
 import {
   CloseIcon,
   ScissorsIcon,
-  CheckIcon,
-  InfoIcon,
   WarningIcon,
+  SparkleIcon,
+  LayersIcon,
+  VideoIcon,
+  MusicIcon,
+  UserIcon,
+  TimerIcon,
 } from './Icons';
-import { CutTimeline, formatCutTime, CUT_MIN_GAP } from './CutTimeline';
+import { CutTimeline, CUT_MIN_GAP } from './CutTimeline';
 import { YtDlpNative } from '../native/YtDlpModule';
 import { acquireTabSwipeLock } from '../utils/tabSwipeLock';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { VideoInfo } from '../native/YtDlpModule';
 
 export interface CutSelection {
@@ -44,6 +71,14 @@ interface CutDownloadSheetProps {
 
 type CutMode = 'video' | 'audio';
 
+/** Same per-output accents as the desktop modal. */
+const CUT_TABS = {
+  video: { label: 'Video', from: '#a855f7', to: '#d946ef' },
+  audio: { label: 'Audio', from: '#10b981', to: '#14b8a6' },
+} as const;
+
+const SURFACE = '#0f0f11';
+
 interface QuickPreset {
   label: string;
   resolve: (duration: number) => [number, number];
@@ -58,20 +93,39 @@ const PRESETS: QuickPreset[] = [
 ];
 
 const AUDIO_QUALITIES = [
-  { id: 'audio_best', label: 'Best', hint: 'Source quality' },
+  { id: 'audio_best', label: 'Best', hint: '~320 kbps' },
   { id: 'audio_standard', label: 'Standard', hint: '~128 kbps' },
-  { id: 'audio_low', label: 'Small', hint: '~64 kbps' },
+  { id: 'audio_low', label: 'Low', hint: '~64 kbps' },
 ];
 
-/** `1:23.4`, for the clip summary line. */
+/** `1:23`, or `1:02:03` for long media. */
 function formatFull(seconds: number): string {
-  const safe = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+  const safe = Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : 0;
   const h = Math.floor(safe / 3600);
   const m = Math.floor((safe % 3600) / 60);
-  const s = Math.floor(safe % 60);
-  const mm = h > 0 ? String(m).padStart(2, '0') : String(m);
+  const s = safe % 60;
   const ss = String(s).padStart(2, '0');
-  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+
+/** `2 minutes 23 seconds` */
+function formatWords(seconds: number): string {
+  const sec = Math.max(0, Math.round(seconds));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  const parts: string[] = [];
+  if (h > 0) parts.push(`${h} hour${h !== 1 ? 's' : ''}`);
+  if (m > 0) parts.push(`${m} minute${m !== 1 ? 's' : ''}`);
+  if (s > 0 || parts.length === 0) parts.push(`${s} second${s !== 1 ? 's' : ''}`);
+  return parts.join(' ');
+}
+
+function formatBytes(bytes?: number): string {
+  if (!bytes || bytes <= 0) return '';
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
+  return `${Math.round(mb)} MB`;
 }
 
 /**
@@ -100,6 +154,32 @@ function pickDefaultVideoFormat(
   return byHeight[0]?.formatId ?? null;
 }
 
+/** One chip per resolution, tallest first. */
+function listVideoFormats(formats: VideoInfo['formats'] | undefined) {
+  const list = (formats ?? []).filter(
+    f => f.hasVideo !== false && f.vcodec && f.vcodec !== 'none' && f.height,
+  );
+  const sorted = [...list].sort(
+    (a, b) => (b.height ?? 0) - (a.height ?? 0) || (b.tbr ?? 0) - (a.tbr ?? 0),
+  );
+  const seen = new Set<number>();
+  return sorted
+    .filter(f => {
+      const h = f.height ?? 0;
+      if (seen.has(h)) return false;
+      seen.add(h);
+      return true;
+    })
+    .slice(0, 8);
+}
+
+/** Splits chips into rows of three, so each row can be a flex row. */
+function chunk<T>(items: T[], size: number): T[][] {
+  const rows: T[][] = [];
+  for (let i = 0; i < items.length; i += size) rows.push(items.slice(i, i + size));
+  return rows;
+}
+
 /**
  * Cut & Download sheet.
  *
@@ -114,6 +194,7 @@ export const CutDownloadSheet: React.FC<CutDownloadSheetProps> = ({
   onConfirm,
   onClose,
 }) => {
+  const insets = useSafeAreaInsets();
   const duration = videoInfo?.duration ?? 0;
   const cuttable = duration > 0;
 
@@ -122,10 +203,31 @@ export const CutDownloadSheet: React.FC<CutDownloadSheetProps> = ({
     start: 0,
     end: 0,
   });
-  const [videoFormatId, setVideoFormatId] = useState<string | null>(null);
+  // 'best' is the Auto chip; anything else is a concrete yt-dlp format id.
+  const [videoPick, setVideoPick] = useState<string>('best');
   const [audioFormatId, setAudioFormatId] = useState<string>('audio_best');
   const [ffmpegAvailable, setFfmpegAvailable] = useState<boolean | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const accent = CUT_TABS[mode];
+
+  // Sliding Video/Audio indicator.
+  const [tabsWidth, setTabsWidth] = useState(0);
+  const tabAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.spring(tabAnim, {
+      toValue: mode === 'video' ? 0 : 1,
+      stiffness: 420,
+      damping: 34,
+      mass: 1,
+      useNativeDriver: true,
+    }).start();
+  }, [mode, tabAnim]);
+  const tabWidth = tabsWidth > 0 ? (tabsWidth - 8 - 4) / 2 : 0;
+  const indicatorX = tabAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, tabWidth + 4],
+  });
 
   // Re-seed the selection each time the sheet opens, matching the desktop
   // modal which resets to the full length on open. Keyed on the formats array
@@ -138,7 +240,12 @@ export const CutDownloadSheet: React.FC<CutDownloadSheetProps> = ({
     setMode('video');
     setAudioFormatId('audio_best');
     setSubmitting(false);
-    setVideoFormatId(pickDefaultVideoFormat(formatsKey ?? [], initialFormatId));
+    const listed = listVideoFormats(formatsKey);
+    setVideoPick(
+      initialFormatId && listed.some(f => f.formatId === initialFormatId)
+        ? initialFormatId
+        : 'best',
+    );
   }, [visible, cuttable, duration, initialFormatId, formatsKey]);
 
   // While this sheet is open the Download <-> Library tab swipe must not run:
@@ -167,16 +274,24 @@ export const CutDownloadSheet: React.FC<CutDownloadSheetProps> = ({
     };
   }, [visible]);
 
-  const videoFormats = useMemo(() => {
-    const list = (videoInfo?.formats ?? []).filter(
-      f => f.hasVideo !== false && f.vcodec && f.vcodec !== 'none' && f.height,
-    );
-    return [...list].sort((a, b) => (b.height ?? 0) - (a.height ?? 0));
-  }, [videoInfo]);
+  const videoFormats = useMemo(
+    () => listVideoFormats(videoInfo?.formats),
+    [videoInfo],
+  );
+
+  const resolvedVideoId = useMemo(
+    () =>
+      videoPick === 'best'
+        ? pickDefaultVideoFormat(videoInfo?.formats ?? [], initialFormatId)
+        : videoPick,
+    [videoPick, videoInfo, initialFormatId],
+  );
 
   const clipLength = Math.max(0, range.end - range.start);
   const savedPercent =
-    duration > 0 ? Math.round((1 - clipLength / duration) * 100) : 0;
+    duration > 0
+      ? Math.max(0, Math.round((1 - clipLength / duration) * 100))
+      : 0;
   const tooShort = clipLength < CUT_MIN_GAP;
 
   const applyPreset = useCallback(
@@ -189,7 +304,7 @@ export const CutDownloadSheet: React.FC<CutDownloadSheetProps> = ({
 
   const handleConfirm = useCallback(async () => {
     if (!videoInfo || submitting) return;
-    const formatId = mode === 'audio' ? audioFormatId : videoFormatId;
+    const formatId = mode === 'audio' ? audioFormatId : resolvedVideoId;
     if (!formatId) return;
 
     setSubmitting(true);
@@ -203,7 +318,7 @@ export const CutDownloadSheet: React.FC<CutDownloadSheetProps> = ({
     submitting,
     mode,
     audioFormatId,
-    videoFormatId,
+    resolvedVideoId,
     range.start,
     range.end,
     onConfirm,
@@ -215,31 +330,110 @@ export const CutDownloadSheet: React.FC<CutDownloadSheetProps> = ({
     ? 'Trimming uses ffmpeg, which is already included in this app. It cannot start on this device, so download the full file instead.'
     : null;
 
+  const cutDisabled =
+    !!blockedReason ||
+    ffmpegAvailable === null ||
+    tooShort ||
+    submitting ||
+    (mode === 'video' && !resolvedVideoId);
+
+  /* ───────── quality chips ───────── */
+  type Chip = {
+    key: string;
+    title: string;
+    badge?: { text: string; bg: string; fg: string };
+    hint: string;
+    active: boolean;
+    onPress: () => void;
+  };
+
+  const chips: Chip[] = useMemo(() => {
+    if (mode === 'audio') {
+      return AUDIO_QUALITIES.map(q => ({
+        key: q.id,
+        title: q.label,
+        hint: q.hint,
+        active: audioFormatId === q.id,
+        onPress: () => setAudioFormatId(q.id),
+      }));
+    }
+    const list: Chip[] = [];
+    if (videoFormats.length > 0) {
+      list.push({
+        key: 'best',
+        title: 'Best',
+        badge: { text: 'Auto', bg: 'rgba(255,255,255,0.10)', fg: 'rgba(255,255,255,0.7)' },
+        hint: 'Highest available',
+        active: videoPick === 'best',
+        onPress: () => setVideoPick('best'),
+      });
+    }
+    videoFormats.forEach(f => {
+      const h = f.height ?? 0;
+      const size = formatBytes(f.filesize);
+      list.push({
+        key: f.formatId,
+        title: `${h}p`,
+        badge:
+          h >= 2160
+            ? { text: '4K', bg: 'rgba(217,70,239,0.20)', fg: '#f0abfc' }
+            : h >= 1440
+            ? { text: '2K', bg: 'rgba(14,165,233,0.20)', fg: '#7dd3fc' }
+            : undefined,
+        hint: `${f.ext?.toUpperCase() || 'MP4'}${
+          size ? ` · ${size}` : f.formatNote ? ` · ${f.formatNote}` : ''
+        }`,
+        active: videoPick === f.formatId,
+        onPress: () => setVideoPick(f.formatId),
+      });
+    });
+    return list;
+  }, [mode, audioFormatId, videoFormats, videoPick]);
+
   return (
     <Modal
       visible={visible}
       animationType="slide"
       transparent
+      statusBarTranslucent
       onRequestClose={onClose}
     >
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
+          {/* Colour wash that follows the output type */}
+          <View style={styles.wash} pointerEvents="none">
+            <Svg width="100%" height="100%">
+              <Defs>
+                <RadialGradient
+                  id="cutWash"
+                  cx="70%"
+                  cy="0%"
+                  rx="60%"
+                  ry="100%"
+                  fx="70%"
+                  fy="0%"
+                >
+                  <Stop offset="0%" stopColor={accent.from} stopOpacity={0.16} />
+                  <Stop offset="100%" stopColor={accent.from} stopOpacity={0} />
+                </RadialGradient>
+              </Defs>
+              <Rect x="0" y="0" width="100%" height="100%" fill="url(#cutWash)" />
+            </Svg>
+          </View>
+
+          {/* Header */}
           <View style={styles.header}>
-            <View style={styles.headerBadge}>
-              <ScissorsIcon size={18} color={Colors.primary} />
-            </View>
-            <View style={styles.headerText}>
-              <Text style={styles.title}>Cut &amp; Download</Text>
-              <Text style={styles.subtitle} numberOfLines={1}>
-                {videoInfo?.title ?? 'Select a clip'}
-              </Text>
+            <View style={styles.headerLabel}>
+              <ScissorsIcon size={14} color="rgba(255,255,255,0.4)" />
+              <Text style={styles.headerLabelText}>CUT &amp; DOWNLOAD</Text>
             </View>
             <TouchableOpacity
               style={styles.closeBtn}
               onPress={onClose}
               accessibilityLabel="Close"
+              activeOpacity={0.7}
             >
-              <CloseIcon size={20} color={Colors.textMuted} />
+              <CloseIcon size={16} color="rgba(255,255,255,0.6)" />
             </TouchableOpacity>
           </View>
 
@@ -249,31 +443,121 @@ export const CutDownloadSheet: React.FC<CutDownloadSheetProps> = ({
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {videoInfo?.thumbnail ? (
-              <Image
-                source={{ uri: videoInfo.thumbnail }}
-                style={styles.preview}
-                resizeMode="cover"
-              />
-            ) : null}
+            {/* Preview */}
+            <View style={styles.previewWrap}>
+              {videoInfo?.thumbnail ? (
+                <Image
+                  source={{ uri: videoInfo.thumbnail }}
+                  style={styles.preview}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={[styles.preview, styles.previewEmpty]}>
+                  <VideoIcon size={40} color="rgba(255,255,255,0.2)" />
+                </View>
+              )}
+              <View style={styles.previewFade} pointerEvents="none">
+                <Svg width="100%" height="100%">
+                  <Defs>
+                    <LinearGradient id="cutFade" x1="0" y1="1" x2="0" y2="0">
+                      <Stop offset="0" stopColor="#000" stopOpacity={0.6} />
+                      <Stop offset="0.5" stopColor="#000" stopOpacity={0} />
+                    </LinearGradient>
+                  </Defs>
+                  <Rect x="0" y="0" width="100%" height="100%" fill="url(#cutFade)" />
+                </Svg>
+              </View>
+              {cuttable && (
+                <View style={styles.durBadge}>
+                  <TimerIcon size={12} color="rgba(255,255,255,0.85)" />
+                  <Text style={styles.durText}>{formatFull(duration)}</Text>
+                </View>
+              )}
+            </View>
+
+            <Text style={styles.title} numberOfLines={2}>
+              {videoInfo?.title ?? 'Select a clip'}
+            </Text>
+            {!!videoInfo?.uploader && (
+              <View style={styles.uploaderRow}>
+                <UserIcon size={14} color="rgba(255,255,255,0.4)" />
+                <Text style={styles.uploader} numberOfLines={1}>
+                  {videoInfo.uploader}
+                </Text>
+              </View>
+            )}
 
             {blockedReason ? (
               <View style={styles.blocked}>
-                <WarningIcon size={16} color={Colors.warning} />
+                <WarningIcon size={16} color="#fbbf24" />
                 <Text style={styles.blockedText}>{blockedReason}</Text>
               </View>
             ) : null}
 
             {cuttable && (
               <>
-                <View style={styles.summaryRow}>
-                  <SummaryStat
-                    label="Clip"
-                    value={formatFull(clipLength)}
-                    highlight
-                  />
-                  <SummaryStat label="Saved" value={`${savedPercent}%`} />
-                  <SummaryStat label="Total" value={formatFull(duration)} />
+                {/* Video / Audio switch with a sliding indicator */}
+                <View
+                  style={styles.tabs}
+                  onLayout={e => setTabsWidth(e.nativeEvent.layout.width)}
+                >
+                  {tabWidth > 0 && (
+                    <Animated.View
+                      style={[
+                        styles.tabIndicator,
+                        { width: tabWidth, transform: [{ translateX: indicatorX }] },
+                      ]}
+                    />
+                  )}
+                  {(['video', 'audio'] as const).map(id => {
+                    const active = mode === id;
+                    const Icon = id === 'video' ? VideoIcon : MusicIcon;
+                    return (
+                      <TouchableOpacity
+                        key={id}
+                        style={styles.tab}
+                        onPress={() => setMode(id)}
+                        activeOpacity={0.8}
+                        accessibilityRole="tab"
+                        accessibilityState={{ selected: active }}
+                      >
+                        <Icon
+                          size={14}
+                          color={active ? CUT_TABS[id].from : 'rgba(255,255,255,0.45)'}
+                        />
+                        <Text
+                          style={[styles.tabText, active && styles.tabTextActive]}
+                        >
+                          {CUT_TABS[id].label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                <Text style={styles.hint}>
+                  Drag the handles, or tap the track to trim
+                </Text>
+
+                {/* Timeline */}
+                <View style={styles.sectionHead}>
+                  <View style={styles.sectionLabelRow}>
+                    <LayersIcon size={14} color="rgba(255,255,255,0.35)" />
+                    <Text style={styles.sectionLabel}>TIMELINE</Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.lengthChip,
+                      {
+                        borderColor: `${accent.from}40`,
+                        backgroundColor: `${accent.from}14`,
+                      },
+                    ]}
+                  >
+                    <ScissorsIcon size={12} color={accent.from} />
+                    <Text style={[styles.lengthChipText, { color: accent.from }]}>
+                      {formatFull(clipLength)}
+                    </Text>
+                  </View>
                 </View>
 
                 <CutTimeline
@@ -281,109 +565,173 @@ export const CutDownloadSheet: React.FC<CutDownloadSheetProps> = ({
                   start={range.start}
                   end={range.end}
                   onChange={(start, end) => setRange({ start, end })}
+                  accent={accent.from}
                 />
 
+                {/* Quick presets */}
                 <View style={styles.presets}>
                   {PRESETS.map(preset => (
                     <TouchableOpacity
                       key={preset.label}
                       style={styles.preset}
                       onPress={() => applyPreset(preset)}
+                      activeOpacity={0.7}
                     >
                       <Text style={styles.presetText}>{preset.label}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
 
-                <Text style={styles.sectionLabel}>Save as</Text>
-                <View style={styles.segment}>
-                  <SegmentTab
-                    label="Video"
-                    active={mode === 'video'}
-                    onPress={() => setMode('video')}
-                  />
-                  <SegmentTab
-                    label="Audio"
-                    active={mode === 'audio'}
-                    onPress={() => setMode('audio')}
-                  />
+                {/* Clip summary */}
+                <View style={styles.summary}>
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryKey}>CLIP</Text>
+                    <View style={styles.summaryRight}>
+                      <Text style={styles.summaryBig}>{formatFull(clipLength)}</Text>
+                      <Text style={styles.summarySmall}>
+                        {formatWords(clipLength)}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={[styles.summaryRow, styles.summaryDivider]}>
+                    <Text style={styles.summaryKey}>RANGE</Text>
+                    <Text style={styles.summaryValue}>
+                      {formatFull(range.start)} → {formatFull(range.end)}
+                    </Text>
+                  </View>
+                  <View style={[styles.summaryRow, styles.summaryDivider]}>
+                    <Text style={styles.summaryKey}>SAVED</Text>
+                    <Text style={styles.summaryValue}>{savedPercent}%</Text>
+                  </View>
                 </View>
 
-                {mode === 'video' ? (
-                  <View style={styles.options}>
-                    <OptionRow
-                      label="Best available"
-                      hint={videoFormats[0]?.resolution ?? 'Recommended'}
-                      selected={videoFormatId === videoFormats[0]?.formatId}
-                      onPress={() =>
-                        setVideoFormatId(videoFormats[0]?.formatId ?? null)
-                      }
-                    />
-                    {videoFormats.slice(0, 8).map(f => (
-                      <OptionRow
-                        key={f.formatId}
-                        label={f.resolution ?? f.formatNote ?? f.formatId}
-                        hint={f.ext ? f.ext.toUpperCase() : undefined}
-                        selected={videoFormatId === f.formatId}
-                        onPress={() => setVideoFormatId(f.formatId)}
-                      />
+                {/* Quality */}
+                <Text style={[styles.sectionLabel, styles.qualityLabel]}>
+                  {mode === 'video' ? 'VIDEO QUALITY' : 'AUDIO QUALITY'}
+                </Text>
+                {chips.length > 0 ? (
+                  <View style={styles.chipGrid}>
+                    {chunk(chips, 3).map((row, ri) => (
+                      <View key={ri} style={styles.chipRow}>
+                        {row.map(c => (
+                          <TouchableOpacity
+                            key={c.key}
+                            style={[styles.chip, c.active && styles.chipActive]}
+                            onPress={c.onPress}
+                            activeOpacity={0.8}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: c.active }}
+                          >
+                            <View style={styles.chipTitleRow}>
+                              <Text
+                                style={[
+                                  styles.chipTitle,
+                                  c.active && styles.chipTitleActive,
+                                ]}
+                              >
+                                {c.title}
+                              </Text>
+                              {c.badge && (
+                                <View
+                                  style={[
+                                    styles.chipBadge,
+                                    { backgroundColor: c.badge.bg },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[styles.chipBadgeText, { color: c.badge.fg }]}
+                                  >
+                                    {c.badge.text}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                            <Text style={styles.chipHint} numberOfLines={1}>
+                              {c.hint}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                        {/* Keep a short last row aligned to the same grid. */}
+                        {Array.from({ length: 3 - row.length }, (_, i) => (
+                          <View key={`pad${i}`} style={styles.chipPad} />
+                        ))}
+                      </View>
                     ))}
-                    {videoFormats.length === 0 && (
-                      <Text style={styles.note}>
-                        No quality list was returned for this media; the default
-                        quality is used.
-                      </Text>
-                    )}
                   </View>
                 ) : (
-                  <View style={styles.options}>
-                    {AUDIO_QUALITIES.map(q => (
-                      <OptionRow
-                        key={q.id}
-                        label={q.label}
-                        hint={q.hint}
-                        selected={audioFormatId === q.id}
-                        onPress={() => setAudioFormatId(q.id)}
-                      />
-                    ))}
-                  </View>
+                  <Text style={styles.note}>
+                    No quality list was returned for this media; the default
+                    quality is used.
+                  </Text>
                 )}
 
                 <View style={styles.infoRow}>
-                  <InfoIcon size={13} color={Colors.textMuted} />
+                  <SparkleIcon size={14} color="rgba(255,255,255,0.35)" />
                   <Text style={styles.infoText}>
-                    The whole video is fetched first, then trimmed. Start and
-                    end land on the nearest video keyframe.
+                    Your clip will be saved as a separate{' '}
+                    {mode === 'video' ? 'video' : 'audio'} file. The full media
+                    is fetched first, then trimmed to the nearest keyframe.
                   </Text>
                 </View>
               </>
             )}
           </ScrollView>
 
-          <View style={styles.footer}>
+          {/* Action (stays visible while the sheet scrolls) */}
+          <View
+            style={[
+              styles.footer,
+              { paddingBottom: (Platform.OS === 'ios' ? 28 : 20) + insets.bottom },
+            ]}
+          >
+            <View style={styles.footerFade} pointerEvents="none">
+              <Svg width="100%" height="100%">
+                <Defs>
+                  <LinearGradient id="footFade" x1="0" y1="0" x2="0" y2="1">
+                    <Stop offset="0" stopColor={SURFACE} stopOpacity={0} />
+                    <Stop offset="1" stopColor={SURFACE} stopOpacity={1} />
+                  </LinearGradient>
+                </Defs>
+                <Rect x="0" y="0" width="100%" height="100%" fill="url(#footFade)" />
+              </Svg>
+            </View>
+            {cuttable && tooShort && (
+              <Text style={styles.warn}>Select a longer range to cut.</Text>
+            )}
             <TouchableOpacity
               style={[
-                styles.primaryBtn,
-                (blockedReason || tooShort) && styles.primaryBtnDisabled,
+                styles.cutBtn,
+                { shadowColor: accent.from },
+                cutDisabled && styles.cutBtnDisabled,
               ]}
               onPress={handleConfirm}
-              disabled={
-                !!blockedReason ||
-                ffmpegAvailable === null ||
-                tooShort ||
-                submitting ||
-                (mode === 'video' && !videoFormatId)
-              }
-              activeOpacity={0.8}
+              disabled={cutDisabled}
+              activeOpacity={0.85}
+              accessibilityLabel="Cut and download"
             >
+              <View style={StyleSheet.absoluteFill}>
+                <Svg width="100%" height="100%">
+                  <Defs>
+                    <LinearGradient id="cutBtnGrad" x1="0" y1="0" x2="1" y2="0">
+                      <Stop offset="0" stopColor={accent.from} />
+                      <Stop offset="1" stopColor={accent.to} />
+                    </LinearGradient>
+                  </Defs>
+                  <Rect
+                    x="0"
+                    y="0"
+                    width="100%"
+                    height="100%"
+                    fill="url(#cutBtnGrad)"
+                  />
+                </Svg>
+              </View>
               {submitting ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
                 <>
                   <ScissorsIcon size={16} color="#fff" />
-                  <Text style={styles.primaryText}>
-                    {`Cut ${formatCutTime(clipLength)} & download`}
-                  </Text>
+                  <Text style={styles.cutBtnText}>Cut &amp; Download</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -394,262 +742,309 @@ export const CutDownloadSheet: React.FC<CutDownloadSheetProps> = ({
   );
 };
 
-const SummaryStat: React.FC<{
-  label: string;
-  value: string;
-  highlight?: boolean;
-}> = ({ label, value, highlight }) => (
-  <View style={styles.stat}>
-    <Text style={[styles.statValue, highlight && styles.statValueHighlight]}>
-      {value}
-    </Text>
-    <Text style={styles.statLabel}>{label}</Text>
-  </View>
-);
-
-const SegmentTab: React.FC<{
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}> = ({ label, active, onPress }) => (
-  <TouchableOpacity
-    style={[styles.segmentTab, active && styles.segmentTabActive]}
-    onPress={onPress}
-    accessibilityRole="button"
-    accessibilityState={{ selected: active }}
-  >
-    <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-      {label}
-    </Text>
-  </TouchableOpacity>
-);
-
-const OptionRow: React.FC<{
-  label: string;
-  hint?: string;
-  selected: boolean;
-  onPress: () => void;
-}> = ({ label, hint, selected, onPress }) => (
-  <TouchableOpacity
-    style={styles.option}
-    onPress={onPress}
-    accessibilityRole="radio"
-    accessibilityState={{ checked: selected }}
-  >
-    <View style={styles.optionText}>
-      <Text
-        style={[styles.optionLabel, selected && styles.optionLabelSelected]}
-        numberOfLines={1}
-      >
-        {label}
-      </Text>
-      {hint ? <Text style={styles.optionHint}>{hint}</Text> : null}
-    </View>
-    {selected ? <CheckIcon size={16} color={Colors.primary} /> : null}
-  </TouchableOpacity>
-);
-
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(0,0,0,0.8)',
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: Colors.surfaceElevated,
-    borderTopLeftRadius: BorderRadius.xxl,
-    borderTopRightRadius: BorderRadius.xxl,
-    maxHeight: '92%',
-    paddingBottom: Platform.OS === 'ios' ? Spacing.xl : Spacing.lg,
+    backgroundColor: SURFACE,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: 'rgba(255,255,255,0.10)',
+    maxHeight: '94%',
+    overflow: 'hidden',
+  },
+  wash: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 260,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.lg,
-    paddingBottom: Spacing.md,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
   },
-  headerBadge: {
-    width: 38,
-    height: 38,
+  headerLabel: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerLabelText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.8,
+    color: 'rgba(255,255,255,0.4)',
+  },
+  closeBtn: {
+    width: 36,
+    height: 36,
     borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: `${Colors.primary}1F`,
-    marginRight: Spacing.md,
   },
-  headerText: { flex: 1 },
+  body: { paddingHorizontal: 20 },
+  bodyContent: { paddingBottom: 24 },
+
+  previewWrap: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
+  preview: { width: '100%', aspectRatio: 16 / 9 },
+  previewEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  previewFade: { ...StyleSheet.absoluteFillObject },
+  durBadge: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    height: 24,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+  },
+  durText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.85)',
+    fontVariant: ['tabular-nums'],
+  },
   title: {
-    fontSize: Typography.sizes.lg,
-    fontWeight: Typography.weights.bold,
-    color: Colors.textPrimary,
+    marginTop: 16,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: '#fff',
   },
-  subtitle: {
-    fontSize: Typography.sizes.xs,
-    color: Colors.textMuted,
-    marginTop: 2,
+  uploaderRow: {
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
-  closeBtn: { padding: 6 },
-  body: { paddingHorizontal: Spacing.lg },
-  bodyContent: { paddingBottom: Spacing.lg },
-  preview: {
-    width: '100%',
-    height: 150,
-    borderRadius: BorderRadius.lg,
-    backgroundColor: Colors.surface,
-    marginBottom: Spacing.md,
-  },
+  uploader: { flexShrink: 1, fontSize: 12, color: 'rgba(255,255,255,0.4)' },
+
   blocked: {
     flexDirection: 'row',
-    gap: Spacing.sm,
+    gap: 8,
     alignItems: 'flex-start',
-    padding: Spacing.md,
-    borderRadius: BorderRadius.md,
-    backgroundColor: `${Colors.warning}14`,
+    padding: 12,
+    marginTop: 16,
+    borderRadius: 12,
+    backgroundColor: 'rgba(251,191,36,0.08)',
     borderWidth: 1,
-    borderColor: `${Colors.warning}55`,
-    marginBottom: Spacing.md,
+    borderColor: 'rgba(251,191,36,0.30)',
   },
   blockedText: {
     flex: 1,
-    fontSize: Typography.sizes.xs,
-    color: Colors.textPrimary,
+    fontSize: 12,
     lineHeight: 18,
+    color: 'rgba(255,255,255,0.85)',
   },
-  summaryRow: {
+
+  tabs: {
+    marginTop: 24,
     flexDirection: 'row',
-    gap: Spacing.sm,
-    marginBottom: Spacing.lg,
+    gap: 4,
+    padding: 4,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
   },
-  stat: {
+  tabIndicator: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.09)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  tab: {
     flex: 1,
-    alignItems: 'center',
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  statValue: {
-    fontSize: Typography.sizes.lg,
-    fontWeight: Typography.weights.bold,
-    color: Colors.textPrimary,
-  },
-  statValueHighlight: { color: Colors.primary },
-  statLabel: {
-    fontSize: Typography.sizes.xxs,
-    color: Colors.textMuted,
-    marginTop: 2,
-  },
-  presets: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.xs,
-    marginTop: Spacing.md,
-  },
-  preset: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 7,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  presetText: {
-    fontSize: Typography.sizes.xs,
-    color: Colors.textPrimary,
-    fontWeight: Typography.weights.medium,
-  },
-  sectionLabel: {
-    fontSize: Typography.sizes.xs,
-    color: Colors.textMuted,
-    fontWeight: Typography.weights.semibold,
-    marginTop: Spacing.lg,
-    marginBottom: Spacing.sm,
-  },
-  segment: {
-    flexDirection: 'row',
-    padding: 3,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  segmentTab: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 9,
-    borderRadius: BorderRadius.sm,
-  },
-  segmentTabActive: { backgroundColor: `${Colors.primary}26` },
-  segmentText: {
-    fontSize: Typography.sizes.xs,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.textMuted,
-  },
-  segmentTextActive: { color: Colors.primary },
-  options: { marginTop: Spacing.sm, gap: Spacing.xs },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  optionText: { flex: 1 },
-  optionLabel: { fontSize: Typography.sizes.sm, color: Colors.textPrimary },
-  optionLabelSelected: {
-    color: Colors.primary,
-    fontWeight: Typography.weights.semibold,
-  },
-  optionHint: {
-    fontSize: Typography.sizes.xxs,
-    color: Colors.textMuted,
-    marginTop: 2,
-  },
-  note: {
-    fontSize: Typography.sizes.xs,
-    color: Colors.textMuted,
-    lineHeight: 17,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    alignItems: 'flex-start',
-    marginTop: Spacing.lg,
-    paddingTop: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-  },
-  infoText: {
-    flex: 1,
-    fontSize: Typography.sizes.xxs,
-    color: Colors.textMuted,
-    lineHeight: 16,
-  },
-  footer: {
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-  },
-  primaryBtn: {
+    height: 48,
+    borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.lg,
-    backgroundColor: Colors.primary,
+    gap: 6,
   },
-  primaryBtnDisabled: { opacity: 0.45 },
-  primaryText: {
-    fontSize: Typography.sizes.sm,
-    fontWeight: Typography.weights.bold,
+  tabText: { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.45)' },
+  tabTextActive: { color: '#fff' },
+  hint: { marginTop: 12, fontSize: 12, color: 'rgba(255,255,255,0.4)' },
+
+  sectionHead: {
+    marginTop: 20,
+    marginBottom: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sectionLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  sectionLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.8,
+    color: 'rgba(255,255,255,0.35)',
+  },
+  lengthChip: {
+    height: 24,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  lengthChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
+
+  presets: { marginTop: 16, flexDirection: 'row', gap: 8 },
+  preset: {
+    flex: 1,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  presetText: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.6)' },
+
+  summary: {
+    marginTop: 20,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  summaryDivider: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+  },
+  summaryKey: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.8,
+    color: 'rgba(255,255,255,0.35)',
+  },
+  summaryRight: { alignItems: 'flex-end' },
+  summaryBig: {
+    fontSize: 14,
+    fontWeight: '600',
     color: '#fff',
+    fontVariant: ['tabular-nums'],
   },
+  summarySmall: { fontSize: 10, color: 'rgba(255,255,255,0.4)' },
+  summaryValue: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.8)',
+    fontVariant: ['tabular-nums'],
+  },
+
+  qualityLabel: { marginTop: 24, marginBottom: 8 },
+  chipGrid: { gap: 8 },
+  chipRow: { flexDirection: 'row', gap: 8 },
+  chip: {
+    flex: 1,
+    minHeight: 44,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    justifyContent: 'center',
+  },
+  chipActive: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.30)',
+  },
+  chipPad: { flex: 1 },
+  chipTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  chipTitle: { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.6)' },
+  chipTitleActive: { color: '#fff' },
+  chipBadge: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 },
+  chipBadgeText: { fontSize: 9, fontWeight: '700' },
+  chipHint: { marginTop: 1, fontSize: 9, fontWeight: '500', color: 'rgba(255,255,255,0.4)' },
+  note: { fontSize: 12, lineHeight: 17, color: 'rgba(255,255,255,0.4)' },
+
+  infoRow: {
+    marginTop: 20,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  infoText: {
+    flex: 1,
+    fontSize: 11,
+    lineHeight: 17,
+    color: 'rgba(255,255,255,0.35)',
+  },
+
+  footer: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 28 : 20,
+    backgroundColor: SURFACE,
+  },
+  footerFade: {
+    position: 'absolute',
+    top: -24,
+    left: 0,
+    right: 0,
+    height: 24,
+  },
+  warn: {
+    marginBottom: 10,
+    textAlign: 'center',
+    fontSize: 11,
+    color: 'rgba(252,211,77,0.8)',
+  },
+  cutBtn: {
+    height: 48,
+    borderRadius: 16,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    // Coloured glow under the button, like desktop's box-shadow.
+    elevation: 10,
+    shadowOpacity: 0.45,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+  },
+  cutBtnDisabled: { opacity: 0.4 },
+  cutBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
 });

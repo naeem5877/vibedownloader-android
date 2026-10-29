@@ -1,233 +1,248 @@
 /**
- * Premium SkeletonCard - Animated loading placeholder
+ * SkeletonCard - the desktop loading state: a 16:9 box that says what the app
+ * is doing ("Fetching your link" + a step timeline + elapsed time), and pulsing
+ * placeholder lines for the title and meta underneath.
  */
-import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Animated, Easing, Dimensions } from 'react-native';
-import { Colors, Spacing, BorderRadius } from '../theme';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Animated,
+  Easing,
+  ActivityIndicator,
+} from 'react-native';
+import { Colors } from '../theme';
+import { ShinyText } from './ShinyText';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+type StepState = 'done' | 'active' | 'pending';
 
-export const SkeletonCard = () => {
-    const shimmerAnim = useRef(new Animated.Value(0)).current;
-    const pulseAnim = useRef(new Animated.Value(0.3)).current;
+// Time since mount, ticking twice a second.
+function useElapsed(): number {
+  const [ms, setMs] = useState(0);
+  useEffect(() => {
+    const start = Date.now();
+    const id = setInterval(() => setMs(Date.now() - start), 500);
+    return () => clearInterval(id);
+  }, []);
+  return ms;
+}
 
-    useEffect(() => {
-        // Shimmer animation
-        const shimmerLoop = Animated.loop(
-            Animated.timing(shimmerAnim, {
-                toValue: 1,
-                duration: 1500,
-                useNativeDriver: true,
-                easing: Easing.linear,
-            })
-        );
+const formatElapsed = (ms: number) => {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
 
-        // Pulse animation
-        const pulseLoop = Animated.loop(
-            Animated.sequence([
-                Animated.timing(pulseAnim, {
-                    toValue: 0.6,
-                    duration: 800,
-                    useNativeDriver: true,
-                    easing: Easing.inOut(Easing.ease),
-                }),
-                Animated.timing(pulseAnim, {
-                    toValue: 0.3,
-                    duration: 800,
-                    useNativeDriver: true,
-                    easing: Easing.inOut(Easing.ease),
-                }),
-            ])
-        );
-
-        shimmerLoop.start();
-        pulseLoop.start();
-        return () => {
-            shimmerLoop.stop();
-            pulseLoop.stop();
-        };
-    }, []);
-
-    const translateX = shimmerAnim.interpolate({
-        inputRange: [0, 1],
-        outputRange: [-SCREEN_WIDTH, SCREEN_WIDTH],
-    });
-
+const StepIcon: React.FC<{ state: StepState; color: string }> = ({
+  state,
+  color,
+}) => {
+  if (state === 'done') {
     return (
-        <View style={styles.container}>
-            {/* Thumbnail Skeleton */}
-            <View style={styles.thumbnailContainer}>
-                <Animated.View style={[styles.thumbnail, { opacity: pulseAnim }]} />
-
-                {/* Shimmer overlay */}
-                <Animated.View
-                    style={[
-                        styles.shimmer,
-                        { transform: [{ translateX }] }
-                    ]}
-                />
-
-                {/* Duration badge skeleton */}
-                <Animated.View style={[styles.durationBadge, { opacity: pulseAnim }]} />
-
-                {/* Quality badge skeleton */}
-                <Animated.View style={[styles.qualityBadge, { opacity: pulseAnim }]} />
-            </View>
-
-            {/* Content Skeleton */}
-            <View style={styles.content}>
-                {/* Title skeleton */}
-                <Animated.View style={[styles.titleLine, { opacity: pulseAnim }]} />
-                <Animated.View style={[styles.titleLineShort, { opacity: pulseAnim }]} />
-
-                {/* Meta skeleton */}
-                <View style={styles.metaRow}>
-                    <Animated.View style={[styles.metaDot, { opacity: pulseAnim }]} />
-                    <Animated.View style={[styles.metaText, { opacity: pulseAnim }]} />
-                    <Animated.View style={[styles.metaDivider, { opacity: pulseAnim }]} />
-                    <Animated.View style={[styles.metaViews, { opacity: pulseAnim }]} />
-                </View>
-
-                {/* Stats row skeleton */}
-                <View style={styles.statsRow}>
-                    <View style={styles.statItem}>
-                        <Animated.View style={[styles.statValue, { opacity: pulseAnim }]} />
-                        <Animated.View style={[styles.statLabel, { opacity: pulseAnim }]} />
-                    </View>
-                    <View style={styles.statItem}>
-                        <Animated.View style={[styles.statValue, { opacity: pulseAnim }]} />
-                        <Animated.View style={[styles.statLabel, { opacity: pulseAnim }]} />
-                    </View>
-                    <View style={styles.statItem}>
-                        <Animated.View style={[styles.statValue, { opacity: pulseAnim }]} />
-                        <Animated.View style={[styles.statLabel, { opacity: pulseAnim }]} />
-                    </View>
-                </View>
-            </View>
-        </View>
+      <View style={styles.iconDone}>
+        <Text style={styles.check}>✓</Text>
+      </View>
     );
+  }
+  if (state === 'active') {
+    return (
+      <View style={styles.iconSlot}>
+        <ActivityIndicator size="small" color={color} />
+      </View>
+    );
+  }
+  return <View style={styles.iconPending} />;
+};
+
+const StepList: React.FC<{
+  steps: { title: string; state: StepState }[];
+  color: string;
+}> = ({ steps, color }) => (
+  <View>
+    {steps.map((s, i) => (
+      <View key={s.title} style={styles.stepRow}>
+        {i < steps.length - 1 && (
+          <View
+            style={[
+              styles.connector,
+              {
+                backgroundColor:
+                  s.state === 'done'
+                    ? 'rgba(255,255,255,0.4)'
+                    : 'rgba(255,255,255,0.1)',
+              },
+            ]}
+          />
+        )}
+        <StepIcon state={s.state} color={color} />
+        <Text
+          style={[
+            styles.stepTitle,
+            { color: s.state === 'pending' ? 'rgba(255,255,255,0.3)' : '#fff' },
+          ]}
+        >
+          {s.title}
+        </Text>
+      </View>
+    ))}
+  </View>
+);
+
+interface SkeletonCardProps {
+  platform?: string;
+  color?: string;
+}
+
+export const SkeletonCard: React.FC<SkeletonCardProps> = ({
+  platform = 'the site',
+  color = Colors.primary,
+}) => {
+  const elapsed = useElapsed();
+  const pulse = useRef(new Animated.Value(0.4)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0.4,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+
+  // The lookup reports no stages of its own, so the timeline advances with time.
+  const current = elapsed < 1500 ? 0 : elapsed < 4000 ? 1 : 2;
+  const titles = [
+    `Connecting to ${platform}`,
+    'Reading media details',
+    'Checking available qualities',
+  ];
+  const steps = titles.map((title, i) => ({
+    title,
+    state: (i < current ? 'done' : i === current ? 'active' : 'pending') as StepState,
+  }));
+
+  return (
+    <View>
+      <View style={styles.box}>
+        <View style={styles.inner}>
+          <View style={styles.headRow}>
+            <ShinyText
+              text="FETCHING YOUR LINK"
+              speed={3}
+              fontSize={13}
+              fontWeight="700"
+              letterSpacing={1.6}
+            />
+            <Text style={styles.elapsed}>{formatElapsed(elapsed)}</Text>
+          </View>
+          <StepList steps={steps} color={color} />
+          {elapsed > 9000 && (
+            <Text style={styles.slow}>
+              Taking longer than usual. Some links need extra steps to resolve,
+              so hang tight.
+            </Text>
+          )}
+        </View>
+      </View>
+
+      <View style={styles.lines}>
+        <Animated.View style={[styles.lineTitle, { opacity: pulse }]} />
+        <View style={styles.lineRow}>
+          <Animated.View style={[styles.lineMeta, { width: 96, opacity: pulse }]} />
+          <Animated.View style={[styles.lineMeta, { width: 64, opacity: pulse }]} />
+        </View>
+      </View>
+    </View>
+  );
 };
 
 const styles = StyleSheet.create({
-    container: {
-        backgroundColor: Colors.surfaceMedium,
-        borderRadius: BorderRadius.xl,
-        overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: Colors.innerBorder,
-    },
-    thumbnailContainer: {
-        position: 'relative',
-        overflow: 'hidden',
-    },
-    thumbnail: {
-        width: '100%',
-        height: 200,
-        backgroundColor: Colors.surfaceLow,
-    },
-    shimmer: {
-        position: 'absolute',
-        top: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-        width: 150,
-        transform: [{ rotate: '25deg' }, { scale: 2 }], // Industrial slanted shimmer
-    },
-    durationBadge: {
-        position: 'absolute',
-        bottom: Spacing.sm,
-        right: Spacing.sm,
-        width: 45,
-        height: 20,
-        backgroundColor: Colors.surfaceHigh,
-        borderRadius: BorderRadius.sm,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.05)',
-    },
-    qualityBadge: {
-        position: 'absolute',
-        top: Spacing.sm,
-        left: Spacing.sm,
-        width: 34,
-        height: 20,
-        backgroundColor: Colors.surfaceHigh,
-        borderRadius: BorderRadius.sm,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.05)',
-    },
-    content: {
-        padding: Spacing.md,
-    },
-    titleLine: {
-        height: 18,
-        width: '90%',
-        backgroundColor: Colors.surfaceHigh,
-        borderRadius: BorderRadius.sm,
-        marginBottom: Spacing.xs,
-    },
-    titleLineShort: {
-        height: 18,
-        width: '60%',
-        backgroundColor: Colors.surfaceHigh,
-        borderRadius: BorderRadius.sm,
-        marginBottom: Spacing.md,
-    },
-    metaRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: Spacing.md,
-    },
-    metaDot: {
-        width: 10,
-        height: 14,
-        borderRadius: 2,
-        backgroundColor: Colors.surfaceHigh,
-        marginRight: Spacing.sm,
-    },
-    metaText: {
-        height: 12,
-        width: 100,
-        backgroundColor: Colors.surfaceHigh,
-        borderRadius: BorderRadius.xs,
-    },
-    metaDivider: {
-        width: 4,
-        height: 4,
-        borderRadius: 2,
-        backgroundColor: Colors.surfaceHigh,
-        marginHorizontal: Spacing.sm,
-        opacity: 0.5,
-    },
-    metaViews: {
-        height: 12,
-        width: 70,
-        backgroundColor: Colors.surfaceHigh,
-        borderRadius: BorderRadius.xs,
-    },
-    statsRow: {
-        flexDirection: 'row',
-        borderTopWidth: 1,
-        borderTopColor: Colors.innerBorder,
-        paddingTop: Spacing.md,
-        gap: Spacing.xl,
-    },
-    statItem: {
-        alignItems: 'flex-start',
-    },
-    statValue: {
-        height: 20,
-        width: 35,
-        backgroundColor: Colors.surfaceHigh,
-        borderRadius: BorderRadius.xs,
-        marginBottom: 6,
-    },
-    statLabel: {
-        height: 8,
-        width: 40,
-        backgroundColor: Colors.surfaceHigh,
-        borderRadius: BorderRadius.xs,
-        opacity: 0.4,
-    },
+  box: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+    marginBottom: 20,
+  },
+  inner: { width: '100%', maxWidth: 320 },
+  headRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 18,
+  },
+  elapsed: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.4)',
+    fontVariant: ['tabular-nums'],
+  },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingBottom: 14,
+  },
+  connector: {
+    position: 'absolute',
+    left: 8.5,
+    top: 22,
+    bottom: 0,
+    width: 1,
+  },
+  iconSlot: { width: 18, height: 18, alignItems: 'center', justifyContent: 'center' },
+  iconDone: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  check: { fontSize: 11, fontWeight: '900', color: '#000', marginTop: -1 },
+  iconPending: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  stepTitle: { fontSize: 13, fontWeight: '600', lineHeight: 18 },
+  slow: {
+    marginTop: 6,
+    fontSize: 11,
+    lineHeight: 16,
+    color: 'rgba(255,255,255,0.45)',
+  },
+  lines: { paddingHorizontal: 8, gap: 12, marginBottom: 24 },
+  lineTitle: {
+    height: 24,
+    width: '75%',
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  lineRow: { flexDirection: 'row', gap: 16 },
+  lineMeta: {
+    height: 12,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
 });
 
 export default SkeletonCard;

@@ -71,14 +71,25 @@ class StoryModule(
 
                 val cookiePath = cookieModule.getCookieFilePath(platform.lowercase())
                 val hasCookies = File(cookiePath).exists() && File(cookiePath).length() > 100
-                val cookies = if (hasCookies) {
-                    buildCookieHeaderFromFile(cookiePath, platform.lowercase())
-                } else {
-                    null
+                // SnapSave cannot read stories by handle (it answers "Unable to
+                // connect to Instagram server"), but Instagram's own API can when
+                // the user is signed in, so that goes first.
+                if (platform.equals("instagram", ignoreCase = true) && hasCookies) {
+                    val direct = try {
+                        fetchInstagramStoriesViaApi(username.trim().trimEnd('/').substringAfterLast('/'), cookiePath)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Instagram API fetch failed: ${e.message}")
+                        emptyList()
+                    }
+                    if (direct.isNotEmpty()) {
+                        withContext(Dispatchers.Main) { promise.resolve(toNativeArray(direct, platform, username)) }
+                        return@launch
+                    }
                 }
 
                 val target = buildStoryTargetUrl(platform, username)
-                val result = SnapSaveClient.fetch(target, cookies)
+                // Never forward the user's session cookies to a third-party server.
+                val result = SnapSaveClient.fetch(target, null)
 
                 val stories = when (result) {
                     is SnapSaveResult.Ok -> result.items.mapIndexed { index, media ->
@@ -126,8 +137,21 @@ class StoryModule(
                                 "app so your cookies are saved, then paste the story link again."
                         }
                     } else {
-                        (result as? SnapSaveResult.Failed)?.message
-                            ?: "No stories are available for $username right now."
+                        val raw = (result as? SnapSaveResult.Failed)
+                        val igBlocked = raw != null &&
+                            (raw.message.contains("Unable to connect to Instagram", ignoreCase = true) ||
+                                raw.code == "error_api_get_instagram")
+                        when {
+                            igBlocked && !hasCookies ->
+                                "Instagram stories need you to be signed in. Log in to Instagram inside " +
+                                    "the app, then try again."
+                            igBlocked ->
+                                "Instagram did not return any stories for $username. They may have none " +
+                                    "right now, the account may be private, or your Instagram login may " +
+                                    "have expired - try logging in again."
+                            else -> raw?.message
+                                ?: "No stories are available for $username right now."
+                        }
                     }
                     withContext(Dispatchers.Main) {
                         promise.reject("NO_STORIES", detail)
@@ -559,8 +583,11 @@ class StoryModule(
         }
     }
 
-    /** SnapSave CDN urls are the only ones we can stream without yt-dlp. */
-    private fun isDirectMediaUrl(url: String) = url.contains("d.rapidcdn.app/")
+    /** SnapSave and Instagram CDN urls can be streamed directly, without yt-dlp. */
+    private fun isDirectMediaUrl(url: String) =
+        url.contains("d.rapidcdn.app/") ||
+            url.contains("cdninstagram.com/") ||
+            url.contains("fbcdn.net/")
 
     private fun directMedia(url: String) = StoryMedia(
         id = url,

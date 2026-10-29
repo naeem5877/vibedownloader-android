@@ -159,10 +159,10 @@ export default function SubtitleViewerModal({ file, onClose }: Props) {
             visible={!!file}
             animationType="slide"
             onRequestClose={onClose}
-            statusBarTranslucent={false}
+            statusBarTranslucent
         >
             <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-                <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+                <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
                 <View style={[styles.header, { borderBottomColor: `${accent}33` }]}>
                     <View style={[styles.headerIcon, { backgroundColor: `${accent}1F` }]}>

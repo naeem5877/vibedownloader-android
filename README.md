@@ -1,16 +1,9 @@
 <div align="center">
-  <img src="transparent_logo.png" alt="VibeDownloader Android logo" width="110" />
+  <img src="Screenshots/final/banner.png" alt="VibeDownloader for Android - a fast, modern media downloader right in your pocket" width="100%" />
 
   # VibeDownloader for Android
 
   ### Free, fast & private video and music downloader for your phone
-
-  <a href="https://github.com/naeem5877/vibedownloader-android/releases/latest">
-    <img src="Screenshots/screenshot1.jpeg" alt="VibeDownloader Android Home" width="23%" />
-    <img src="Screenshots/screenshot3.jpeg" alt="VibeDownloader Android Video Result" width="23%" />
-    <img src="Screenshots/screenshot6.jpeg" alt="VibeDownloader Android Spotify Track" width="23%" />
-    <img src="Screenshots/screenshot7.jpeg" alt="VibeDownloader Android Media Library" width="23%" />
-  </a>
 </div>
 
 <br />
@@ -110,20 +103,19 @@ Select your quality, audio language or format, optionally trim with clip handles
 
 <table>
 <tr>
-<td width="50%" align="center"><img src="Screenshots/screenshot1.jpeg" alt="Home Screen - Paste Link & Platform Grid" width="75%" /><br /><sub><b>Home screen — Quick platform shortcuts &amp; instant link fetch</b></sub></td>
-<td width="50%" align="center"><img src="Screenshots/screenshot3.jpeg" alt="Video Result & Audio Formats" width="75%" /><br /><sub><b>Video result — Title, views, likes, 4K badge &amp; one-tap Best Quality</b></sub></td>
+<td width="33%" align="center" valign="top"><img src="Screenshots/final/1.png" alt="Paste & Download" width="100%" /><br /><sub><b>Paste & Download</b><br />Support for YouTube, Instagram, TikTok, Spotify &amp; more</sub></td>
+<td width="33%" align="center" valign="top"><img src="Screenshots/final/2.png" alt="Instant Preview & Details" width="100%" /><br /><sub><b>Instant Preview & Details</b><br />Video metadata, thumbnails, duration and trim controls</sub></td>
+<td width="33%" align="center" valign="top"><img src="Screenshots/final/3.png" alt="Formats & Qualities" width="100%" /><br /><sub><b>Formats & Qualities</b><br />Multi-audio, subtitles, lossless WAV, 320kbps MP3 &amp; 4K</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="Screenshots/screenshot4.jpeg" alt="Video Quality Options List" width="75%" /><br /><sub><b>Video qualities — Auto Best, 4K (3840p), 2K, 1080p with file sizes</b></sub></td>
-<td width="50%" align="center"><img src="Screenshots/screenshot5.jpeg" alt="Active Download Progress Screen" width="75%" /><br /><sub><b>Live download — Circular progress ring, speed, and cancel control</b></sub></td>
+<td width="33%" align="center" valign="top"><img src="Screenshots/final/4.png" alt="Trim Before Downloading" width="100%" /><br /><sub><b>Trim Before Downloading</b><br />Select exact start and end times or clip highlights</sub></td>
+<td width="33%" align="center" valign="top"><img src="Screenshots/final/5.png" alt="Resize & Compress" width="100%" /><br /><sub><b>Resize & Compress</b><br />Downscale resolution and optimize file size</sub></td>
+<td width="33%" align="center" valign="top"><img src="Screenshots/final/6.png" alt="Format Converter & Presets" width="100%" /><br /><sub><b>Format Converter & Presets</b><br />MP4, WebM &amp; MKV, or quick presets to shrink files</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="Screenshots/screenshot6.jpeg" alt="Spotify Track Fetch Result" width="75%" /><br /><sub><b>Spotify tracks — Artwork, artist metadata &amp; audio format options</b></sub></td>
-<td width="50%" align="center"><img src="Screenshots/screenshot7.jpeg" alt="Library Breakdown by Platform" width="75%" /><br /><sub><b>Smart Library — Storage bar &amp; organized platform folders</b></sub></td>
-</tr>
-<tr>
-<td width="50%" align="center"><img src="Screenshots/screenshot8.jpeg" alt="Media Details Sheet" width="75%" /><br /><sub><b>Media details — Built-in playback, share, and storage management</b></sub></td>
-<td width="50%" align="center"><img src="Screenshots/screenshot2.jpeg" alt="Library Storage Location" width="75%" /><br /><sub><b>Clean storage view — Custom internal or SD card path support</b></sub></td>
+<td width="33%" align="center" valign="top"><img src="Screenshots/final/7.png" alt="GIF Maker & Clip Looper" width="100%" /><br /><sub><b>GIF Maker & Clip Looper</b><br />Turn short video moments into smooth GIFs</sub></td>
+<td width="33%" align="center" valign="top"><img src="Screenshots/final/8.png" alt="Music & Synced Lyrics" width="100%" /><br /><sub><b>Music & Synced Lyrics</b><br />Spotify &amp; YouTube Music with lyrics</sub></td>
+<td width="33%" align="center" valign="top"><img src="Screenshots/final/9.png" alt="Real-Time Progress Tracking" width="100%" /><br /><sub><b>Real-Time Progress Tracking</b><br />Preparing, processing and saving, live</sub></td>
 </tr>
 </table>
 
@@ -352,9 +344,43 @@ Download the `.apk` that matches your phone's architecture from the [**Releases 
 
 <a id="whats-new"></a>
 
-## 🆕 What's New in v2.1.0
+## 🆕 What's New in v2.2.0
 
-The latest production release brings faster engine resolution, redesigned batch processing, and 16 KB page size support.
+This release brings a monochrome redesign, an upgraded media editor, and smoother progress and downloads.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 🎨 Monochrome Redesign
+A clean white-on-black theme across every screen, with a platform-tinted glow on the download button.
+
+### ✂️ Redesigned Editor & Cut
+A new in-app media editor with a redesigned GIF picker, plus a new Cut & Download sheet and timeline.
+
+### 📡 Steadier Progress
+Speed and size stay on screen between updates instead of blanking out during a download.
+
+</td>
+<td width="50%" valign="top">
+
+### 📚 Batch & Playlist Updates
+Redesigned batch download sheet and queue, plus a new playlist selection screen.
+
+### 📱 Edge-to-Edge Display
+The app draws behind the status and navigation bars, with each screen padding itself for a cleaner full-screen look.
+
+### 🖼️ New README & Screenshots
+Updated banner and a new screenshot gallery.
+
+</td>
+</tr>
+</table>
+
+<details>
+<summary><b>Previous release — v2.1.0</b></summary>
+
+<br />
 
 <table>
 <tr>
@@ -384,6 +410,8 @@ Native libraries and `ffmpeg`/`ffprobe` tools updated to run flawlessly on moder
 </td>
 </tr>
 </table>
+
+</details>
 
 <details>
 <summary><b>Previous release — v2.0.0</b></summary>
@@ -520,7 +548,7 @@ Ensure you download the APK matching your device's architecture:
 
 <br />
 
-This occurred on older v2.0.0 builds on devices utilizing 16 KB memory pages. Update to **v2.1.0 or newer**, which contains native binaries compiled with 16 KB alignment.
+This occurred on older v2.0.0 builds on devices utilizing 16 KB memory pages. Update to **v2.2.0 or newer**. The fix first shipped in v2.1.0, and v2.2.0 includes it.
 
 </details>
 

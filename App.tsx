@@ -205,7 +205,10 @@ const TabButton: React.FC<TabButtonProps> = ({
 };
 
 function App(): React.JSX.Element {
-  const [splashDone, setSplashDone] = useState(true);
+  // Must start false: the JS splash is what tells the native launch splash to
+  // hand over (SplashModule.hide). Starting true skipped it, so the native
+  // splash sat on screen until its 4 second safety timeout on every launch.
+  const [splashDone, setSplashDone] = useState(false);
   const [contentReady, setContentReady] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [isFirstLaunch, setIsFirstLaunch] = useState<boolean | null>(null);
@@ -415,8 +418,8 @@ function App(): React.JSX.Element {
     <SafeAreaProvider style={styles.root}>
       <StatusBar
         barStyle="light-content"
-        backgroundColor={Colors.background}
-        translucent={false}
+        translucent
+        backgroundColor="transparent"
       />
 
       {appState === 'onboarding' && (

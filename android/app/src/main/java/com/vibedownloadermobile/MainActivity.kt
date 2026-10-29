@@ -25,7 +25,7 @@ class MainActivity : ReactActivity() {
         var jsSplashShown: Boolean = false
 
         // The native splash never outlives this, even if JS fails to report in.
-        private const val MAX_NATIVE_SPLASH_MS = 4_000L
+        private const val MAX_NATIVE_SPLASH_MS = 2_000L
     }
 
     /**

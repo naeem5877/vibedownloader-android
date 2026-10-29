@@ -9,6 +9,7 @@ import {
     Modal,
 } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '../theme';
 import { QueueItem, QueueItemStatus } from '../hooks/useDownloadQueue';
 import { CloseIcon, CheckIcon, DownloadIcon, PlaySmallIcon, PauseIcon, RefreshIcon, TrashIcon } from './Icons';
@@ -200,6 +201,7 @@ export const DownloadQueuePanel: React.FC<DownloadQueuePanelProps> = ({
     onPause,
     onResume,
 }) => {
+    const insets = useSafeAreaInsets();
     const slideAnim = useRef(new Animated.Value(500)).current;
     const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -245,10 +247,15 @@ export const DownloadQueuePanel: React.FC<DownloadQueuePanelProps> = ({
     if (!visible && queue.length === 0) return null;
 
     return (
-        <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+        <Modal visible={visible} transparent statusBarTranslucent animationType="none" onRequestClose={onClose}>
             <Animated.View style={[styles.overlay, { opacity: fadeAnim }]}>
                 <TouchableOpacity style={StyleSheet.absoluteFill as any} onPress={onClose} activeOpacity={1} />
-                <Animated.View style={[styles.panel, { transform: [{ translateY: slideAnim }] }]}>
+                <Animated.View
+                    style={[
+                        styles.panel,
+                        { paddingBottom: insets.bottom, transform: [{ translateY: slideAnim }] },
+                    ]}
+                >
 
                     {/* Header */}
                     <View style={styles.header}>

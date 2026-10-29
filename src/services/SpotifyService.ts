@@ -72,26 +72,6 @@ function getOGMeta(html: string, prop: string): string | null {
     return m ? decodeHTMLEntities(m[1]) : null;
 }
 
-async function fetchSpotifyHtml(url: string): Promise<string> {
-    let lastError: any = null;
-    for (const ua of USER_AGENTS) {
-        try {
-            const res = await fetch(url, {
-                headers: {
-                    'User-Agent': ua,
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                },
-            });
-            if (res.ok) return await res.text();
-            lastError = new Error(`HTTP ${res.status}`);
-        } catch (e) {
-            lastError = e;
-        }
-    }
-    throw lastError ?? new Error('All UA attempts failed');
-}
-
 // ─── extractSpotifyId ──────────────────────────────────────────────────────────
 
 export function extractSpotifyId(url: string): { type: 'track' | 'album' | 'playlist'; id: string } | null {
@@ -306,137 +286,195 @@ export async function getTrackInfo(trackId: string): Promise<SpotifyTrack> {
 }
 
 // ─── getSpotifyPlaylist ───────────────────────────────────────────────────────
+// ─── Embed pages (playlist / album) ───────────────────────────────────────────
+// open.spotify.com/playlist/<id> is a client-rendered app with no __NEXT_DATA__,
+// so scraping it finds nothing and the sheet used to open with 0 tracks. The
+// embed player page still ships the track list as __NEXT_DATA__ JSON:
+//   entity.name / entity.title      → playlist or album name
+//   entity.subtitle                 → owner (playlist) or artist (album)
+//   entity.visualIdentity.image[]   → cover art [{ url, maxWidth, maxHeight }]
+//   entity.trackList[]              → { uri, title, subtitle (artists, comma
+//                                      separated), duration (ms), isExplicit,
+//                                      audioPreview, entityType }
+// Limits: Spotify caps the embed list at 100 tracks, and playlist tracks carry
+// no album art of their own (see fetchTrackThumbnails).
+
+/** Spotify's embed endpoint never returns more than this many tracks per playlist. */
+export const SPOTIFY_EMBED_TRACK_LIMIT = 100;
+
+type EmbedImage = { url: string; height: number; width: number };
+
+async function fetchEmbedEntity(kind: 'playlist' | 'album', id: string): Promise<any | null> {
+    const embedUrl = `https://open.spotify.com/embed/${kind}/${id}`;
+    for (const ua of USER_AGENTS) {
+        try {
+            const res = await fetch(embedUrl, {
+                headers: {
+                    'User-Agent': ua,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                },
+            });
+            console.log(`[Spotify:Embed:${kind}] Status:`, res.status);
+            if (!res.ok) continue;
+
+            const html = await res.text();
+            const tagIdx = html.indexOf('__NEXT_DATA__');
+            if (tagIdx === -1) {
+                console.warn(`[Spotify:Embed:${kind}] __NEXT_DATA__ NOT found`);
+                continue;
+            }
+            const jsonStart = html.indexOf('>', tagIdx) + 1;
+            const jsonEnd = html.indexOf('</script>', jsonStart);
+            const pageProps = JSON.parse(html.slice(jsonStart, jsonEnd))?.props?.pageProps;
+            const entity = pageProps?.state?.data?.entity;
+            if (entity && Array.isArray(entity.trackList)) return entity;
+
+            // Private, deleted or region-locked: Spotify answers 200 with a 404 status inside the JSON.
+            console.warn(`[Spotify:Embed:${kind}] No entity, page status:`, pageProps?.status);
+            return null;
+        } catch (e: any) {
+            console.warn(`[Spotify:Embed:${kind}] Exception:`, e?.message);
+        }
+    }
+    return null;
+}
+
+/** Cover images, largest first. */
+function embedImages(entity: any): EmbedImage[] {
+    const raw: any[] = entity?.visualIdentity?.image || [];
+    return raw
+        .filter(img => !!img?.url)
+        .sort((a, b) => (b.maxWidth || 0) - (a.maxWidth || 0))
+        .map(img => ({ url: img.url, height: img.maxHeight || 640, width: img.maxWidth || 640 }));
+}
+
+function embedTracks(
+    entity: any,
+    albumName: string,
+    albumImages: EmbedImage[],
+    releaseDate: string,
+): SpotifyTrack[] {
+    const out: SpotifyTrack[] = [];
+    (entity.trackList as any[]).forEach((t: any, idx: number) => {
+        if (t?.entityType && t.entityType !== 'track') return; // podcast episodes etc.
+        const id = String(t?.uri || '').split(':').pop() || '';
+        const title = String(t?.title || '').trim();
+        if (!id || !title) return;
+
+        const artistNames = String(t.subtitle || '')
+            .replace(/ /g, ' ')
+            .split(/\s*,\s*/)
+            .map(s => s.trim())
+            .filter(Boolean);
+
+        out.push({
+            id,
+            name: title,
+            artists: (artistNames.length ? artistNames : ['Unknown Artist']).map(name => ({
+                id: '',
+                name,
+                external_urls: { spotify: '' },
+            })),
+            album: { id: '', name: albumName, images: albumImages, release_date: releaseDate, total_tracks: 0 },
+            duration_ms: Number(t.duration) || 0,
+            explicit: !!t.isExplicit,
+            preview_url: t.audioPreview?.url || null,
+            external_urls: { spotify: `https://open.spotify.com/track/${id}` },
+            track_number: idx + 1,
+        });
+    });
+    return out;
+}
+
+const UNREADABLE_MESSAGE =
+    'Could not read this Spotify link. It may be private or unavailable, or check your connection.';
+
+// ─── getSpotifyPlaylist ───────────────────────────────────────────────────────
 
 export async function getSpotifyPlaylist(playlistId: string): Promise<SpotifyPlaylist> {
-    const spotifyUrl = `https://open.spotify.com/playlist/${playlistId}`;
     console.log('[Spotify] ─── getSpotifyPlaylist ───', playlistId);
-    try {
-        // Try __NEXT_DATA__ from the main playlist page
-        try {
-            const html = await fetchSpotifyHtml(spotifyUrl);
-            const tagIdx = html.indexOf('__NEXT_DATA__');
-            if (tagIdx !== -1) {
-                const jsonStart = html.indexOf('>', tagIdx) + 1;
-                const jsonEnd = html.indexOf('</script>', jsonStart);
-                const nextData = JSON.parse(html.slice(jsonStart, jsonEnd));
-                const pp = nextData?.props?.pageProps;
-                const playlist = pp?.state?.data?.entity || pp?.playlist || pp?.data?.playlist;
-                if (playlist?.name) {
-                    console.log('[Spotify:Playlist] Found via __NEXT_DATA__, name:', playlist.name);
-                    const images = (playlist.images?.items || playlist.images || []).map((img: any) => ({
-                        url: img?.sources?.[0]?.url || img?.url || '',
-                    }));
-                    return {
-                        id: playlistId,
-                        name: playlist.name,
-                        description: playlist.description || '',
-                        images,
-                        owner: { display_name: playlist.ownerV2?.data?.name || playlist.owner?.display_name || 'Spotify' },
-                        tracks: {
-                            total: playlist.tracks?.totalCount || playlist.tracks?.total || 0,
-                            items: (playlist.tracks?.items || []).map((item: any) => ({
-                                track: item.itemV2?.data || item.track,
-                            })),
-                        },
-                    };
-                }
-            }
-        } catch (e) {
-            console.warn('[Spotify:Playlist] __NEXT_DATA__ parse failed:', e);
+    const entity = await fetchEmbedEntity('playlist', playlistId);
+    if (entity) {
+        // Playlist tracks have no album name or art in the embed list; the
+        // sheet fills art in afterwards and the downloader falls back to "Unknown".
+        const tracks = embedTracks(entity, '', [], '');
+        if (tracks.length > 0) {
+            console.log('[Spotify:Playlist] ✅ Embed OK →', entity.name, '|', tracks.length, 'tracks');
+            return {
+                id: playlistId,
+                name: entity.name || entity.title || 'Spotify Playlist',
+                description: '',
+                images: embedImages(entity).map(img => ({ url: img.url })),
+                owner: { display_name: entity.subtitle || 'Spotify' },
+                tracks: { total: tracks.length, items: tracks.map(track => ({ track })) },
+            };
         }
-
-        // Fallback: oEmbed + OG
-        const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
-        const res = await fetch(oembedUrl, { headers: { 'User-Agent': UA } });
-        console.log('[Spotify:Playlist:oEmbed] Status:', res.status);
-        const oembedData = res.ok ? await res.json() : null;
-        const fallback = await tryOGFallback(spotifyUrl, 'playlist');
-        return {
-            id: playlistId,
-            name: oembedData?.title || fallback.name || 'Spotify Playlist',
-            description: fallback.description || '',
-            images: [{ url: oembedData?.thumbnail_url || fallback.images?.[0]?.url || '' }],
-            owner: { display_name: oembedData?.author_name || fallback.owner?.display_name || 'Spotify' },
-            tracks: { total: fallback.tracks?.total || 0, items: fallback.tracks?.items || [] },
-        };
-    } catch (e: any) {
-        console.error('[Spotify] ❌ Playlist fetch failed:', e?.message);
-        throw new Error('Failed to fetch Spotify playlist: ' + String(e));
     }
+    console.error('[Spotify] ❌ Playlist fetch failed:', playlistId);
+    throw new Error(UNREADABLE_MESSAGE);
 }
 
 // ─── getSpotifyAlbum ──────────────────────────────────────────────────────────
 
 export async function getSpotifyAlbum(albumId: string): Promise<any> {
-    const spotifyUrl = `https://open.spotify.com/album/${albumId}`;
     console.log('[Spotify] ─── getSpotifyAlbum ───', albumId);
-    try {
-        // Try __NEXT_DATA__ from the main album page
-        try {
-            const html = await fetchSpotifyHtml(spotifyUrl);
-            const tagIdx = html.indexOf('__NEXT_DATA__');
-            if (tagIdx !== -1) {
-                const jsonStart = html.indexOf('>', tagIdx) + 1;
-                const jsonEnd = html.indexOf('</script>', jsonStart);
-                const nextData = JSON.parse(html.slice(jsonStart, jsonEnd));
-                const pp = nextData?.props?.pageProps;
-                const album = pp?.state?.data?.entity || pp?.album || pp?.data?.album;
-                if (album?.name) {
-                    console.log('[Spotify:Album] Found via __NEXT_DATA__, name:', album.name);
-                    const images = (album.coverArt?.sources || album.images || []).map((img: any) => ({
-                        url: img.url || '', height: img.height || 640, width: img.width || 640,
-                    }));
-                    const tracks: SpotifyTrack[] = (album.tracks?.items || []).map((item: any) => {
-                        const t = item.track || item;
-                        const artists: SpotifyArtist[] = (t.artists?.items || t.artists || []).map((a: any) => ({
-                            id: a.id || a.uri?.split(':').pop() || '',
-                            name: a.profile?.name || a.name || 'Unknown Artist',
-                            external_urls: { spotify: '' },
-                        }));
-                        return {
-                            id: t.id || t.uri?.split(':').pop() || '',
-                            name: t.name || 'Unknown Track',
-                            artists,
-                            album: {
-                                id: albumId, name: album.name, images,
-                                release_date: album.date?.isoString?.split('T')[0] || '',
-                                total_tracks: album.tracks?.totalCount || 0,
-                            },
-                            duration_ms: t.duration?.totalMilliseconds || 0,
-                            explicit: t.contentRating?.label === 'EXPLICIT' || false,
-                            preview_url: null,
-                            external_urls: { spotify: `https://open.spotify.com/track/${t.id || ''}` },
-                            track_number: t.trackNumber || 0,
-                        };
-                    });
-                    return {
-                        id: albumId, name: album.name, images,
-                        release_date: album.date?.isoString?.split('T')[0] || '',
-                        total_tracks: album.tracks?.totalCount || tracks.length,
-                        tracks: { items: tracks },
-                    };
-                }
-            }
-        } catch (e) {
-            console.warn('[Spotify:Album] __NEXT_DATA__ parse failed:', e);
+    const entity = await fetchEmbedEntity('album', albumId);
+    if (entity) {
+        const images = embedImages(entity);
+        const name = entity.name || entity.title || 'Spotify Album';
+        const releaseDate = entity.releaseDate?.isoString?.split('T')[0] || '';
+        const tracks = embedTracks(entity, name, images, releaseDate);
+        if (tracks.length > 0) {
+            console.log('[Spotify:Album] ✅ Embed OK →', name, '|', tracks.length, 'tracks');
+            return {
+                id: albumId,
+                name,
+                images,
+                release_date: releaseDate,
+                total_tracks: tracks.length,
+                tracks: { items: tracks },
+            };
         }
+    }
+    console.error('[Spotify] ❌ Album fetch failed:', albumId);
+    throw new Error(UNREADABLE_MESSAGE);
+}
 
-        // Fallback: oEmbed
-        const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
-        const res = await fetch(oembedUrl, { headers: { 'User-Agent': UA } });
-        const oembedData = res.ok ? await res.json() : null;
-        const fallback = await tryOGFallback(spotifyUrl, 'album');
-        return {
-            id: albumId,
-            name: oembedData?.title || fallback.name || 'Spotify Album',
-            images: [{ url: oembedData?.thumbnail_url || fallback.images?.[0]?.url || '' }],
-            release_date: fallback.release_date || '',
-            total_tracks: fallback.total_tracks || 0,
-            tracks: { items: fallback.tracks?.items || [] },
-        };
-    } catch (e: any) {
-        console.error('[Spotify] ❌ Album fetch failed:', e?.message);
-        throw new Error('Failed to fetch Spotify album: ' + String(e));
+// ─── Per-track album art ──────────────────────────────────────────────────────
+// oEmbed returns the track's album cover (300x300). One request per track, so
+// callers get results in small batches and can cancel between them.
+
+async function fetchTrackThumbnail(trackId: string): Promise<string | null> {
+    try {
+        const trackUrl = `https://open.spotify.com/track/${trackId}`;
+        const res = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(trackUrl)}`, {
+            headers: { 'User-Agent': UA },
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        return data?.thumbnail_url || null;
+    } catch {
+        return null;
+    }
+}
+
+export async function fetchTrackThumbnails(
+    trackIds: string[],
+    onBatch: (found: Record<string, string>) => void,
+    shouldCancel: () => boolean = () => false,
+    batchSize: number = 8,
+): Promise<void> {
+    for (let i = 0; i < trackIds.length; i += batchSize) {
+        if (shouldCancel()) return;
+        const slice = trackIds.slice(i, i + batchSize);
+        const urls = await Promise.all(slice.map(fetchTrackThumbnail));
+        if (shouldCancel()) return;
+        const found: Record<string, string> = {};
+        urls.forEach((url, idx) => {
+            if (url) found[slice[idx]] = url;
+        });
+        if (Object.keys(found).length > 0) onBatch(found);
     }
 }
 

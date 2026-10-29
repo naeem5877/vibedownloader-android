@@ -19,6 +19,8 @@ interface CutTimelineProps {
   /** Selected out-point in seconds. */
   end: number;
   onChange: (start: number, end: number) => void;
+  /** Colour of the selected range and its handles (hex). Defaults to the app primary. */
+  accent?: string;
 }
 
 /** Shortest clip the user can select, mirroring the desktop app's MIN_GAP. */
@@ -47,32 +49,24 @@ const TAP_SLOP_PX = 6;
  */
 const EDGE_SAFE_PADDING = 14;
 
-const WAVEFORM_BARS = 56;
+const WAVEFORM_BARS = 72;
 
-const TRACK_HEIGHT = 66;
+const TRACK_HEIGHT = 64;
 
 /**
- * The knobs sit proud of the track top and bottom, like a real editor's trim
- * handles, so they read as something to grab and are not clipped by the track's
- * own rounded corners when parked at 0% or 100%.
+ * Handles stand proud of the waveform top and bottom, like the desktop's
+ * trim handles, so they read as something to grab and are not clipped by the
+ * track's own rounded corners when parked at 0% or 100%.
+ * Visual handle is intentionally slim; the invisible hit zone stays large
+ * enough for a finger so precision does not come at the cost of usability.
  */
-// Visual handle is intentionally small; the invisible hit zone stays large
-// enough for a finger so precision does not come at the cost of usability.
-const KNOB_WIDTH = 10;
-const KNOB_HEIGHT = 44;
-
-/** Ridges drawn inside each knob, mirroring Premiere/CapCut trim grips. */
-const GRIP_COUNT = 3;
-const GRIP_RIDGE_WIDTH = 2;
+const KNOB_WIDTH = 14;
+const KNOB_HEIGHT = 52;
 
 /** Nudge steps offered under the track, in seconds. */
 const NUDGE_STEPS = [-1, -0.1, 0.1, 1];
 
 const BUBBLE_WIDTH = 68;
-
-/** Handles are a neutral tool colour; the accent is reserved for the live state. */
-const KNOB_BODY = '#F1F5F9';
-const KNOB_RIDGE = 'rgba(15, 23, 42, 0.45)';
 
 /** Monospaced digits stop the timestamps from jittering while a value changes. */
 const MONO = Platform.select({
@@ -95,15 +89,13 @@ function clamp(value: number, lo: number, hi: number): number {
 }
 
 /**
- * Deterministic pseudo-waveform. A real waveform needs audio decoding, which is
- * not worth it here, so this fakes a stable silhouette that depends only on the
- * bar index: it reads as audio without pretending to analyse the real track.
+ * Deterministic decorative waveform - the same silhouette formula as the
+ * desktop timeline, so the track looks identical on both. It depends only on
+ * the bar index; it reads as audio without pretending to analyse the track.
  */
 const WAVEFORM = Array.from({ length: WAVEFORM_BARS }, (_, i) => {
-  const a = Math.sin(i * 1.7) * 0.5 + 0.5;
-  const b = Math.sin(i * 0.43 + 1.2) * 0.5 + 0.5;
-  const c = Math.sin(i * 3.1 + 0.4) * 0.5 + 0.5;
-  return 0.25 + (a * 0.4 + b * 0.35 + c * 0.25) * 0.75;
+  const pct = 20 + Math.abs(Math.sin(i * 0.9)) * 45 + ((i * 7) % 5) * 5;
+  return pct / 100;
 });
 
 interface Grab {
@@ -137,6 +129,7 @@ export const CutTimeline: React.FC<CutTimelineProps> = ({
   start,
   end,
   onChange,
+  accent = Colors.primary,
 }) => {
   const total = Number.isFinite(duration) && duration > 0 ? duration : 1;
 
@@ -423,48 +416,49 @@ export const CutTimeline: React.FC<CutTimelineProps> = ({
                   style={[
                     styles.bar,
                     { height: `${Math.round(h * 100)}%` },
-                    inSelection ? styles.barSelected : styles.barDimmed,
+                    inSelection
+                      ? { backgroundColor: accent, opacity: 0.8 }
+                      : styles.barDimmed,
                   ]}
                 />
               );
             })}
           </View>
 
-          {/* Translucent tint over the kept region. The dimming is done
-                        per bar with opacity rather than a black overlay, so the
-                        waveform stays legible on both sides of the cut. */}
+          {/* Tint plus top/bottom frame over the kept region, as on desktop. */}
           <View
             style={[
               styles.selection,
-              { left: `${leftPct}%`, width: `${widthPct}%` },
+              {
+                left: `${leftPct}%`,
+                width: `${widthPct}%`,
+                borderColor: accent,
+                backgroundColor: `${accent}1F`,
+              },
             ]}
           />
         </View>
 
-        {/* Small precision handles are centered on the waveform. */}
+        {/* Slim accent handles with a white grip line, like desktop. */}
         <View
           style={[
             styles.knob,
-            { left: `${leftPct}%` },
+            { left: `${leftPct}%`, backgroundColor: accent },
             active === 'start' && styles.knobActive,
           ]}
           pointerEvents="none"
         >
-          {Array.from({ length: GRIP_COUNT }, (_, g) => (
-            <View key={g} style={styles.grip} />
-          ))}
+          <View style={styles.grip} />
         </View>
         <View
           style={[
             styles.knob,
-            { left: `${leftPct + widthPct}%` },
+            { left: `${leftPct + widthPct}%`, backgroundColor: accent },
             active === 'end' && styles.knobActive,
           ]}
           pointerEvents="none"
         >
-          {Array.from({ length: GRIP_COUNT }, (_, g) => (
-            <View key={g} style={styles.grip} />
-          ))}
+          <View style={styles.grip} />
         </View>
 
         {/* Readout follows the handle the finger owns, which is what
@@ -484,11 +478,7 @@ export const CutTimeline: React.FC<CutTimelineProps> = ({
         )}
       </View>
 
-      <TimeReadout
-        start={shown.start}
-        end={shown.end}
-        clipLength={shown.end - shown.start}
-      />
+      <TimeReadout start={shown.start} end={shown.end} total={total} />
 
       <View style={styles.nudgeRow}>
         <Stepper label="Start" onStep={delta => nudge('start', delta)} />
@@ -499,21 +489,24 @@ export const CutTimeline: React.FC<CutTimelineProps> = ({
 };
 
 /**
- * In/out readouts with the clip length between them.
- *
- * The two timestamps sit under their own handle because that is where the eye
- * already is; the mono face keeps the digits from shifting as the value
- * changes during a drag.
+ * START / of-total / END readout, laid out like the desktop timeline. The mono
+ * face keeps the digits from shifting as the value changes during a drag.
  */
 const TimeReadout: React.FC<{
   start: number;
   end: number;
-  clipLength: number;
-}> = ({ start, end, clipLength }) => (
+  total: number;
+}> = ({ start, end, total }) => (
   <View style={styles.timeRow}>
-    <Text style={styles.time}>{formatCutTime(start)}</Text>
-    <Text style={styles.clipLength}>{formatCutTime(clipLength)} clip</Text>
-    <Text style={[styles.time, styles.timeEnd]}>{formatCutTime(end)}</Text>
+    <View>
+      <Text style={styles.timeLabel}>START</Text>
+      <Text style={styles.time}>{formatCutTime(start)}</Text>
+    </View>
+    <Text style={styles.ofTotal}>of {formatCutTime(total)}</Text>
+    <View style={styles.timeEnd}>
+      <Text style={[styles.timeLabel, styles.timeEnd]}>END</Text>
+      <Text style={[styles.time, styles.timeEnd]}>{formatCutTime(end)}</Text>
+    </View>
   </View>
 );
 
@@ -561,10 +554,10 @@ const styles = StyleSheet.create({
   },
   track: {
     height: TRACK_HEIGHT,
-    borderRadius: BorderRadius.xl,
-    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.03)',
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: 'rgba(255,255,255,0.10)',
     overflow: 'hidden',
     justifyContent: 'center',
     paddingHorizontal: 3,
@@ -575,25 +568,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 3,
   },
-  bar: { flex: 1, marginHorizontal: 0.5, borderRadius: 2 },
-  /** Full-strength accent inside the kept range. */
-  barSelected: { backgroundColor: Colors.primary, opacity: 1 },
-  /** Dimmed to a third outside it, instead of being blacked out by a mask. */
-  barDimmed: { backgroundColor: Colors.primary, opacity: 0.3 },
+  bar: { flex: 1, marginHorizontal: 1, borderRadius: 3 },
+  /** Outside the kept range the bars fall back to a faint white, like desktop. */
+  barDimmed: { backgroundColor: 'rgba(255,255,255,0.10)' },
   selection: {
     position: 'absolute',
     top: 0,
     bottom: 0,
-    backgroundColor: `${Colors.primary}1A`,
     borderTopWidth: 2,
     borderBottomWidth: 2,
-    borderColor: Colors.primary,
   },
-  /**
-   * A slim bar rather than a chunky pill: the body is a neutral off-white and
-   * the accent is reserved for the live drag state, so the handle reads as a
-   * precision tool and stays legible over the waveform.
-   */
+  /** Accent-coloured slim handle with a white grip line (colour set inline). */
   knob: {
     position: 'absolute',
     top: 26 + (TRACK_HEIGHT - KNOB_HEIGHT) / 2,
@@ -601,28 +586,21 @@ const styles = StyleSheet.create({
     height: KNOB_HEIGHT,
     marginLeft: -KNOB_WIDTH / 2,
     borderRadius: 6,
-    backgroundColor: KNOB_BODY,
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.55)',
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 5,
     shadowColor: '#000',
-    shadowOpacity: 0.4,
+    shadowOpacity: 0.5,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
   },
-  knobActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  /** Vertical ridges inside the knob, the usual trimmer grip. */
+  /** Desktop's brightness-125 while dragging. */
+  knobActive: { transform: [{ scaleX: 1.15 }], opacity: 0.92 },
   grip: {
-    width: GRIP_RIDGE_WIDTH,
-    height: 6,
+    width: 2,
+    height: 16,
     borderRadius: 1,
-    backgroundColor: KNOB_RIDGE,
-    marginHorizontal: 1.5,
+    backgroundColor: 'rgba(255,255,255,0.85)',
   },
   bubble: {
     position: 'absolute',
@@ -643,46 +621,53 @@ const styles = StyleSheet.create({
   },
   timeRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
-    marginTop: Spacing.xs,
-    paddingHorizontal: 2,
+    marginTop: 10,
+  },
+  timeLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.6,
+    color: 'rgba(255,255,255,0.35)',
   },
   time: {
+    marginTop: 2,
     fontFamily: MONO,
-    fontSize: Typography.sizes.xs,
-    fontWeight: Typography.weights.medium,
-    color: Colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.8)',
     fontVariant: ['tabular-nums'],
   },
-  timeEnd: { textAlign: 'right' },
-  clipLength: {
+  timeEnd: { textAlign: 'right', alignItems: 'flex-end' },
+  ofTotal: {
     fontFamily: MONO,
-    fontSize: Typography.sizes.xxs,
-    color: Colors.textMuted,
-    opacity: 0.8,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.3)',
+    paddingBottom: 2,
   },
   nudgeRow: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.md },
   nudgeGroup: { flex: 1, gap: Spacing.xs },
   nudgeLabel: {
-    fontSize: Typography.sizes.xxs,
-    color: Colors.textMuted,
-    fontWeight: Typography.weights.medium,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.6,
+    color: 'rgba(255,255,255,0.35)',
   },
-  nudgeButtons: { flexDirection: 'row', gap: Spacing.xs },
+  nudgeButtons: { flexDirection: 'row', gap: 6 },
   nudgeBtn: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.sm,
-    backgroundColor: Colors.surfaceElevated,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.03)',
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: 'rgba(255,255,255,0.10)',
   },
   nudgeBtnText: {
     fontFamily: MONO,
-    fontSize: Typography.sizes.xs,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.6)',
   },
 });

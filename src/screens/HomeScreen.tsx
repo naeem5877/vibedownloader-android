@@ -28,7 +28,9 @@ import {
   Dimensions,
   ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBarScrim } from '../components/StatusBarScrim';
+import AmbientGlow from '../components/AmbientGlow';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Colors,
@@ -79,7 +81,6 @@ import {
   CloseIcon,
   SettingsIcon,
   ChevronRightIcon,
-  ScissorsIcon,
   WarningIcon,
 } from '../components/Icons';
 import { useDownloadQueue } from '../hooks/useDownloadQueue';
@@ -89,10 +90,13 @@ import {
   BatchResolvedItem,
 } from '../components/BatchDownloadSheet';
 import { CutDownloadSheet } from '../components/CutDownloadSheet';
-import { LiveBadge, LiveRecordBar } from '../components/LiveRecordBar';
+import { LiveRecordBar } from '../components/LiveRecordBar';
 import { checkForUpdates, UpdateInfo } from '../services/GitHubUpdateService';
 import {
   getSpotifyPlaylist,
+  getSpotifyAlbum,
+  fetchTrackThumbnails,
+  SPOTIFY_EMBED_TRACK_LIMIT,
   extractSpotifyId,
   getTrackInfo,
   buildYouTubeSearchQuery,
@@ -105,10 +109,15 @@ import {
   isYouTubeUrl,
   extractYouTubeVideoId,
 } from '../services/YouTubeMusicService';
+import {
+  fetchYouTubePlaylist,
+  parseYouTubePlaylistUrl,
+  isAbortError,
+} from '../services/YouTubePlaylistService';
 import { lookupLyrics } from '../services/LyricsService';
 import type { LyricsResult } from '../services/lyrics/types';
 import type { AudioTrack, SubtitleTrack } from '../native/YtDlpModule';
-import { detectPlatform } from '../utils/platform';
+import { matchPlatform } from '../utils/platform';
 import { Haptics } from '../utils/haptics';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -117,24 +126,13 @@ interface HomeScreenProps {
   onNavigateToLibrary?: () => void;
 }
 
-/** `3:45`, or `1:02:03` for long media, for inline duration labels. */
-function formatDuration(seconds: number): string {
-  const safe =
-    Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : 0;
-  const h = Math.floor(safe / 3600);
-  const m = Math.floor((safe % 3600) / 60);
-  const s = safe % 60;
-  if (h > 0) {
-    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  }
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
-
 export const HomeScreen: React.FC<HomeScreenProps> = ({
   onNavigateToLibrary,
 }) => {
   const [url, setUrl] = useState('');
-  const [detectedPlatform, setDetectedPlatform] = useState<string | null>(null);
+  const [detectedPlatform, setDetectedPlatform] = useState<string | null>(
+    'YouTube',
+  ); // YouTube is open by default, like the desktop app
   const [userSelectedPlatform, setUserSelectedPlatform] = useState(false);
   // Removed downloadMode toggle - auto-detect based on platform (Spotify/SoundCloud = audio)
 
@@ -146,6 +144,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     undefined,
   );
   const [isPlaylistLoading, setIsPlaylistLoading] = useState(false);
+  /** First page is on screen, later pages are still being fetched. */
+  const [isPlaylistLoadingMore, setIsPlaylistLoadingMore] = useState(false);
+  /** Cancels an in-flight playlist load when the sheet closes or a new link is fetched. */
+  const playlistAbortRef = useRef<AbortController | null>(null);
+  // Bumped whenever the playlist sheet closes or a new link is fetched, so a
+  // slow Spotify album-art loop from the previous list stops on its own.
+  const spotifyArtRunRef = useRef(0);
 
   // Network State
   const [isOffline, setIsOffline] = useState(false);
@@ -283,6 +288,22 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   }, [sessionsRestored, loginModalVisible, detectedPlatform]);
 
   const headerFadeAnim = useRef(new Animated.Value(0)).current;
+  // Scroll position, so the ambient glow can ride up with the content like
+  // the desktop's (which lives inside its scroll container) instead of
+  // staying pinned to the screen.
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const insets = useSafeAreaInsets();
+  // Status-bar scrim fades in once content starts scrolling under the bar.
+  const scrimOpacity = scrollY.interpolate({
+    inputRange: [0, 60],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+  const glowTranslateY = scrollY.interpolate({
+    inputRange: [0, 1000],
+    outputRange: [0, -1000],
+    extrapolateLeft: 'clamp',
+  });
   const headerSlideAnim = useRef(new Animated.Value(-20)).current;
   const batchActiveRef = useRef(false);
   const lastPastedUrlRef = useRef<string>('');
@@ -298,6 +319,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       setPlaylistItems([]);
       setPlaylistTitle('');
       setPlaylistImage(undefined);
+      spotifyArtRunRef.current += 1;
 
       // ── 0. YouTube / YouTube Music — fetch real album art before/alongside normal fetch ──
       if (isYouTubeUrl(text)) {
@@ -331,30 +353,66 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         setIsPlaylistLoading(true);
         setPlaylistModalVisible(true);
         try {
-          const data = await getSpotifyPlaylist(spotifyData.id);
+          const isAlbum = spotifyData.type === 'album';
+          const data: any = isAlbum
+            ? await getSpotifyAlbum(spotifyData.id)
+            : await getSpotifyPlaylist(spotifyData.id);
           setPlaylistTitle(data.name);
           setPlaylistImage(data.images?.[0]?.url);
 
-          const items = data.tracks.items.map((item: any) => ({
-            id: item.track.id,
-            title: item.track.name,
-            author: item.track.artists.map((a: any) => a.name).join(', '),
-            duration: item.track.duration_ms
-              ? `${Math.floor(item.track.duration_ms / 60000)}:${(
-                  (item.track.duration_ms % 60000) /
-                  1000
-                )
-                  .toFixed(0)
-                  .padStart(2, '0')}`
-              : undefined,
-            thumbnail: item.track.album.images?.[0]?.url,
-            url: item.track.external_urls.spotify,
-            type: 'spotify',
-            searchQuery: buildYouTubeSearchQuery(item.track),
-            rawTrack: item.track,
-          }));
+          // Playlists wrap each track as { track }; albums list them directly.
+          const tracks: any[] = data.tracks.items
+            .map((entry: any) => (isAlbum ? entry : entry.track))
+            .filter(Boolean);
+
+          const items = tracks.map((track: any) => {
+            const totalSeconds = Math.floor((track.duration_ms || 0) / 1000);
+            return {
+              id: track.id,
+              title: track.name,
+              author: track.artists.map((a: any) => a.name).join(', '),
+              duration: totalSeconds
+                ? `${Math.floor(totalSeconds / 60)}:${String(
+                    totalSeconds % 60,
+                  ).padStart(2, '0')}`
+                : undefined,
+              thumbnail: track.album?.images?.[0]?.url,
+              url: track.external_urls.spotify,
+              type: 'spotify',
+              searchQuery: buildYouTubeSearchQuery(track),
+              rawTrack: track,
+            };
+          });
 
           setPlaylistItems(items);
+
+          if (!isAlbum && items.length >= SPOTIFY_EMBED_TRACK_LIMIT) {
+            ToastAndroid.show(
+              `Spotify only shares the first ${SPOTIFY_EMBED_TRACK_LIMIT} tracks of a playlist`,
+              ToastAndroid.LONG,
+            );
+          }
+
+          // Playlist tracks arrive without album art. Load it in the
+          // background in small batches so the list is usable straight away
+          // and covers appear as they come in (the downloader reuses each
+          // item's thumbnail as the embedded cover).
+          const needArt = items.filter(i => !i.thumbnail).map(i => i.id);
+          if (needArt.length > 0) {
+            const artRun = ++spotifyArtRunRef.current;
+            fetchTrackThumbnails(
+              needArt,
+              found =>
+                setPlaylistItems(prev =>
+                  prev.map(it =>
+                    found[it.id] && !it.thumbnail
+                      ? { ...it, thumbnail: found[it.id] }
+                      : it,
+                  ),
+                ),
+              () => spotifyArtRunRef.current !== artRun,
+            ).catch(e => console.warn('[HomeScreen] Spotify art load failed:', e));
+          }
         } catch (error: any) {
           console.error('Spotify error:', error);
           ToastAndroid.show(
@@ -641,8 +699,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           let msg =
             error?.message || error?.userInfo?.message || 'Unknown error';
 
-          // Clean up raw python/yt-dlp scraping errors
-          if (
+          // Clean up raw python/yt-dlp scraping errors. NO_STORIES messages are
+          // already written for the user by the native side, so show them as-is.
+          if (error?.code === 'NO_STORIES') {
+            // keep msg untouched
+          } else if (
             msg.includes('SSL') ||
             msg.includes('Unable to download webpage') ||
             msg.toLowerCase().includes('login') ||
@@ -666,49 +727,150 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         return;
       }
 
-      // 2. Check YouTube Playlist
-      if (text.includes('list=') || text.includes('playlist')) {
+      // 2. YouTube / YouTube Music playlists and mixes.
+      //    InnerTube first (fast, and the only thing that can page a Mix), then
+      //    yt-dlp as the fallback for private lists and anything InnerTube
+      //    cannot read. Other sites' playlists (SoundCloud sets, ...) still go
+      //    straight to yt-dlp, exactly as before.
+      const ytList = parseYouTubePlaylistUrl(text);
+      if (ytList || text.includes('list=') || text.includes('playlist')) {
+        playlistAbortRef.current?.abort();
+        const controller = new AbortController();
+        playlistAbortRef.current = controller;
+        const isCurrent = () =>
+          !controller.signal.aborted && playlistAbortRef.current === controller;
+
+        // Clear the previous list so its tracks never flash up under a new title.
+        setPlaylistItems([]);
+        setPlaylistTitle('');
+        setPlaylistImage(undefined);
+        setIsPlaylistLoadingMore(false);
         setIsPlaylistLoading(true);
         setPlaylistModalVisible(true);
+
         try {
-          const json = await YtDlpNative.getPlaylistInfo(text);
-          const data = JSON.parse(json);
-          setPlaylistTitle(data.title || 'Playlist');
-          // setPlaylistImage... yt-dlp dump-single-json flat-playlist excludes thumbnails usually to be fast
+          let loaded = false;
 
-          const items = (data.entries || []).map((entry: any) => ({
-            id: entry.id,
-            title: entry.title,
-            author: entry.uploader,
-            duration: entry.duration
-              ? `${Math.floor(entry.duration / 60)}:${(entry.duration % 60)
-                  .toString()
-                  .padStart(2, '0')}`
-              : undefined,
-            url: entry.url || `https://youtu.be/${entry.id}`,
-            type: 'youtube',
-          }));
+          if (ytList && !ytList.requiresAuth) {
+            try {
+              const result = await fetchYouTubePlaylist(text, {
+                signal: controller.signal,
+                // Show page 1 as soon as it lands, then keep growing the list.
+                onProgress: partial => {
+                  if (!isCurrent()) return;
+                  setPlaylistTitle(partial.title);
+                  setPlaylistImage(partial.thumbnail);
+                  setPlaylistItems(partial.items);
+                  setIsPlaylistLoading(false);
+                  setIsPlaylistLoadingMore(true);
+                },
+              });
+              if (!isCurrent()) return;
+              setPlaylistTitle(result.title);
+              setPlaylistImage(result.thumbnail);
+              setPlaylistItems(result.items);
+              if (result.truncated && result.totalCount) {
+                ToastAndroid.show(
+                  `Showing the first ${result.items.length} of ${result.totalCount} videos.`,
+                  ToastAndroid.LONG,
+                );
+              }
+              loaded = true;
+            } catch (innerTubeError: any) {
+              if (isAbortError(innerTubeError)) return;
+              console.warn(
+                '[Playlist] InnerTube failed, falling back to yt-dlp:',
+                innerTubeError,
+              );
+            }
+          }
 
-          setPlaylistItems(items);
+          if (!loaded) {
+            // Private lists (Watch Later, Liked, personal mixes) need the
+            // signed-in cookies; harmless for public ones.
+            const ytCookies = ytList
+              ? await CookieManagerService.getCookiesForPlatform('youtube')
+              : null;
+            if (!isCurrent()) return;
+
+            const json = await YtDlpNative.getPlaylistInfo(text, {
+              cookies: ytCookies || undefined,
+              // A Mix never ends, so stop yt-dlp at a sane length.
+              args:
+                ytList?.kind === 'mix'
+                  ? ['--no-warnings', '--playlist-end=100']
+                  : ['--no-warnings'],
+            });
+            if (!isCurrent()) return;
+
+            // yt-dlp/python may print warnings before the JSON.
+            const jsonStart = json.indexOf('{');
+            if (jsonStart === -1) throw new Error('No JSON in playlist response');
+            const data = JSON.parse(json.substring(jsonStart));
+
+            const items = (data.entries || [])
+              .filter((entry: any) => entry && entry.id)
+              .map((entry: any) => ({
+                id: entry.id,
+                title: entry.title || 'Untitled',
+                author: entry.uploader || entry.channel || '',
+                duration: entry.duration
+                  ? `${Math.floor(entry.duration / 60)}:${Math.floor(
+                      entry.duration % 60,
+                    )
+                      .toString()
+                      .padStart(2, '0')}`
+                  : undefined,
+                thumbnail:
+                  entry.thumbnails?.[entry.thumbnails.length - 1]?.url ||
+                  entry.thumbnail,
+                url:
+                  entry.url ||
+                  entry.webpage_url ||
+                  `https://youtu.be/${entry.id}`,
+                type: 'youtube',
+              }));
+
+            if (items.length === 0) {
+              throw new Error('Playlist is empty or private');
+            }
+            setPlaylistTitle(data.title || 'Playlist');
+            setPlaylistImage(
+              data.thumbnails?.[data.thumbnails.length - 1]?.url ||
+                data.thumbnail ||
+                items[0]?.thumbnail,
+            );
+            setPlaylistItems(items);
+          }
         } catch (error: any) {
+          if (isAbortError(error) || !isCurrent()) return;
           console.error('Playlist fetch error:', error);
           ToastAndroid.show(
-            'Failed to fetch playlist info',
-            ToastAndroid.SHORT,
+            ytList?.requiresAuth
+              ? 'This list is private. Log in to YouTube (tap the YouTube icon) and try again.'
+              : 'Failed to fetch playlist info',
+            ToastAndroid.LONG,
           );
-          setPlaylistModalVisible(false); // Fallback to single?
-          // If playlist fetch fails, maybe try single fetch?
+          setPlaylistModalVisible(false);
+          // Last resort: treat the link as a single video.
           actions.fetchInfo(text);
         } finally {
-          setIsPlaylistLoading(false);
+          if (playlistAbortRef.current === controller) {
+            setIsPlaylistLoading(false);
+            setIsPlaylistLoadingMore(false);
+          }
         }
         return;
       }
 
       // 3. Normal Single Fetch
       try {
-        const cookiesPath = detectedPlatform
-          ? await CookieManagerService.getCookiesForPlatform(detectedPlatform)
+        // Take the platform from the link itself. Right after a paste the
+        // picker's state has not updated yet, so reading `detectedPlatform`
+        // here would send the previous platform's cookies for this link.
+        const fetchPlatform = matchPlatform(text) ?? detectedPlatform;
+        const cookiesPath = fetchPlatform
+          ? await CookieManagerService.getCookiesForPlatform(fetchPlatform)
           : null;
         await actions.fetchInfo(text, {
           cookies: cookiesPath || undefined,
@@ -765,8 +927,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           const sharedUrl = urlMatch[0];
           setUrl(sharedUrl);
           // Auto-detect platform and fetch
-          const detected = detectPlatform(sharedUrl);
-          if (detected !== 'YouTube') setDetectedPlatform(detected);
+          const detected = matchPlatform(sharedUrl);
+          if (detected) {
+            setDetectedPlatform(detected);
+            setUserSelectedPlatform(false);
+          }
           if (consumedShareRef.current !== sharedUrl) {
             consumedShareRef.current = sharedUrl;
             setTimeout(() => handleFetch(sharedUrl), 500);
@@ -787,8 +952,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             if (clipUrl !== lastPastedUrlRef.current) {
               lastPastedUrlRef.current = clipUrl;
               setUrl(clipUrl);
-              const detected = detectPlatform(clipUrl);
-              if (detected !== 'YouTube') setDetectedPlatform(detected);
+              const detected = matchPlatform(clipUrl);
+              if (detected) {
+                setDetectedPlatform(detected);
+                setUserSelectedPlatform(false);
+              }
               ToastAndroid.show('Pasted from clipboard', ToastAndroid.SHORT);
             }
           }
@@ -1056,9 +1224,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         setUrl(text);
         // Optional: Auto-fetch on paste if it looks like a URL
         if (text.startsWith('http')) {
-          const detected = detectPlatform(text);
-          if (detected !== 'YouTube') {
+          // A link that clearly belongs to a platform wins over an earlier
+          // manual pick, so pasting YouTube while Instagram is selected
+          // switches to YouTube. Unknown links leave the selection alone.
+          const detected = matchPlatform(text);
+          if (detected) {
             setDetectedPlatform(detected);
+            setUserSelectedPlatform(false);
           }
           handleFetch(text);
         }
@@ -1199,36 +1371,49 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     [platformColor],
   );
 
+  // Mirrors `userSelectedPlatform` so the detection effect below can read it
+  // without depending on it. Depending on it would re-run detection the moment
+  // the user taps a platform icon, and a link still in the field would snap the
+  // picker straight back, undoing their tap.
+  const userSelectedRef = useRef(userSelectedPlatform);
+  userSelectedRef.current = userSelectedPlatform;
+
   // Validate URL and detect platform with error handling
   useEffect(() => {
     const validateAndDetect = async () => {
       if (url.trim().length > 5) {
-        // Use JS-based detection first as it's faster and handles common cases
-        const detected = detectPlatform(url);
-        if (detected !== 'YouTube' && !userSelectedPlatform) {
-          setDetectedPlatform(detected);
-        } else {
-          // Fallback to native validation if needed or just trust JS
-          try {
-            const result = await actions.validateUrl(url);
-            // Only auto-update platform if user didn't manually select
-            if (
-              !userSelectedPlatform &&
-              result.platform &&
-              result.platform !== 'Unknown'
-            ) {
-              setDetectedPlatform(result.platform);
-            }
-          } catch (error) {
-            console.warn('URL validation error:', error);
+        // JS-based detection first: it is instant and covers every platform
+        // the picker offers.
+        const matched = matchPlatform(url);
+        if (matched) {
+          // The link names its platform, so it beats an earlier manual pick:
+          // pasting YouTube while Instagram is selected moves to YouTube.
+          setDetectedPlatform(matched);
+          setUserSelectedPlatform(false);
+          return;
+        }
+
+        // Unrecognised link: only ask native validation when the user has
+        // not chosen a platform themselves.
+        if (userSelectedRef.current) return;
+        try {
+          const result = await actions.validateUrl(url);
+          if (
+            !userSelectedRef.current &&
+            result.platform &&
+            result.platform !== 'Unknown'
+          ) {
+            setDetectedPlatform(result.platform);
           }
+        } catch (error) {
+          console.warn('URL validation error:', error);
         }
       }
     };
 
     const timer = setTimeout(validateAndDetect, 500);
     return () => clearTimeout(timer);
-  }, [url, actions, userSelectedPlatform]);
+  }, [url, actions]);
 
   // Ask for permissions once on mount. Kept apart from the share-intent effect
   // below: that one re-runs whenever its callbacks change, and re-running it
@@ -1712,21 +1897,38 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   }, [detectedPlatform]);
 
   return (
-    <SafeAreaView
+    <View
       style={[styles.container, { backgroundColor: currentTheme.background }]}
-      edges={['top']}
     >
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.glowLayer,
+          { transform: [{ translateY: glowTranslateY }] },
+        ]}
+      >
+        <AmbientGlow color={platformColor} />
+      </Animated.View>
       <OfflineBanner onActionPress={onNavigateToLibrary} />
       <StatusBar
         barStyle="light-content"
-        backgroundColor={currentTheme.background}
+        translucent
+        backgroundColor="transparent"
         animated
       />
-      <ScrollView
+      <Animated.ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: insets.top },
+        ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        scrollEventThrottle={16}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { useNativeDriver: true },
+        )}
       >
         {/* Modern Header */}
         <Animated.View
@@ -1740,7 +1942,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         >
           <View style={styles.headerTop}>
             <View style={styles.headerBrand}>
-              <View pointerEvents="none" style={styles.brandGlow} />
               <Text style={styles.logo} allowFontScaling={false}>
                 Vibe
               </Text>
@@ -1804,24 +2005,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               )}
             </View>
           </View>
-          <View style={styles.taglineRow}>
-            <View
-              style={[
-                styles.taglineDotRing,
-                { backgroundColor: platformColor + '26' },
-              ]}
-            >
-              <View
-                style={[styles.taglineDot, { backgroundColor: platformColor }]}
-              />
-            </View>
-            <Text style={styles.tagline}>
-              Download from any platform, instantly
-            </Text>
-          </View>
         </Animated.View>
 
-        {/* Platform Selector */}
+        {/* Step 1 — choose platform */}
         <PlatformSelector
           selectedPlatform={detectedPlatform}
           onSelectPlatform={id => {
@@ -1869,7 +2055,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   setUrl(text);
                   if (text.trim().length === 0) {
                     setUserSelectedPlatform(false);
-                    setDetectedPlatform(null);
+                    setDetectedPlatform('YouTube');
                     actions.reset();
                   }
                 }}
@@ -1892,16 +2078,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               activeOpacity={0.7}
               onPress={() => setBatchSheetVisible(true)}
             >
-              <View
-                style={[
-                  styles.batchIconWrap,
-                  { backgroundColor: `${platformColor}1F` },
-                ]}
-              >
-                <LayersIcon size={18} color={platformColor} />
+              <View style={styles.batchIconWrap}>
+                <LayersIcon size={18} color={Colors.textSecondary} />
               </View>
               <View style={styles.batchTextWrap}>
-                <Text style={styles.batchTitle}>Batch Download</Text>
+                <Text style={styles.batchTitle}>Batch download</Text>
                 <Text style={styles.batchSubtitle} numberOfLines={1}>
                   {queue.length > 0
                     ? `${queue.length} in queue${
@@ -1915,10 +2096,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 </Text>
               </View>
               <View style={styles.batchCta}>
-                <Text style={[styles.batchCtaText, { color: platformColor }]}>
-                  {queue.length > 0 ? 'OPEN' : 'START'}
-                </Text>
-                <ChevronRightIcon size={14} color={platformColor} />
+                {queue.length > 0 && (
+                  <Text style={[styles.batchCtaText, { color: platformColor }]}>
+                    Open
+                  </Text>
+                )}
+                <ChevronRightIcon size={16} color={Colors.textMuted} />
               </View>
             </TouchableOpacity>
 
@@ -2049,6 +2232,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               title={state.videoInfo?.title}
               platformColor={platformColor}
               statusLine={state.downloadLine}
+              thumbnail={ytMusicAlbumArtUrl || state.videoInfo?.thumbnail}
+              speed={state.downloadSpeed}
+              size={state.downloadSize}
+              rawLine={state.downloadRawLine}
             />
           </View>
         )}
@@ -2058,7 +2245,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         {/* Skeleton Loading - only while nothing at all is known yet */}
         {state.isLoading && !state.videoInfo && (
           <View style={styles.videoSection}>
-            <SkeletonCard />
+            <SkeletonCard platform={detectedPlatform ?? undefined} color={platformColor} />
           </View>
         )}
 
@@ -2076,15 +2263,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                     : state.videoInfo
                 }
                 onSaveThumbnail={handleSaveThumbnail}
+                onCut={() => setCutSheetVisible(true)}
                 isMusic={isMusicTrack}
               />
               {/* A live broadcast replaces the ordinary download
                                 controls: it has no duration and no end, so the
-                                quality list would be misleading. */}
+                                quality list would be misleading. The LIVE badge
+                                itself now sits on the thumbnail, like desktop. */}
               {state.videoInfo.isLive && (
                 <>
                   <View style={styles.liveBadgeRow}>
-                    <LiveBadge platformColor={platformColor} />
                     <Text style={styles.liveBadgeHint}>
                       This channel is live right now
                     </Text>
@@ -2095,13 +2283,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                     recording={liveRecording || state.isDownloading}
                   />
                 </>
-              )}
-              {ytMusicAlbumArtUrl && (
-                <View style={styles.albumArtBadge}>
-                  <Text style={styles.albumArtBadgeText}>
-                    🎵 Real album art loaded
-                  </Text>
-                </View>
               )}
             </View>
 
@@ -2189,30 +2370,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       Quick Download
                     </Text>
                   </TouchableOpacity>
-
-                  {/* Cut & Download — needs a known duration to
-                                        pick a range, so it waits for the full
-                                        metadata instead of the oEmbed preview. */}
-                  {state.videoInfo.duration > 0 && (
-                    <TouchableOpacity
-                      style={[styles.cutBtn, { borderColor: platformColor }]}
-                      onPress={() => setCutSheetVisible(true)}
-                      activeOpacity={0.75}
-                      accessibilityLabel="Cut and download a clip"
-                    >
-                      <ScissorsIcon size={18} color={platformColor} />
-                      <View style={styles.cutBtnTextWrap}>
-                        <Text style={styles.cutBtnText}>
-                          Cut &amp; Download
-                        </Text>
-                        <Text style={styles.cutBtnHint}>
-                          Save only part of this{' '}
-                          {formatDuration(state.videoInfo.duration)}
-                        </Text>
-                      </View>
-                      <ChevronRightIcon size={16} color={Colors.textMuted} />
-                    </TouchableOpacity>
-                  )}
                 </View>
 
                 <AudioTrackSelector
@@ -2250,13 +2407,20 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         {/* Playlist Modal */}
         <PlaylistSelectionModal
           visible={playlistModalVisible}
-          onClose={() => setPlaylistModalVisible(false)}
+          onClose={() => {
+            spotifyArtRunRef.current += 1;
+            playlistAbortRef.current?.abort();
+            setIsPlaylistLoading(false);
+            setIsPlaylistLoadingMore(false);
+            setPlaylistModalVisible(false);
+          }}
           onDownload={handleBatchDownload}
           playlistTitle={playlistTitle}
           playlistImage={playlistImage}
           items={playlistItems}
           platformColor={platformColor}
           isLoading={isPlaylistLoading}
+          isLoadingMore={isPlaylistLoadingMore}
           onItemPress={handlePlaylistItemPress}
         />
 
@@ -2279,7 +2443,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         {/* Login Webview Modal */}
 
         <View style={{ height: 100 }} />
-      </ScrollView>
+      </Animated.ScrollView>
       <DownloadQueuePanel
         visible={queuePanelVisible}
         onClose={() => setQueuePanelVisible(false)}
@@ -2322,13 +2486,23 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         onClose={() => setCutSheetVisible(false)}
         onConfirm={handleCutConfirm}
       />
-    </SafeAreaView>
+      <StatusBarScrim opacity={scrimOpacity} />
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  // Holds the ambient glow; translated by the scroll offset so it rides up
+  // with the content like on desktop. Same 440px box AmbientGlow draws into.
+  glowLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 440,
   },
   scrollView: {
     flex: 1,
@@ -2373,12 +2547,12 @@ const styles = StyleSheet.create({
     letterSpacing: -1.4,
     includeFontPadding: false,
   },
-  // contrast in weight + tint gives the wordmark a refined two-tone feel
+  // two-weight wordmark: heavy "Vibe", thin white "Downloader"
   logoAccent: {
     fontSize: 28,
     lineHeight: 34,
     fontWeight: '300',
-    color: Colors.primaryLight,
+    color: Colors.textPrimary,
     letterSpacing: -1.1,
     includeFontPadding: false,
   },
@@ -2390,24 +2564,21 @@ const styles = StyleSheet.create({
   headerBtn: {
     width: 42,
     height: 42,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.045)',
+    borderRadius: 21,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: 'rgba(255, 255, 255, 0.10)',
+    borderWidth: 0,
   },
   batchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginTop: 10,
-    paddingVertical: 11,
-    paddingHorizontal: 12,
+    marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
     borderRadius: 16,
-    backgroundColor: '#161618',
-    borderWidth: 1,
-    borderColor: '#252528',
+    backgroundColor: Colors.surface,
   },
   batchRowPressed: {
     opacity: 0.7,
@@ -2416,9 +2587,10 @@ const styles = StyleSheet.create({
   batchIconWrap: {
     width: 34,
     height: 34,
-    borderRadius: 11,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   batchTextWrap: { flex: 1 },
   batchTitle: {
@@ -2470,9 +2642,22 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
   },
   // ── Input Section ──
-  inputSection: {
+  stepLabel: {
+    color: Colors.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: -0.1,
+    paddingHorizontal: Spacing.lg,
+    marginTop: Spacing.sm,
+  },
+  stepLabelInner: {
+    paddingHorizontal: 0,
     marginTop: Spacing.md,
-    paddingHorizontal: Spacing.md,
+    marginBottom: 10,
+  },
+  inputSection: {
+    marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
   },
   inputRow: {
     marginBottom: Spacing.sm,
@@ -2502,28 +2687,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     letterSpacing: 0.3,
-  },
-  cutBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    marginTop: Spacing.sm,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.md,
-    borderRadius: 16,
-    backgroundColor: Colors.surfaceElevated,
-    borderWidth: 1,
-  },
-  cutBtnTextWrap: { flex: 1 },
-  cutBtnText: {
-    color: Colors.textPrimary,
-    fontSize: Typography.sizes.sm,
-    fontWeight: '700',
-  },
-  cutBtnHint: {
-    color: Colors.textMuted,
-    fontSize: Typography.sizes.xxs,
-    marginTop: 2,
   },
   // ── Error ──
   errorContainer: {
@@ -2720,13 +2883,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: Colors.surfaceElevated,
+    backgroundColor: Colors.surface,
     marginHorizontal: 0,
-    marginTop: Spacing.md,
-    padding: 12,
+    marginTop: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
     borderRadius: 16,
-    borderWidth: 1,
-    ...Shadows.sm,
+    borderWidth: 0,
   },
   loginBannerContent: {
     flexDirection: 'row',
@@ -2754,44 +2917,25 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   loginTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 0.2,
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: -0.1,
     marginBottom: 1,
   },
   loginSubtitle: {
-    fontSize: 11,
+    fontSize: 12,
     color: Colors.textMuted,
-    fontWeight: '500',
+    fontWeight: '400',
   },
   loginActionBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 0,
   },
   loginActionText: {
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  // YouTube Music album art badge shown below the VideoInfoCard
-  albumArtBadge: {
-    alignSelf: 'center',
-    marginTop: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 87, 34, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 87, 34, 0.3)',
-  },
-  albumArtBadgeText: {
-    color: '#FF5722',
-    fontSize: 11,
-    fontWeight: '600' as const,
-    letterSpacing: 0.3,
+    fontSize: 13,
+    fontWeight: '600',
   },
   modeToggleContainer: {
     flexDirection: 'row',

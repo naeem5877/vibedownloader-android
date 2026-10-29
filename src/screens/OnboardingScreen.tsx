@@ -10,6 +10,7 @@ import {
     StatusBar,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { Colors, Typography, getPlatformColor } from '../theme';
 import { DownloadIcon, VideoIcon, LibraryIcon, ChevronRightIcon } from '../components/Icons';
 import { Haptics } from '../utils/haptics';
@@ -21,16 +22,29 @@ interface Slide {
     title: string;
     description: string;
     accent: string;
+    /** Second colour of the slide's gradient. */
+    accentTo: string;
     icon: (color: string) => React.ReactElement;
     chips: { label: string; dot?: string }[];
 }
+
+/**
+ * The same three colour themes as the Library editor tabs (Audio, Convert,
+ * GIF), one per slide, so onboarding and the editor feel like one app.
+ */
+const THEMES = {
+    emerald: { from: '#10b981', to: '#14b8a6' },
+    sky: { from: '#38bdf8', to: '#8b5cf6' },
+    fuchsia: { from: '#d946ef', to: '#fb923c' },
+};
 
 const SLIDES: Slide[] = [
     {
         id: 'sources',
         title: 'Save videos from anywhere',
         description: 'YouTube, Instagram, TikTok, Facebook, X and more, all in one app.',
-        accent: Colors.primary,
+        accent: THEMES.fuchsia.from,
+        accentTo: THEMES.fuchsia.to,
         icon: (c) => <VideoIcon size={40} color={c} />,
         chips: [
             { label: 'YouTube', dot: getPlatformColor('YouTube') },
@@ -45,7 +59,8 @@ const SLIDES: Slide[] = [
         id: 'paste',
         title: 'Paste a link, pick a quality',
         description: 'Download the best quality in one tap, or choose the resolution, audio only, or just a clip.',
-        accent: Colors.secondary,
+        accent: THEMES.sky.from,
+        accentTo: THEMES.sky.to,
         icon: (c) => <DownloadIcon size={40} color={c} />,
         chips: [
             { label: 'Quick download' },
@@ -58,7 +73,8 @@ const SLIDES: Slide[] = [
         id: 'library',
         title: 'Yours to keep',
         description: 'No account needed. Files save straight to your device and your library keeps them organised.',
-        accent: Colors.success,
+        accent: THEMES.emerald.from,
+        accentTo: THEMES.emerald.to,
         icon: (c) => <LibraryIcon size={40} color={c} />,
         chips: [
             { label: 'No sign-in' },
@@ -215,7 +231,32 @@ const OnboardingScreen: React.FC<OnboardingProps> = ({ onDone }) => {
                 </View>
 
                 <TouchableOpacity onPress={goToNext} activeOpacity={0.85}>
-                    <Animated.View style={[styles.primaryBtn, { backgroundColor: accentColor }]}>
+                    <Animated.View style={[styles.primaryBtn]}>
+                        {/* One gradient per slide, cross-faded as you swipe */}
+                        {SLIDES.map((s, i) => {
+                            const range = [(i - 1) * width, i * width, (i + 1) * width];
+                            const layerOpacity = scrollX.interpolate({
+                                inputRange: range,
+                                outputRange: [0, 1, 0],
+                                extrapolate: 'clamp',
+                            });
+                            return (
+                                <Animated.View
+                                    key={s.id}
+                                    style={[StyleSheet.absoluteFill, { opacity: layerOpacity }]}
+                                >
+                                    <Svg width="100%" height="100%">
+                                        <Defs>
+                                            <LinearGradient id={`obBtn${i}`} x1="0" y1="0" x2="1" y2="0">
+                                                <Stop offset="0" stopColor={s.accent} />
+                                                <Stop offset="1" stopColor={s.accentTo} />
+                                            </LinearGradient>
+                                        </Defs>
+                                        <Rect x="0" y="0" width="100%" height="100%" fill={`url(#obBtn${i})`} />
+                                    </Svg>
+                                </Animated.View>
+                            );
+                        })}
                         <Text style={styles.primaryBtnText}>{isLast ? 'Get started' : 'Continue'}</Text>
                         <ChevronRightIcon size={18} color="#fff" />
                     </Animated.View>
@@ -359,6 +400,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         gap: 6,
+        overflow: 'hidden',
     },
     primaryBtnText: {
         fontSize: 16,

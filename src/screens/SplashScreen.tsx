@@ -22,9 +22,9 @@ interface SplashScreenProps {
 }
 
 // The splash stays at least this long (long enough for the wordmark to play)...
-const MIN_HOLD_MS = 1100;
+const MIN_HOLD_MS = 400;
 // ...and never longer than this, even if the app underneath is slow.
-const MAX_WAIT_MS = 4000;
+const MAX_WAIT_MS = 2500;
 const EXIT_MS = 260;
 // Must match the native launch splash (res/drawable-*/splash_logo.png is drawn
 // at this size) so the hand-off from native to JS is invisible.
@@ -144,7 +144,7 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ ready, onFinish }) => {
 
     return (
         <Animated.View style={[styles.container, { opacity: screenOpacity }]} onLayout={handleLayout}>
-            <StatusBar barStyle="light-content" backgroundColor="#0A0A0C" />
+            <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
             {/* Logo with soft ripples behind it, centred on the screen */}
             <View style={styles.logoSlot}>

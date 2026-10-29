@@ -212,7 +212,7 @@ export const parseReleaseNotes = (body: string | null | undefined): NoteBlock[] 
             // The per-ABI install table is for the GitHub page; the app picks the APK itself.
             skipSection = /^(?:[^\w]*\s*)?(install|installation|download|downloads|assets)\b/i.test(title);
             if (skipSection || !title) continue;
-            // The release title heading ("VibeDownloader Android v2.1.0") repeats
+            // The release title heading ("VibeDownloader Android v2.2.0") repeats
             // what the dialog header already shows.
             if (/vibedownloader/i.test(title)) continue;
             blocks.push({ type: 'heading', level: Math.min(heading[1].length, 3), spans: parseInline(title) });

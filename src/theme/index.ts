@@ -17,21 +17,25 @@ export const Colors = {
   accent: '#F97316', // Orange accent from logo
 
   // Background - Deep Pure Blacks
-  background: '#010101', // Pure Black
+  background: '#0A0A0A', // Same base surface as the desktop app
   backgroundGradientStart: '#000000',
   backgroundGradientEnd: '#161616',
 
   // Surfaces - Dark and Sleek
-  surface: '#121212', // Slightly lighter black for cards
-  surfaceElevated: '#1E1E1E', // Modals
+  surface: '#0F0F11', // Desktop modal/card surface
+  surfaceElevated: '#131316', // Desktop popover surface
   surfaceHover: '#2A2A2A',
   surfaceGlass: 'rgba(18, 18, 24, 0.85)', // Glassmorphism
   surfaceGlassLight: 'rgba(255, 255, 255, 0.05)',
+  // Desktop "glass" layer: white at 4% with a 10% hairline
+  glassFill: 'rgba(255, 255, 255, 0.04)',
+  glassFillStrong: 'rgba(255, 255, 255, 0.08)',
+  glassBorder: 'rgba(255, 255, 255, 0.10)',
 
   // Text
   textPrimary: '#FFFFFF',
-  textSecondary: '#EBEBEB',
-  textMuted: '#8F8F8F',
+  textSecondary: '#C9C9D4',
+  textMuted: '#7E7E8C',
   textAccent: '#F97316', // Orange text for accents
 
   // Status
@@ -45,8 +49,8 @@ export const Colors = {
   infoLight: '#60A5FA',
 
   // UI
-  border: '#2F2F2F',
-  borderLight: '#3D3D3D',
+  border: '#202028',
+  borderLight: '#2C2C36',
   borderAccent: 'rgba(255, 255, 255, 0.4)', // White border
   overlay: 'rgba(0, 0, 0, 0.9)',
   overlayLight: 'rgba(0, 0, 0, 0.7)',
@@ -218,6 +222,12 @@ export const Typography = {
   // One type scale: five sizes, used by the Library, Settings and result cards.
   // Spread into a style: `...Typography.scale.body`. Keep new screens on these.
   scale: {
+    hero: {
+      fontSize: 34,
+      lineHeight: 38,
+      fontWeight: '800',
+      letterSpacing: -1.2,
+    },
     display: {
       fontSize: 28,
       lineHeight: 34,

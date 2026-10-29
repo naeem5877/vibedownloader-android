@@ -16,8 +16,11 @@
     <!-- Base application theme -->
     <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:windowBackground">@color/splashBackground</item>
-        <item name="android:statusBarColor">@color/splashBackground</item>
-        <item name="android:navigationBarColor">@color/splashBackground</item>
+        <!-- Edge-to-edge: the app draws behind both system bars, so they are
+             transparent and each screen pads itself with the safe-area insets.
+             React Native (edgeToEdgeEnabled=true) applies the same at runtime. -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

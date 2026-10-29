@@ -66,31 +66,29 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           generate_release_notes: false
           body: |
-            ## ????????? VibeDownloader Android ${{ github.ref_name }}
+            ## 📥 VibeDownloader Android ${{ github.ref_name }}
 
-            ### ?????? New
-            - ???????? **Cleaner onboarding**: A simpler, friendlier first-run introduction
-            - ????????? **Batch Download redesign**: Link list with platform colours, remove single links, paste more, live progress while links are checked, and a Stop button
-            - ?????????? **Real update details**: The update dialog now shows the full release notes with headings, bullets and links, the release date, and the size of the APK that fits your phone
-            - ?????????? **What's new after updating**: After an update the app shows that version's release notes, fetched straight from GitHub
-            - ?????? **Faster YouTube loading**: Video formats load without the long wait. A built-in JavaScript engine now solves YouTube's checks on the phone, so the app no longer needs a slow second attempt
-            - ????????? **Offline mode that works**: When you lose connection the app shows an offline banner and a "Network Interrupted" screen with a shortcut to your Library, and returns to normal as soon as you reconnect
-            
-            ### ???????? Fixed
-            - ????????? **Endless "update available"**: The app compared against a version baked into the code, so it kept asking you to update even on the latest version. It now reads the version that is really installed
-            - ????????? **Wrong APK offered**: Updates now download the build that matches your device (arm64-v8a, armeabi-v7a, x86 or x86_64) instead of always the universal file
-            - ????????????? **Trim handles**: Dragging the clip handles no longer swipes the Download and Library screens instead
-            - ?????????????? **ffmpeg "cannot start on this device"**: Clip trimming and merging now start correctly on normal phones, including newer Android devices that use 16 KB memory pages
-            - ?????? **X (Twitter) links**: Buttons and text on X links were white on white. They are now readable
-            - ???????? **Sentry noise**: Removed harmless red error screens caused by Sentry's own debug logging in development builds
-            
-            ### ????????? Download Guide
+            ### ✨ New
+            - 🎬 **In-app media editor**: Edit videos and audio from your Library without leaving the app, with a redesigned GIF range picker for making GIFs from any clip
+            - 🖤 **Monochrome theme**: A clean white-on-black look across the whole app
+            - 🎨 **Redesigned Home & downloads**: New platform selector, link box, video card, format list, download progress, loading skeletons and empty state
+            - 🌀 **Platform glow**: A soft ambient glow tinted to the platform you pick, with smoother animations everywhere
+            - 📜 **Better playlists**: Redesigned playlist selection and a dedicated YouTube playlist loader
+            - 🎵 **Improved Spotify links**: Reworked Spotify handling for more reliable results
+            - 📱 **Edge-to-edge screen**: The app now draws behind the status and navigation bars for a more immersive look
+            - ⚡ **Faster start**: The splash screen now gets out of the way sooner
+
+            ### 🐛 Fixed
+            - 📶 **Status bar overlap**: Platform buttons no longer run into the clock, signal and battery icons when you scroll
+            - 🧹 **Smoother status bar fade**: Content now fades out gently under the status bar
+
+            ### 📦 Download Guide
             Choose the correct APK for your device:
-            - **arm64-v8a** (Recommended) ???????? For most modern Android phones (last 5????????6 years)
-            - **armeabi-v7a** ???????? For older or low-end Android devices
-            - **universal** ???????? Works on ALL devices (larger file size) and emulators
-            - **x86_64 / x86** ???????? Primarily for emulators or specific tablets
+            - **arm64-v8a** (Recommended) — For most modern Android phones (last 5–6 years)
+            - **armeabi-v7a** — For older or low-end Android devices
+            - **universal** — Works on ALL devices (larger file size) and emulators
+            - **x86_64 / x86** — Primarily for emulators or specific tablets
 
             ---
             Requires Android 7.0 (API 24) or newer.
-            **Full Changelog**: https://github.com/naeem5877/vibedownloader-android/compare/v2.0.0...${{ github.ref_name }}
+            **Full Changelog**: https://github.com/naeem5877/vibedownloader-android/compare/v2.1.0...${{ github.ref_name }}

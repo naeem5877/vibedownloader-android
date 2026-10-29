@@ -371,7 +371,112 @@ private fun isExecutable(file: File): Boolean = try {
     /** ffmpeg subprocesses currently cutting, so cancelDownload() can kill them. */
     private val activeCutProcesses = ConcurrentHashMap<String, Process>()
 
+    // --- Extraction hand-off: fetchInfo -> download ---------------------------
+    // A YouTube extraction (JS challenge solving included) costs many seconds.
+    // fetchInfo already did it, so it leaves its raw JSON here and download()
+    // passes it to yt-dlp with --load-info-json instead of extracting again.
+    // The stream URLs inside expire, hence the short lifetime.
+    private val infoCacheTtlMs = 20 * 60 * 1000L
+
+    private val ytIdRegex = Regex("(?:youtu\\.be/|[?&]v=|/shorts/|/embed/|/live/)([A-Za-z0-9_-]{11})")
+    private fun cacheKey(url: String): String =
+        ytIdRegex.find(url)?.groupValues?.get(1)?.let { "yt:$it" } ?: url
+
+    private fun infoCacheFile(url: String): File =
+        File(File(reactApplicationContext.cacheDir, "info_cache"), "${Integer.toHexString(cacheKey(url).hashCode())}.json")
+
+    private fun saveInfoCache(url: String, json: String) {
+        try {
+            val file = infoCacheFile(url)
+            file.parentFile?.let { dir ->
+                dir.mkdirs()
+                val cutoff = System.currentTimeMillis() - 60 * 60 * 1000L
+                dir.listFiles()?.forEach { if (it.lastModified() < cutoff) it.delete() }
+            }
+            file.writeText(json)
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not cache extraction result: ${e.message}")
+        }
+    }
+
+    private fun freshInfoCache(url: String): File? {
+        val file = infoCacheFile(url)
+        return if (file.isFile && file.length() > 0 &&
+            System.currentTimeMillis() - file.lastModified() < infoCacheTtlMs) file else null
+    }
+
+    /**
+     * Turns a yt-dlp postprocessor line into the status text shown on the
+     * loading screen. Returns "" when the line is not an ffmpeg stage, so the
+     * caller keeps its normal handling.
+     */
+    private fun ffmpegStageLabel(line: String): String = when {
+        line.startsWith("[ExtractAudio]") ->
+            if (line.contains(".wav", ignoreCase = true)) "Converting to WAV (ffmpeg)..."
+            else "Converting to MP3 (ffmpeg)..."
+        line.startsWith("[Merger]") -> "Merging video + audio (ffmpeg)..."
+        line.startsWith("[Metadata]") -> "Writing tags (ffmpeg)..."
+        line.startsWith("[ThumbnailsConvertor]") -> "Preparing cover art (ffmpeg)..."
+        line.startsWith("[EmbedThumbnail]") -> "Embedding cover art (ffmpeg)..."
+        line.startsWith("[VideoRemuxer]") -> "Remuxing (ffmpeg)..."
+        line.startsWith("[Fixup") -> "Fixing container (ffmpeg)..."
+        else -> ""
+    }
+
+    /** Pushes a status line through the same event the loading screen already listens to. */
+    private fun emitStage(processId: String, title: String?, text: String) {
+        val params = WritableNativeMap().apply {
+            putString("processId", processId)
+            putDouble("progress", 100.0)
+            putDouble("eta", 0.0)
+            putString("line", text)
+        }
+        sendEvent("onDownloadProgress", params)
+        showProgressNotification(processId, title ?: "Downloading...", 100, text)
+    }
+
     private val CUT_TIMEOUT_MINUTES = 30L
+
+    // --- Background prewarm of the YouTube extraction --------------------------
+    // fetchInfoFast answers from InnerTube, so no yt-dlp JSON exists when the user
+    // taps Download and the download would pay for a full extraction (JS challenge
+    // included) before the first byte. While the user looks at the format picker,
+    // run that extraction in the background and cache it for download().
+    private val prewarmJobs = ConcurrentHashMap<String, kotlinx.coroutines.Job>()
+
+    private fun prewarmYouTubeExtraction(url: String) {
+        if (freshInfoCache(url) != null) return
+        val job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            try {
+                if (!isInitialized) initializeYtDlp()
+                val startedAt = System.currentTimeMillis()
+                val request = YoutubeDLRequest(url)
+                request.addOption("--force-ipv4")
+                request.addOption("--no-check-certificate")
+                request.addOption("--socket-timeout", "30")
+                applyJsRuntime(request)
+                request.addOption("--user-agent", DESKTOP_USER_AGENT)
+                request.addOption("--extractor-args", "youtube:player_client=web_embedded")
+                request.addOption("--no-playlist")
+                request.addOption("--dump-single-json")
+                val out = YoutubeDL.getInstance().execute(request, processId = null, callback = null).out
+                val raw = JsonParser.parseString(out).asJsonObject
+                if (raw.bool("is_live") != true && raw.get("formats") != null) {
+                    saveInfoCache(url, out)
+                    Log.d(TAG, "Prewarmed extraction in ${System.currentTimeMillis() - startedAt}ms")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Extraction prewarm failed (download will extract itself): ${e.message}")
+            } finally {
+                prewarmJobs.remove(cacheKey(url))
+            }
+        }
+        if (prewarmJobs.putIfAbsent(cacheKey(url), job) != null) {
+            job.cancel()
+            return
+        }
+        job.start()
+    }
 
     /** Formats that carry no video track, so the re-encode must not force one. */
     private val AUDIO_ONLY_EXT = setOf("mp3", "m4a", "aac", "opus", "ogg", "wav", "flac")
@@ -1984,6 +2089,10 @@ if (options?.hasKey("cookies") == true) {
                 
                 val raw = JsonParser.parseString(responseJson).asJsonObject
                 val rawFormats = raw.get("formats")
+                // Hand the finished extraction to download() so it can skip its own.
+                if (platform == "YouTube" && raw.bool("is_live") != true) {
+                    saveInfoCache(url, responseJson)
+                }
                 
                 val result = WritableNativeMap().apply {
                     putString("id", raw.str("id"))
@@ -2197,6 +2306,10 @@ withContext(Dispatchers.Main) {
                 }
                 if (info == null) {
                     Log.d(TAG, "fast path gave up or declined, deferring to yt-dlp")
+                } else if (!info.isLive) {
+                    // The user is about to pick a format; extract through yt-dlp
+                    // meanwhile so the download does not have to.
+                    prewarmYouTubeExtraction(url)
                 }
                 withContext(Dispatchers.Main) {
                     if (info == null) promise.resolve(null) else promise.resolve(buildFastInfoMap(info, url))
@@ -2642,7 +2755,7 @@ private fun publishSidecarFile(
             return try {
                 resolver.openOutputStream(uri)?.use { output ->
                     java.io.FileInputStream(sourceFile).use { input ->
-                        input.copyTo(output)
+                        input.copyTo(output, 1 shl 20)
                     }
                 }
                 
@@ -3093,8 +3206,15 @@ platform.equals("Spotify", ignoreCase = true) ||
                 // devices whose page size the bundled ffmpeg cannot load, yt-dlp
                 // aborts the whole download with "ffprobe and ffmpeg not found",
                 // so request the untouched source instead.
+                // Each --embed-* step makes yt-dlp start ffmpeg and rewrite the whole
+                // file. Tags matter for audio; a video's title already lives in its
+                // file name, and rewriting a multi-hundred-MB mp4 just for tags is
+                // the slowest pass of a video download.
+                val wantsTags = isAudioDownload ||
+                    platform.equals("Spotify", ignoreCase = true) ||
+                    platform.equals("SoundCloud", ignoreCase = true)
                 if (ffmpegAvailable) {
-                    request.addOption("--embed-metadata")
+                    if (wantsTags) request.addOption("--embed-metadata")
                     if (isAudioDownload) {
                         // Embed thumbnail directly into MP3/M4A ID3 tags so music players show cover art.
                         // WAV is excluded: yt-dlp's EmbedThumbnail postprocessor rejects it outright
@@ -3103,9 +3223,9 @@ platform.equals("Spotify", ignoreCase = true) ||
                         // matches the WAV card's "No cover art" promise and the JAudioTagger
                         // step below, which already skips wav. --embed-metadata stays on
                         // because text tags are what WAV is actually used for here.
-                        if (formatId != "audio_wav") {
-                            request.addOption("--embed-thumbnail")
-                        }
+                        // No --embed-thumbnail: it costs a full ffmpeg rewrite of the
+                        // file, and the JAudioTagger step after the download already
+                        // embeds the same cover art into the mp3 (pure Java, fast).
                         if (overrideThumbnailPath != null && formatId != "audio_wav") {
                             // Crux of the fix: forcefully stop yt-dlp from downloading its own 16:9 thumbnail
                             // so it's forced to use the 1:1 high-res art we just seeded manually.
@@ -3115,11 +3235,9 @@ platform.equals("Spotify", ignoreCase = true) ||
                             request.addOption("--convert-thumbnails", "jpg")
                         }
                     } else {
-                        // For video, write thumbnail as sidecar (embedding into video is slow)
-                        if (overrideThumbnailPath == null) {
-                            request.addOption("--write-thumbnail")
-                            request.addOption("--convert-thumbnails", "jpg")
-                        }
+                        // Video: no thumbnail work at all. The cover is only published
+                        // for audio, and a video poster is decoded from the video, so
+                        // downloading and converting one here was thrown away later.
                     }
                 } else {
                     // --write-thumbnail only saves the image file next to the media; it
@@ -3132,6 +3250,27 @@ platform.equals("Spotify", ignoreCase = true) ||
                     Log.w(TAG, "ffmpeg unavailable: keeping the source stream, embedding art with JAudioTagger where possible")
                 }
                 request.addOption("--no-post-overwrites")
+
+                // --- Transfer speed ---
+                // Parallel fragment download (DASH/HLS) and a bigger read buffer;
+                // yt-dlp's default buffer is only 1 KiB. Live recording goes
+                // through ffmpeg as the downloader, so it keeps its own path.
+                if (!isLiveDownload) {
+                    request.addOption("--concurrent-fragments", "8")
+                }
+                request.addOption("--buffer-size", "256K")
+
+                // Reuse fetchInfo's extraction (YouTube only). yt-dlp itself falls
+                // back to a fresh extraction if the saved stream URLs fail.
+                if (!isLiveDownload && platform.equals("YouTube", ignoreCase = true)) {
+                    // Prewarm still running? Wait for it instead of starting a second
+                    // parallel extraction (doubles CPU/RAM load on low-end phones).
+                    prewarmJobs[cacheKey(url)]?.let { pj -> kotlinx.coroutines.withTimeoutOrNull(90_000L) { pj.join() } }
+                    freshInfoCache(url)?.let { cached ->
+                        request.addOption("--load-info-json", cached.absolutePath)
+                        Log.d(TAG, "Reusing fetchInfo extraction, skipping a second YouTube extraction")
+                    }
+                }
                 
                 // Use a standard Desktop User-Agent to bypass simple bot protections for TikTok, Instagram, etc.
                 // Note: Do not use --impersonate as it requires curl-cffi which isn't available on Android
@@ -3146,6 +3285,7 @@ platform.equals("Spotify", ignoreCase = true) ||
                     
                     val displayLine = when {
                         line.isNullOrEmpty() -> "Preparing..."
+                        ffmpegStageLabel(line).isNotEmpty() -> ffmpegStageLabel(line)
                         line.contains("Solving", ignoreCase = true) -> "Preparing..."
                         line.contains("Downloading", ignoreCase = true) && progress > 0 -> "${progress.toInt()}% - Downloading..."
                         line.contains("Merging", ignoreCase = true) -> "Finalizing..."
@@ -3233,6 +3373,7 @@ platform.equals("Spotify", ignoreCase = true) ||
                             ext == "mp3" || ext == "aiff" -> {
                                 try {
                                     Log.d(TAG, "Embedding album art into $ext via JAudioTagger...")
+                                    emitStage(processId, forcedTitle, "Embedding cover art...")
                                     // JAudioTagger requires the file to not be read-only
                                     downloadedFile.setWritable(true)
                                     val audioFile = AudioFileIO.read(downloadedFile)
@@ -3310,6 +3451,7 @@ platform.equals("Spotify", ignoreCase = true) ||
 
                     // Move to public storage with proper categorization
                     val contentType = getContentType(url, platform)
+                    emitStage(processId, forcedTitle, "Saving to your library...")
                     val finalFile = moveToPublicStorage(finalProcessingFile, platform, contentType)
                     
                     // Publish the thumbnail alongside the file only when there is
@@ -3453,7 +3595,7 @@ platform.equals("Spotify", ignoreCase = true) ||
                         val thumbUrl = URL(thumbnail)
                         BufferedInputStream(thumbUrl.openStream()).use { input ->
                             FileOutputStream(thumbFile).use { output ->
-                                val data = ByteArray(1024)
+                                val data = ByteArray(64 * 1024)
                                 var count: Int
                                 while (input.read(data).also { count = it } != -1) {
                                     output.write(data, 0, count)
@@ -3485,7 +3627,8 @@ platform.equals("Spotify", ignoreCase = true) ||
                 // Metadata & Thumbnails - embed cover art from YouTube into the MP3 ID3 tags
                 if (ffmpegAvailable) {
                     request.addOption("--embed-metadata")
-                    request.addOption("--embed-thumbnail")
+                    // No --embed-thumbnail: a full ffmpeg rewrite, and the JAudioTagger
+                    // step below embeds the same art (plus Spotify's tags) in pure Java.
                     if (!thumbnail.isNullOrEmpty()) {
                         // Force yt-dlp to use our pre-downloaded Spotify thumbnail
                         request.addOption("--no-write-thumbnail")
@@ -3500,6 +3643,8 @@ platform.equals("Spotify", ignoreCase = true) ||
                 }
                 
                 // Network options
+                request.addOption("--concurrent-fragments", "8")
+                request.addOption("--buffer-size", "256K")
                 request.addOption("--force-ipv4")
                 request.addOption("--no-check-certificate")
                 request.addOption("--socket-timeout", "30")
@@ -3509,6 +3654,7 @@ platform.equals("Spotify", ignoreCase = true) ||
                     
                     val displayLine = when {
                         line.isNullOrEmpty() -> "Preparing..."
+                        ffmpegStageLabel(line).isNotEmpty() -> ffmpegStageLabel(line)
                         line.contains("Searching", ignoreCase = true) -> "Searching YouTube..."
                         line.contains("Downloading", ignoreCase = true) && progress > 0 -> "${progress.toInt()}% - Downloading..."
                         line.contains("Converting", ignoreCase = true) -> "Converting to MP3..."
@@ -3624,7 +3770,7 @@ platform.equals("Spotify", ignoreCase = true) ||
                                     val thumbUrl = URL(thumbnail)
                                     BufferedInputStream(thumbUrl.openStream()).use { input ->
                                         FileOutputStream(targetThumb).use { output ->
-                                            input.copyTo(output)
+                                            input.copyTo(output, 1 shl 20)
                                         }
                                     }
                                 }
@@ -4014,6 +4160,67 @@ fun cancelDownload(processId: String, promise: Promise) {
      * @return a file:// URI for the cached JPEG, or null when unavailable.
      */
     private fun videoThumbnail(file: File, targetWidth: Int = 480): String? {
+        // The platform decoder is the fast path, but it only sees what this
+        // phone's hardware codecs can play. YouTube often serves AV1 / VP9, and
+        // on a phone without that decoder MediaMetadataRetriever returns no frame
+        // at all, which left a bare icon where a poster should be. ffmpeg decodes
+        // in software, so it covers exactly those files.
+        return videoThumbnailPlatform(file, targetWidth) ?: ffmpegPosterFrame(file, targetWidth)
+    }
+
+    /** At most two software decodes at once, so a full grid cannot spawn a dozen ffmpegs. */
+    private val posterFfmpegGate = java.util.concurrent.Semaphore(2)
+
+    /**
+     * Poster frame decoded by the bundled ffmpeg, cached under the same key as
+     * the platform path. Returns a file:// URI, or null when ffmpeg is missing or
+     * the file has no decodable video.
+     */
+    private fun ffmpegPosterFrame(file: File, targetWidth: Int): String? {
+        val ext = file.extension.lowercase()
+        if (ext !in VIDEO_EXTENSIONS || !file.exists() || file.length() == 0L) return null
+
+        val cacheDir = File(reactApplicationContext.cacheDir, "videothumbs").apply { mkdirs() }
+        val key = "${file.absolutePath.hashCode().toUInt()}-${file.lastModified()}-${file.length()}"
+        val out = File(cacheDir, "$key.jpg")
+        if (out.exists() && out.length() > 0L) return "file://${out.absolutePath}"
+
+        posterFfmpegGate.acquire()
+        try {
+            // Sample an eighth of the way in, like the platform path: openings
+            // are often black or a rating slate. Retry at 0 for very short clips.
+            val durMs = mediaDurationMs(file)
+            val first = if (durMs > 0) maxOf(1.0, durMs / 8000.0) else 1.0
+            for (seek in listOf(String.format(Locale.US, "%.2f", first), "0")) {
+                out.delete()
+                val code = runFfmpeg(
+                    listOf(
+                        "-y", "-ss", seek, "-i", file.absolutePath,
+                        "-frames:v", "1",
+                        "-vf", "scale=$targetWidth:-2",
+                        "-q:v", "4",
+                        out.absolutePath
+                    ),
+                    "poster-${out.nameWithoutExtension}",
+                    AtomicBoolean(false)
+                )
+                if (code == 0 && out.exists() && out.length() > 0L) {
+                    Log.d(TAG, "Poster frame for ${file.name} via ffmpeg (${out.length()} bytes)")
+                    return "file://${out.absolutePath}"
+                }
+            }
+            out.delete()
+            Log.w(TAG, "ffmpeg could not produce a poster for ${file.name}")
+            return null
+        } catch (e: Exception) {
+            Log.w(TAG, "ffmpeg poster failed for ${file.name}: ${e.message}")
+            return null
+        } finally {
+            posterFfmpegGate.release()
+        }
+    }
+
+    private fun videoThumbnailPlatform(file: File, targetWidth: Int = 480): String? {
         val ext = file.extension.lowercase()
         if (ext !in VIDEO_EXTENSIONS || !file.exists() || file.length() == 0L) return null
 

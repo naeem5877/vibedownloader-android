@@ -638,3 +638,68 @@ export const getPlatformIcon = (
   if (!platform) return null;
   return PLATFORM_ICONS[platform.trim().toLowerCase()] ?? null;
 };
+
+export const UserIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textSecondary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+            d="M19 21v-2a4 4 0 00-4-4H9a4 4 0 00-4 4v2"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+        <Circle cx={12} cy={7} r={4} stroke={color} strokeWidth={2} />
+    </Svg>
+);
+
+export const EyeIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textSecondary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+            d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+        <Circle cx={12} cy={12} r={3} stroke={color} strokeWidth={2} />
+    </Svg>
+);
+
+export const TimerIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textSecondary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+            d="M10 2h4M12 14l3-3"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+        <Circle cx={12} cy={14} r={8} stroke={color} strokeWidth={2} />
+    </Svg>
+);
+
+/** Lightning bolt (Lucide "zap"), the Convert tab icon. */
+export const ZapIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPrimary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+            d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+    </Svg>
+);
+
+/** Magic wand (Lucide "wand-2"), the library Edit entry point. */
+export const WandIcon: React.FC<IconProps> = ({ size = 24, color = Colors.textPrimary }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+            d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8L19 13M15 9h.01M17.8 6.2L19 5M3 21l9-9M12.2 6.2L11 5"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+    </Svg>
+);

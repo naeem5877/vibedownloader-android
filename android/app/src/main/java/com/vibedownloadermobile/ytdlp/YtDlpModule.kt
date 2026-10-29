@@ -519,6 +519,558 @@ private fun isExecutable(file: File): Boolean = try {
         return null
     }
 
+    // ---------------------------------------------------------------------
+    // Library edits: pull the audio out of a video, convert or shrink it, or
+    // cut a short GIF.
+    //
+    // This is the phone side of the desktop library editor
+    // (electron/handlers/libraryEditHandler.ts) and keeps its rules:
+    //  - every edit writes a NEW file next to the original, never the source;
+    //  - output goes to a hidden temp file first (the gallery scan skips
+    //    dot-files) and is renamed into place only when ffmpeg finishes
+    //    cleanly, so a cancelled or failed job leaves nothing behind;
+    //  - values from JS are checked against an allow-list or clamped, and are
+    //    handed to ffmpeg as separate arguments, never through a shell.
+    // ---------------------------------------------------------------------
+
+    /** Library edit jobs in flight: job id -> cancel flag. */
+    private val activeEdits = ConcurrentHashMap<String, AtomicBoolean>()
+
+    /** ffmpeg processes of library edits, so cancelLibraryEdit() can kill them. */
+    private val activeEditProcesses = ConcurrentHashMap<String, Process>()
+
+    /** One edit at a time, like desktop: encoding saturates a phone's cores. */
+    private val editBusy = AtomicBoolean(false)
+
+    /** A WebM re-encode of a long clip on a phone is slow; this only stops a hang. */
+    private val EDIT_TIMEOUT_MINUTES = 120L
+
+    private val GIF_MAX_SECONDS = 15.0
+
+    /** What JS asked for, copied out of the bridge map before leaving its thread. */
+    private class LibraryEditRequest(
+        val type: String,
+        val format: String?,
+        val quality: String?,
+        val height: Double,
+        val start: Double,
+        val length: Double,
+        val width: Double,
+        val fps: Double,
+    )
+
+    /** The ffmpeg arguments for one edit. */
+    private class EditPlan(
+        val ext: String,
+        /** Appended to the original's name, e.g. ` (720p)`. */
+        val suffix: String,
+        /** Input options (placed before -i). */
+        val pre: List<String>,
+        /** Output options (placed after -i). */
+        val post: List<String>,
+        /** Seconds of output expected, for the progress bar. 0 when unknown. */
+        val totalSeconds: Double,
+    )
+
+    private fun ReadableMap.optStr(key: String): String? =
+        if (hasKey(key) && !isNull(key)) getString(key) else null
+
+    private fun ReadableMap.optNum(key: String, fallback: Double = 0.0): Double =
+        if (hasKey(key) && !isNull(key)) getDouble(key) else fallback
+
+    private fun toLibraryEditRequest(map: ReadableMap) = LibraryEditRequest(
+        type = map.optStr("type") ?: "",
+        format = map.optStr("format"),
+        quality = map.optStr("quality"),
+        height = map.optNum("height"),
+        start = map.optNum("start"),
+        length = map.optNum("length"),
+        width = map.optNum("width"),
+        fps = map.optNum("fps"),
+    )
+
+    /** Width, height (as displayed, rotation applied) and duration of a video. */
+    private class VideoProbe(val width: Int, val height: Int, val durationSec: Double)
+
+    private fun probeVideo(file: File): VideoProbe {
+        val retriever = android.media.MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            fun meta(key: Int) = retriever.extractMetadata(key)?.toLongOrNull() ?: 0L
+            var w = meta(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH).toInt()
+            var h = meta(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT).toInt()
+            val rotation = meta(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION).toInt()
+            // Phones record portrait video as a landscape stream plus a rotation
+            // flag; ffmpeg autorotates, so the filters see the displayed shape.
+            if (rotation == 90 || rotation == 270) { val t = w; w = h; h = t }
+            val ms = meta(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+            VideoProbe(w, h, if (ms > 0) ms / 1000.0 else 0.0)
+        } catch (e: Exception) {
+            VideoProbe(0, 0, 0.0)
+        } finally {
+            releaseRetriever(retriever)
+        }
+    }
+
+    private fun fixed2(n: Double): String = String.format(Locale.US, "%.2f", n)
+
+    private fun buildEditPlan(probe: VideoProbe, sourceExt: String, req: LibraryEditRequest): EditPlan? {
+        val dur = probe.durationSec
+
+        when (req.type) {
+            "audio" -> {
+                val format = if (req.format == "m4a") "m4a" else "mp3"
+                val best = req.quality != "standard"
+                val post = mutableListOf("-vn", "-map", "0:a:0", "-map_metadata", "0")
+                if (format == "mp3") {
+                    post.addAll(listOf("-c:a", "libmp3lame", "-b:a", if (best) "320k" else "192k", "-id3v2_version", "3"))
+                } else {
+                    post.addAll(listOf("-c:a", "aac", "-b:a", if (best) "256k" else "128k"))
+                }
+                return EditPlan(format, "", emptyList(), post, dur)
+            }
+
+            "convert" -> {
+                val format: String = when (req.format) { "webm" -> "webm"; "mkv" -> "mkv"; else -> "mp4" }
+                val quality: String = when (req.quality) { "high" -> "high"; "small" -> "small"; else -> "balanced" }
+                val height = listOf(0, 1080, 720, 480, 360).firstOrNull { it.toDouble() == req.height } ?: 0
+
+                // The resolution chips name the SHORT side (720p of a portrait
+                // clip is 720 wide), so portrait is limited by width and
+                // landscape by height. `-2` keeps the aspect ratio and an even
+                // size, which yuv420p requires.
+                val portrait = probe.height > probe.width && probe.width > 0
+                val vf = when {
+                    height == 0 -> "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+                    portrait -> "scale='min($height,iw)':-2"
+                    else -> "scale=-2:'min($height,ih)'"
+                }
+
+                val post = mutableListOf("-map", "0:v:0", "-map", "0:a:0?", "-sn", "-vf", vf)
+                if (format == "webm") {
+                    val crf = when (quality) { "high" -> 29; "small" -> 38; else -> 33 }
+                    // -cpu-used 5 (desktop uses 4): a phone is several times slower
+                    // than a desktop, and this trades a little size for a lot of time.
+                    post.addAll(
+                        listOf(
+                            "-c:v", "libvpx-vp9", "-crf", crf.toString(), "-b:v", "0",
+                            "-row-mt", "1", "-deadline", "good", "-cpu-used", "5",
+                            "-c:a", "libopus", "-b:a", "128k"
+                        )
+                    )
+                } else {
+                    val crf = when (quality) { "high" -> 20; "small" -> 29; else -> 24 }
+                    post.addAll(
+                        listOf(
+                            "-c:v", "libx264", "-preset", "veryfast", "-crf", crf.toString(),
+                            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k"
+                        )
+                    )
+                    if (format == "mp4") post.addAll(listOf("-movflags", "+faststart"))
+                }
+                val tag = when {
+                    height > 0 -> "${height}p"
+                    format == sourceExt -> "converted"
+                    else -> format.uppercase(Locale.US)
+                }
+                return EditPlan(format, " ($tag)", emptyList(), post, dur)
+            }
+
+            "gif" -> {
+                val width = listOf(320, 480, 640).firstOrNull { it.toDouble() == req.width } ?: 480
+                val fps = listOf(10, 15, 20).firstOrNull { it.toDouble() == req.fps } ?: 15
+                val maxLen = if (dur > 0) minOf(GIF_MAX_SECONDS, dur) else GIF_MAX_SECONDS
+                val length = (if (req.length.isFinite()) req.length else 5.0).coerceIn(0.5, maxOf(0.5, maxLen))
+                val start = (if (req.start.isFinite()) req.start else 0.0)
+                    .coerceIn(0.0, maxOf(0.0, (if (dur > 0) dur else 3600.0) - length))
+                val vf =
+                    "fps=$fps,scale='min($width,iw)':-1:flags=lanczos," +
+                        "split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5"
+                return EditPlan(
+                    "gif", " (GIF)",
+                    listOf("-ss", fixed2(start), "-t", fixed2(length)),
+                    listOf("-an", "-vf", vf, "-loop", "0"),
+                    length
+                )
+            }
+        }
+        return null
+    }
+
+    /** `<dir>/<base><suffix>.<ext>`, with " 2", " 3"... added until it is free. */
+    private fun uniqueEditOutput(dir: File, base: String, suffix: String, ext: String, source: File): File {
+        // Very long titles plus a suffix can pass the 255-byte filename limit.
+        val safeBase = base.take(150)
+        var n = 1
+        while (true) {
+            val f = File(dir, "$safeBase$suffix${if (n > 1) " $n" else ""}.$ext")
+            if (!f.exists() && f.absolutePath != source.absolutePath) return f
+            n++
+        }
+    }
+
+    private fun friendlyEditError(tail: String): String = when {
+        Regex("does not contain any stream|matches no streams|Stream map", RegexOption.IGNORE_CASE).containsMatchIn(tail) ->
+            "This video has no audio track to extract."
+        Regex("Unknown encoder|Encoder .* not found", RegexOption.IGNORE_CASE).containsMatchIn(tail) ->
+            "This copy of FFmpeg cannot make that format. Try MP4 instead."
+        Regex("No space left", RegexOption.IGNORE_CASE).containsMatchIn(tail) ->
+            "Your phone is out of storage."
+        Regex("Permission denied", RegexOption.IGNORE_CASE).containsMatchIn(tail) ->
+            "The folder is read-only or the file is in use."
+        else -> "FFmpeg could not finish this edit."
+    }
+
+    private fun sendEditProgress(jobId: String, pct: Double) {
+        val params = WritableNativeMap().apply {
+            putString("jobId", jobId)
+            putDouble("pct", pct)
+        }
+        try {
+            sendEvent("onLibraryEditProgress", params)
+        } catch (e: Exception) {
+            // JS side is gone (reload / app closing); the job still finishes cleanly.
+        }
+    }
+
+    /** Matches ffmpeg's `-progress` key=value lines, which are not error text. */
+    private val ffmpegProgressLine = Regex("^[a-z_0-9]+=.*$")
+
+    /**
+     * Runs ffmpeg for one edit, streaming `-progress` into events.
+     * Returns the exit code and the tail of any non-progress output, or null
+     * when the process could not start.
+     */
+    private fun runEditFfmpeg(
+        jobId: String,
+        args: List<String>,
+        totalSeconds: Double,
+        cancelled: AtomicBoolean,
+    ): Pair<Int, String>? {
+        val binary = ffmpegBinary() ?: return null
+        val builder = ProcessBuilder(listOf(binary.absolutePath) + args).redirectErrorStream(true)
+        builder.environment()["LD_LIBRARY_PATH"] = ffmpegLibraryPath()
+
+        val process = try {
+            builder.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "ffmpeg edit failed to start", e)
+            return null
+        }
+        activeEditProcesses[jobId] = process
+
+        // Only stops a hung encode; a normal job never reaches it.
+        val watchdog = scope.launch {
+            delay(EDIT_TIMEOUT_MINUTES * 60_000L)
+            if (process.isAlive) {
+                Log.w(TAG, "ffmpeg edit timed out after $EDIT_TIMEOUT_MINUTES minutes")
+                process.destroyForcibly()
+            }
+        }
+
+        val tail = StringBuilder()
+        var lastSent = 0L
+        try {
+            process.inputStream.bufferedReader().useLines { lines ->
+                for (line in lines) {
+                    if (cancelled.get()) break
+                    if (line.startsWith("out_time_us=")) {
+                        val us = line.substringAfter('=').trim().toLongOrNull() ?: continue
+                        if (totalSeconds <= 0) continue
+                        val now = System.currentTimeMillis()
+                        if (now - lastSent < 100) continue
+                        lastSent = now
+                        // Held below 100 so the bar only completes once the file is in place.
+                        sendEditProgress(jobId, minOf(99.0, (us / 1e6 / totalSeconds) * 100.0))
+                    } else if (!ffmpegProgressLine.matches(line)) {
+                        tail.append(line).append('\n')
+                        if (tail.length > 2000) tail.delete(0, tail.length - 2000)
+                    }
+                }
+            }
+            if (cancelled.get()) process.destroy()
+            if (!process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) process.destroyForcibly()
+            return Pair(process.exitValue(), tail.toString())
+        } catch (e: Exception) {
+            Log.e(TAG, "ffmpeg edit failed", e)
+            process.destroyForcibly()
+            return null
+        } finally {
+            watchdog.cancel()
+            activeEditProcesses.remove(jobId)
+        }
+    }
+
+    private fun editResultMap(success: Boolean, error: String? = null, cancelled: Boolean = false): WritableNativeMap =
+        WritableNativeMap().apply {
+            putBoolean("success", success)
+            if (error != null) putString("error", error)
+            if (cancelled) putBoolean("cancelled", true)
+        }
+
+    /**
+     * Probes a video for the library editor: displayed size and duration.
+     * Resolves zeros for anything it cannot read, so the editor degrades to
+     * "no size shown" rather than failing to open.
+     */
+    @ReactMethod
+    fun getMediaProbe(filePath: String, promise: Promise) {
+        scope.launch {
+            try {
+                val file = File(filePath)
+                val probe = if (file.isFile) probeVideo(file) else VideoProbe(0, 0, 0.0)
+                val map = WritableNativeMap().apply {
+                    putInt("width", probe.width)
+                    putInt("height", probe.height)
+                    putDouble("duration", probe.durationSec)
+                }
+                promise.resolve(map)
+            } catch (e: Exception) {
+                promise.reject("PROBE_ERROR", e.message, e)
+            }
+        }
+    }
+
+    /**
+     * Evenly spaced frames across a video, for the editor's filmstrip.
+     *
+     * Resolves one `file://` URI per slot, or "" for a frame that could not be
+     * decoded, so the strip keeps its shape instead of shifting. Frames are
+     * cached by path, mtime and size, so reopening the editor is instant.
+     */
+    @ReactMethod
+    fun getVideoFrames(filePath: String, count: Int, promise: Promise) {
+        scope.launch {
+            val slots = count.coerceIn(2, 24)
+            val result = WritableNativeArray()
+            val file = File(filePath)
+            if (!file.isFile || file.extension.lowercase() !in VIDEO_EXTENSIONS) {
+                repeat(slots) { result.pushString("") }
+                promise.resolve(result)
+                return@launch
+            }
+
+            val cacheDir = File(reactApplicationContext.cacheDir, "editorframes").apply { mkdirs() }
+            val key = "${file.absolutePath.hashCode().toUInt()}-${file.lastModified()}-${file.length()}"
+            val retriever = android.media.MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(file.absolutePath)
+                val durationMs = retriever
+                    .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L
+                for (i in 0 until slots) {
+                    val cached = File(cacheDir, "$key-$i-of-$slots.jpg")
+                    if (cached.isFile && cached.length() > 0) {
+                        result.pushString("file://${cached.absolutePath}")
+                        continue
+                    }
+                    try {
+                        // Middle of each slot, so the first and last frames are not black fades.
+                        val atUs = ((i + 0.5) / slots * durationMs * 1000).toLong()
+                        val frame = retriever.getFrameAtTime(
+                            atUs, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                        )
+                        if (frame == null) {
+                            result.pushString("")
+                            continue
+                        }
+                        val targetH = 160
+                        val scaled = if (frame.height > targetH) {
+                            val w = (frame.width.toLong() * targetH / frame.height).toInt().coerceAtLeast(1)
+                            android.graphics.Bitmap.createScaledBitmap(frame, w, targetH, true)
+                        } else frame
+                        FileOutputStream(cached).use { out ->
+                            scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 78, out)
+                        }
+                        if (scaled !== frame) scaled.recycle()
+                        frame.recycle()
+                        result.pushString("file://${cached.absolutePath}")
+                    } catch (e: Exception) {
+                        cached.delete()
+                        result.pushString("")
+                    }
+                }
+                promise.resolve(result)
+            } catch (e: Exception) {
+                Log.w(TAG, "Frame extraction failed: ${e.message}")
+                val empty = WritableNativeArray()
+                repeat(slots) { empty.pushString("") }
+                promise.resolve(empty)
+            } finally {
+                releaseRetriever(retriever)
+            }
+        }
+    }
+
+    /**
+     * Runs one library edit and resolves with `{ success, path, name, inBytes,
+     * outBytes, savedElsewhere }`, or `{ success: false, error | cancelled }`.
+     * Failures are resolved, not rejected, so the editor can show the message
+     * in place; the promise only rejects on an unexpected crash.
+     *
+     * Progress arrives as `onLibraryEditProgress` events `{ jobId, pct }`,
+     * where pct is -1 when the length is unknown.
+     */
+    @ReactMethod
+    fun editLibraryFile(
+        jobId: String,
+        sourcePath: String,
+        platform: String?,
+        request: ReadableMap,
+        promise: Promise
+    ) {
+        val req = toLibraryEditRequest(request)
+
+        if (!editBusy.compareAndSet(false, true)) {
+            promise.resolve(editResultMap(false, "Another edit is already running."))
+            return
+        }
+        val cancelled = AtomicBoolean(false)
+        activeEdits[jobId] = cancelled
+
+        scope.launch {
+            var temp: File? = null
+            try {
+                val source = File(sourcePath)
+                if (!source.isFile) {
+                    promise.resolve(editResultMap(false, "That file was moved or deleted."))
+                    return@launch
+                }
+                if (source.extension.lowercase() !in VIDEO_EXTENSIONS) {
+                    promise.resolve(editResultMap(false, "Only videos can be edited here."))
+                    return@launch
+                }
+                if (!isFfmpegAvailable()) {
+                    promise.resolve(editResultMap(false, "FFmpeg cannot start on this device."))
+                    return@launch
+                }
+
+                val probe = probeVideo(source)
+                val plan = buildEditPlan(probe, source.extension.lowercase(), req)
+                if (plan == null) {
+                    promise.resolve(editResultMap(false, "Unknown edit."))
+                    return@launch
+                }
+
+                // Prefer the original's folder. If it cannot be written (a legacy
+                // public folder under scoped storage), fall back to the app's own
+                // library folder, which the gallery scans too.
+                val safeJob = jobId.replace(Regex("[^A-Za-z0-9_-]"), "_")
+                val tempName = ".edit-$safeJob.${plan.ext}"
+                var dir: File = source.parentFile ?: reactApplicationContext.cacheDir
+                var savedElsewhere = false
+                var tempFile = File(dir, tempName)
+                val writable = try { tempFile.createNewFile() || tempFile.exists() } catch (e: Exception) { false }
+                if (!writable) {
+                    val safePlatform = (platform ?: "").replace(Regex("[^A-Za-z0-9 _-]"), "").trim().ifEmpty { "Edited" }
+                    dir = File(
+                        reactApplicationContext.getExternalFilesDir(null),
+                        "vibedownloader/$safePlatform/Edited"
+                    )
+                    if (!dir.exists() && !dir.mkdirs()) {
+                        promise.resolve(editResultMap(false, "The folder is read-only or the file is in use."))
+                        return@launch
+                    }
+                    tempFile = File(dir, tempName)
+                    savedElsewhere = true
+                }
+                temp = tempFile
+
+                // A crash mid-encode leaves a hidden temp behind; sweep old ones.
+                val staleBefore = System.currentTimeMillis() - 60 * 60 * 1000L
+                dir.listFiles { f -> f.name.startsWith(".edit-") && f != tempFile && f.lastModified() < staleBefore }
+                    ?.forEach { it.delete() }
+
+                val finalFile = uniqueEditOutput(dir, source.nameWithoutExtension, plan.suffix, plan.ext, source)
+
+                val args = listOf("-hide_banner", "-loglevel", "error", "-y", "-nostdin", "-progress", "pipe:1", "-nostats") +
+                    plan.pre + listOf("-i", source.absolutePath) + plan.post + listOf(tempFile.absolutePath)
+
+                sendEditProgress(jobId, if (plan.totalSeconds > 0) 0.0 else -1.0)
+                val outcome = runEditFfmpeg(jobId, args, plan.totalSeconds, cancelled)
+
+                if (cancelled.get()) {
+                    tempFile.delete()
+                    promise.resolve(editResultMap(false, cancelled = true))
+                    return@launch
+                }
+                if (outcome == null) {
+                    tempFile.delete()
+                    promise.resolve(editResultMap(false, "FFmpeg could not start."))
+                    return@launch
+                }
+                val (code, tail) = outcome
+                if (code != 0 || !tempFile.exists() || tempFile.length() == 0L) {
+                    Log.w(TAG, "Library edit failed ($code): ${tail.take(400)}")
+                    tempFile.delete()
+                    promise.resolve(editResultMap(false, friendlyEditError(tail)))
+                    return@launch
+                }
+
+                val moved = tempFile.renameTo(finalFile) || try {
+                    tempFile.copyTo(finalFile, overwrite = false)
+                    tempFile.delete()
+                    true
+                } catch (e: Exception) {
+                    false
+                }
+                if (!moved) {
+                    tempFile.delete()
+                    promise.resolve(editResultMap(false, "Could not save the file."))
+                    return@launch
+                }
+                temp = null
+
+                // Let other apps (Gallery, Music) see the new file straight away.
+                try {
+                    android.media.MediaScannerConnection.scanFile(
+                        reactApplicationContext, arrayOf(finalFile.absolutePath), null, null
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "Media scan after edit failed: ${e.message}")
+                }
+
+                sendEditProgress(jobId, 100.0)
+                val result = editResultMap(true).apply {
+                    putString("path", finalFile.absolutePath)
+                    putString("name", finalFile.name)
+                    putDouble("inBytes", source.length().toDouble())
+                    putDouble("outBytes", finalFile.length().toDouble())
+                    putBoolean("savedElsewhere", savedElsewhere)
+                }
+                promise.resolve(result)
+            } catch (e: Exception) {
+                Log.e(TAG, "Library edit crashed", e)
+                try { temp?.delete() } catch (ignored: Exception) {}
+                promise.resolve(editResultMap(false, e.message ?: "The edit failed."))
+            } finally {
+                activeEdits.remove(jobId)
+                activeEditProcesses.remove(jobId)
+                editBusy.set(false)
+            }
+        }
+    }
+
+    /** Stops a running library edit; resolves true when [jobId] was running. */
+    @ReactMethod
+    fun cancelLibraryEdit(jobId: String, promise: Promise) {
+        val flag = activeEdits[jobId]
+        if (flag == null) {
+            promise.resolve(false)
+            return
+        }
+        flag.set(true)
+        activeEditProcesses.remove(jobId)?.let { process ->
+            try {
+                process.destroy()
+                if (!process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) process.destroyForcibly()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error destroying edit process: ${e.message}")
+            }
+        }
+        promise.resolve(true)
+    }
+
      /**
      * Counts formats each YouTube player client can still see.
 
@@ -2607,6 +3159,7 @@ platform.equals("Spotify", ignoreCase = true) ||
                         putDouble("progress", progress.toDouble())
                         putDouble("eta", eta.toDouble())
                         putString("line", displayLine)
+                        putTransferDetails(line)
                     }
                     sendEvent("onDownloadProgress", params)
                     
@@ -2969,6 +3522,7 @@ platform.equals("Spotify", ignoreCase = true) ||
                         putDouble("progress", progress.toDouble())
                         putDouble("eta", eta.toDouble())
                         putString("line", displayLine)
+                        putTransferDetails(line)
                     }
                     sendEvent("onDownloadProgress", params)
                     showProgressNotification(processId, "Downloading $title...", progress.toInt(), displayLine)
@@ -3954,5 +4508,19 @@ fun cancelDownload(processId: String, promise: Promise) {
         reactApplicationContext
             .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
             .emit(eventName, params)
+    }
+
+    // yt-dlp prints "[download]  45.2% of 120.50MiB at 2.34MiB/s ETA 00:32".
+    // The friendly displayLine drops all of that, so pull speed and size out of
+    // the raw line and ship them beside it for the progress timeline.
+    private val speedRegex = Regex("""at\s+~?\s*([\d.]+\s*[KMGT]?i?B/s)""", RegexOption.IGNORE_CASE)
+    private val sizeRegex = Regex("""of\s+~?\s*([\d.]+\s*[KMGT]?i?B)""", RegexOption.IGNORE_CASE)
+
+    /** Adds `speed`, `size` and `rawLine` to a progress event. Missing parts are simply left out. */
+    private fun WritableMap.putTransferDetails(rawLine: String?) {
+        if (rawLine.isNullOrEmpty()) return
+        speedRegex.find(rawLine)?.groupValues?.getOrNull(1)?.let { putString("speed", it.trim()) }
+        sizeRegex.find(rawLine)?.groupValues?.getOrNull(1)?.let { putString("size", it.trim()) }
+        putString("rawLine", rawLine.take(160))
     }
 }

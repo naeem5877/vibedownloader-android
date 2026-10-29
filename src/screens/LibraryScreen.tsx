@@ -38,10 +38,12 @@ import {
   TrashIcon,
   TypeIcon,
   VideoIcon,
+  WandIcon,
   getPlatformIcon,
 } from '../components/Icons';
 import { EmptyState } from '../components/EmptyState';
 import { MediaPreviewModal } from '../components/MediaPreviewModal';
+import { LibraryEditor } from '../components/LibraryEditor';
 import { BottomFade } from '../components/BottomFade';
 import SubtitleViewerModal, {
   type SubtitleViewerFile,
@@ -101,6 +103,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
   const { width } = useWindowDimensions();
   const [showSearch, setShowSearch] = useState(false);
   const [preview, setPreview] = useState<LibraryItem | null>(null);
+  const [editing, setEditing] = useState<LibraryItem | null>(null);
   const [textViewer, setTextViewer] = useState<SubtitleViewerFile | null>(null);
 
   // Re-scan when the tab becomes active. `reload` is already fire-and-forget
@@ -243,6 +246,8 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
       const sizeLabel = item.size > 0 ? formatFileSize(item.size) : '—';
 
       const inSelection = gallery.selectionMode;
+      // The editor works on video (audio / convert / GIF), same rule as the preview.
+      const canEdit = kind === 'video' && !inSelection;
 
       return (
         <Pressable
@@ -337,7 +342,10 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
           )}
 
           {/* Title + meta overlaid on the fade */}
-          <View style={styles.overlayBody}>
+          <View
+            style={[styles.overlayBody, canEdit && styles.overlayBodyEditable]}
+            pointerEvents="none"
+          >
             <Text style={styles.tileTitle} numberOfLines={2}>
               {displayName}
             </Text>
@@ -346,10 +354,29 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
               {sizeLabel !== '—' ? `  ·  ${sizeLabel}` : ''}
             </Text>
           </View>
+
+          {/* One-tap editor: Audio / Convert / GIF without opening the preview first */}
+          {canEdit && (
+            <Pressable
+              onPress={() => {
+                Haptics.impact();
+                setEditing(item);
+              }}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={`Edit ${displayName}`}
+              style={({ pressed }) => [
+                styles.editBtn,
+                pressed && styles.editBtnPressed,
+              ]}
+            >
+              <WandIcon size={15} color="#FFF" />
+            </Pressable>
+          )}
         </Pressable>
       );
     },
-    [tileWidth, gallery, openItem, platformLabel],
+    [tileWidth, gallery, openItem, platformLabel, setEditing],
   );
 
   const header = useMemo(
@@ -515,7 +542,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
       {gallery.selectionMode ? (
         <View style={styles.selHeader}>
@@ -621,6 +648,22 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
             setPreview(null);
             handleDeleteOne(target);
           }}
+          onEdit={() => {
+            // Two stacked modals misbehave on Android, so the preview closes
+            // first and the editor opens over the gallery.
+            const target = preview;
+            setPreview(null);
+            setEditing(target);
+          }}
+        />
+      ) : null}
+
+      {editing ? (
+        <LibraryEditor
+          item={editing}
+          poster={gallery.thumbnails[editing.path] ?? editing.thumbnail ?? null}
+          onClose={() => setEditing(null)}
+          onDone={() => gallery.reload()}
         />
       ) : null}
 
@@ -954,6 +997,33 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     paddingTop: 28,
     zIndex: 3,
+  },
+  // Leaves room on the right for the edit button.
+  overlayBodyEditable: {
+    paddingRight: 54,
+  },
+  editBtn: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(217,70,239,0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    zIndex: 6,
+    elevation: 4,
+    shadowColor: '#d946ef',
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  editBtnPressed: {
+    transform: [{ scale: 0.92 }],
+    backgroundColor: 'rgba(217,70,239,1)',
   },
   tileTitle: {
     color: '#FFFFFF',

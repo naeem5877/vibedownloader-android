@@ -23,6 +23,7 @@ import {
     ShareIcon,
     TrashIcon,
     VideoIcon,
+    WandIcon,
     MusicNoteIcon,
     TypeIcon,
     getPlatformIcon,
@@ -61,9 +62,11 @@ interface MediaPreviewModalProps {
     item: PreviewItem;
     onClose: () => void;
     onDelete?: () => void;
+    /** Opens the library editor. The button only appears for videos. */
+    onEdit?: () => void;
 }
 
-function MediaPreviewModal({ item, onClose, onDelete }: MediaPreviewModalProps) {
+function MediaPreviewModal({ item, onClose, onDelete, onEdit }: MediaPreviewModalProps) {
     const videoRef = useRef<VideoRef>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -175,6 +178,20 @@ function MediaPreviewModal({ item, onClose, onDelete }: MediaPreviewModalProps) 
                         </Pressable>
 
                         <View style={styles.topBarActions}>
+                            {isVideo && onEdit ? (
+                                <Pressable
+                                    onPress={() => {
+                                        Haptics.impact();
+                                        onEdit();
+                                    }}
+                                    hitSlop={10}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Edit video"
+                                    style={styles.glassBtn}
+                                >
+                                    <WandIcon size={18} color="#FFF" />
+                                </Pressable>
+                            ) : null}
                             <Pressable
                                 onPress={handleShare}
                                 hitSlop={10}

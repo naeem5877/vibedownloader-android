@@ -127,6 +127,12 @@ export interface DownloadProgress {
     progress: number;
     eta: number;
     line: string;
+    /** e.g. `2.34MiB/s`. Only present on lines that report a transfer rate. */
+    speed?: string;
+    /** Total size yt-dlp reported for the stream, e.g. `120.50MiB`. */
+    size?: string;
+    /** The untouched yt-dlp line (stage names like [Merger] / [ExtractAudio] live here). */
+    rawLine?: string;
 }
 
 export interface DownloadResult {
@@ -160,6 +166,42 @@ export interface DownloadedFile {
 export interface BulkDeleteResult {
     deleted: string[];
     failed: string[];
+}
+
+/**
+ * A quick edit of a video already in the library. Same shapes as the desktop
+ * app's `LibraryEditRequest`, so both apps describe an edit identically.
+ */
+export type LibraryEditRequest =
+    | { type: 'audio'; format: 'mp3' | 'm4a'; quality: 'best' | 'standard' }
+    | { type: 'convert'; format: 'mp4' | 'webm' | 'mkv'; height: number; quality: 'high' | 'balanced' | 'small' }
+    | { type: 'gif'; start: number; length: number; width: number; fps: number };
+
+export interface LibraryEditResult {
+    success: boolean;
+    /** Absolute path of the new file. */
+    path?: string;
+    name?: string;
+    inBytes?: number;
+    outBytes?: number;
+    /** True when the original's folder was read-only and the app's own library folder was used. */
+    savedElsewhere?: boolean;
+    error?: string;
+    cancelled?: boolean;
+}
+
+/** Displayed size and length of a video. Zeros when the file cannot be read. */
+export interface MediaProbe {
+    width: number;
+    height: number;
+    /** Seconds. */
+    duration: number;
+}
+
+export interface LibraryEditProgress {
+    jobId: string;
+    /** 0-100, or -1 when the output length is not known. */
+    pct: number;
 }
 
 // Shared Data from Intent
@@ -239,6 +281,23 @@ export interface YtDlpNativeModule {
     getMediaThumbnail(filePath: string): Promise<string | null>;
     openFile(filePath: string): Promise<boolean>;
     shareFile(filePath: string): Promise<boolean>;
+    /** Displayed size and duration of a video, for the library editor. Never rejects on unreadable files. */
+    getMediaProbe(filePath: string): Promise<MediaProbe>;
+    /**
+     * `count` evenly spaced frames of a video as file:// URIs, for the editor's
+     * filmstrip. A frame that cannot be decoded is an empty string, so the
+     * strip keeps its shape. Cached on disk.
+     */
+    getVideoFrames(filePath: string, count: number): Promise<string[]>;
+    /**
+     * Runs one library edit (audio extract, convert, GIF) and saves the result
+     * as a NEW file beside the original. Failures resolve with
+     * `{ success: false, error }` so the editor can show the message in place.
+     * Progress arrives through `onLibraryEditProgress`. Only one edit runs at a time.
+     */
+    editLibraryFile(jobId: string, sourcePath: string, platform: string | null, request: LibraryEditRequest): Promise<LibraryEditResult>;
+    /** Stops a running edit. Resolves true when `jobId` was running. */
+    cancelLibraryEdit(jobId: string): Promise<boolean>;
     // Share Intent Methods
     getSharedText(): Promise<string | null>;
     getSharedData(): Promise<SharedData | null>;
@@ -275,6 +334,12 @@ export const ytDlpEventEmitter = new NativeEventEmitter(YtDlpModule);
 
 export function onDownloadProgress(callback: (progress: DownloadProgress) => void): () => void {
     const subscription = ytDlpEventEmitter.addListener('onDownloadProgress', callback);
+    return () => subscription.remove();
+}
+
+/** Progress of a running library edit, for the editor's progress bar. */
+export function onLibraryEditProgress(callback: (progress: LibraryEditProgress) => void): () => void {
+    const subscription = ytDlpEventEmitter.addListener('onLibraryEditProgress', callback);
     return () => subscription.remove();
 }
 

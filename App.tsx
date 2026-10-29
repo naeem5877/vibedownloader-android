@@ -531,6 +531,8 @@ const styles = StyleSheet.create({
     borderLeftWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255, 255, 255, 0.07)',
+    // Brighter top edge, like light catching the rim of a floating bar.
+    borderTopColor: 'rgba(255, 255, 255, 0.12)',
     overflow: 'hidden',
     elevation: 24,
     shadowColor: '#000',

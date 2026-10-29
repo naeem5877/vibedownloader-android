@@ -2163,7 +2163,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   <TouchableOpacity
                     style={[
                       styles.quickDownloadBtn,
-                      { backgroundColor: platformColor },
+                      // Glow takes the platform tint: red for YouTube,
+                      // magenta for Instagram, green for Spotify.
+                      {
+                        backgroundColor: platformColor,
+                        shadowColor: platformColor,
+                      },
                     ]}
                     onPress={() => {
                       // YouTube Music and other audio platforms default to MP3
@@ -2484,11 +2489,13 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 16,
     gap: Spacing.sm,
+    // shadowColor is set per platform in the JSX. A bit stronger than before
+    // so the tint reads against the black background.
     shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 10,
   },
   quickDownloadText: {
     color: '#FFF',

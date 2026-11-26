@@ -3,7 +3,7 @@
  * selected platform's colour from the top edge of the screen. It sits behind
  * the content and cross-fades whenever the platform changes.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, StyleSheet } from 'react-native';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { Ease } from './Motion';
@@ -66,11 +66,13 @@ export const AmbientGlow: React.FC<AmbientGlowProps> = ({
     }).start();
   }, [color, cur, fade]);
 
+  const prevOpacity = useMemo(() => Animated.subtract(1, fade), [fade]);
+
   return (
     <>
       <Animated.View
         pointerEvents="none"
-        style={[styles.layer, { height, opacity: Animated.subtract(1, fade) }]}
+        style={[styles.layer, { height, opacity: prevOpacity }]}
       >
         <Layer id="glow-prev" color={prev} height={height} intensity={intensity} />
       </Animated.View>

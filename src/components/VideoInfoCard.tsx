@@ -8,7 +8,7 @@
  * shimmer sweep + zoom-in on the thumbnail, LIVE badge, optional top-right
  * badge (Spotify album) and the purple Cut & Download action.
  */
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -91,14 +91,14 @@ export const VideoInfoCard: React.FC<VideoInfoCardProps> = ({
     return () => loop.stop();
   }, [isLive, livePulse]);
 
-  const sweepX = sweep.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-thumbWidth * 1.1, thumbWidth * 1.1],
-  });
-  const sweepOpacity = sweep.interpolate({
-    inputRange: [0, 0.05, 0.95, 1],
-    outputRange: [0, 1, 1, 0],
-  });
+  const sweepX = useMemo(
+    () => sweep.interpolate({ inputRange: [0, 1], outputRange: [-thumbWidth * 1.1, thumbWidth * 1.1] }),
+    [sweep, thumbWidth],
+  );
+  const sweepOpacity = useMemo(
+    () => sweep.interpolate({ inputRange: [0, 0.05, 0.95, 1], outputRange: [0, 1, 1, 0] }),
+    [sweep],
+  );
 
   return (
     <Animated.View style={{ opacity: fade, transform: [{ translateY: rise }] }}>

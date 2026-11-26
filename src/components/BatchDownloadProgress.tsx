@@ -2,7 +2,7 @@
  * BatchDownloadProgress - Shows progress for playlist/batch downloads
  * Displays overall progress + individual track statuses
  */
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import {
     View,
     Text,
@@ -112,10 +112,16 @@ export const BatchDownloadProgress: React.FC<BatchDownloadProgressProps> = ({
     const radius = 34;
     const strokeWidth = 5;
     const circumference = 2 * Math.PI * radius;
-    const strokeDashoffset = progressAnim.interpolate({
-        inputRange: [0, 100],
-        outputRange: [circumference, 0],
-    });
+    // Derived nodes are created once: building them in render made a new native
+    // animated node on every progress tick (OOM in NativeAnimatedNodesManager).
+    const strokeDashoffset = useMemo(
+        () => progressAnim.interpolate({ inputRange: [0, 100], outputRange: [circumference, 0] }),
+        [progressAnim, circumference],
+    );
+    const shimmerOffset = useMemo(
+        () => shimmerAnim.interpolate({ inputRange: [0, 1], outputRange: [circumference, -circumference] }),
+        [shimmerAnim, circumference],
+    );
 
     const getStatusIcon = (status: BatchDownloadItem['status']) => {
         switch (status) {
@@ -194,10 +200,7 @@ export const BatchDownloadProgress: React.FC<BatchDownloadProgressProps> = ({
                                     strokeWidth={strokeWidth}
                                     fill="none"
                                     strokeDasharray={[12, circumference]}
-                                    strokeDashoffset={shimmerAnim.interpolate({
-                                        inputRange: [0, 1],
-                                        outputRange: [circumference, -circumference],
-                                    })}
+                                    strokeDashoffset={shimmerOffset}
                                     strokeLinecap="round"
                                     opacity={0.6}
                                     transform={`rotate(-90 ${size / 2} ${size / 2})`}

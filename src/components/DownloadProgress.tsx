@@ -7,7 +7,7 @@
  * This is the same thing: the thumbnail dimmed behind a ring + timeline, fed
  * by the speed / size / stage details the native module now reports.
  */
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import {
     View,
     Text,
@@ -168,14 +168,14 @@ const CircularProgress: React.FC<{
         return () => loop.stop();
     }, [processing, spin]);
 
-    const offset = anim.interpolate({
-        inputRange: [0, 100],
-        outputRange: [CIRC, 0],
-    });
-    const rotate = spin.interpolate({
-        inputRange: [0, 1],
-        outputRange: ['0deg', '360deg'],
-    });
+    const offset = useMemo(
+        () => anim.interpolate({ inputRange: [0, 100], outputRange: [CIRC, 0] }),
+        [anim],
+    );
+    const rotate = useMemo(
+        () => spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }),
+        [spin],
+    );
     const c = RING / 2;
 
     return (

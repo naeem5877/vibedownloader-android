@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 import {
     View,
     Text,
@@ -35,10 +35,10 @@ const MiniProgress: React.FC<{ progress: number; color: string; status: QueueIte
         }).start();
     }, [progress]);
 
-    const strokeDashoffset = progressAnim.interpolate({
-        inputRange: [0, 100],
-        outputRange: [circumference, 0],
-    });
+    const strokeDashoffset = useMemo(
+        () => progressAnim.interpolate({ inputRange: [0, 100], outputRange: [circumference, 0] }),
+        [progressAnim, circumference],
+    );
 
     if (status === 'done') {
         return (

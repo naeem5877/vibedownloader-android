@@ -62,6 +62,7 @@ import { LocalDB } from '../services/LocalDB';
 import { PlaylistSelectionModal } from '../components/PlaylistSelectionModal';
 import { SkeletonCard } from '../components/SkeletonCard';
 import { DiscordButton } from '../components/DiscordButton';
+import { OfflineState } from '../components/OfflineState';
 
 // BatchDownloadProgress removed in favor of useDownloadQueue
 import { useYtDlp } from '../hooks/useYtDlp';
@@ -77,7 +78,6 @@ import {
   SparkleIcon,
   LayersIcon,
   WaveformIcon,
-  LibraryIcon,
   CloseIcon,
   SettingsIcon,
   ChevronRightIcon,
@@ -168,6 +168,20 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         setIsOffline(state.isConnected === false);
       });
       return () => unsubscribe();
+    }
+  }, []);
+
+  // "Try again" on the offline card: force a fresh connectivity check. Returns
+  // true when back online (the listener above then removes the card).
+  const handleRetryConnection = useCallback(async (): Promise<boolean> => {
+    try {
+      const NetInfo = require('@react-native-community/netinfo').default;
+      const net = await NetInfo.refresh();
+      const online = net?.isConnected !== false;
+      setIsOffline(!online);
+      return online;
+    } catch (e) {
+      return false;
     }
   }, []);
 
@@ -294,16 +308,27 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const scrollY = useRef(new Animated.Value(0)).current;
   const insets = useSafeAreaInsets();
   // Status-bar scrim fades in once content starts scrolling under the bar.
-  const scrimOpacity = scrollY.interpolate({
-    inputRange: [0, 60],
-    outputRange: [0, 1],
-    extrapolate: 'clamp',
-  });
-  const glowTranslateY = scrollY.interpolate({
-    inputRange: [0, 1000],
-    outputRange: [0, -1000],
-    extrapolateLeft: 'clamp',
-  });
+  // Memoised: HomeScreen re-renders on every download progress tick, and building
+  // an interpolation in render creates a new native animated node each time
+  // (Sentry VIBEDOWNLOADER-ANDROID-7/8/9/A/C: OOM in createAnimatedNode).
+  const scrimOpacity = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, 60],
+        outputRange: [0, 1],
+        extrapolate: 'clamp',
+      }),
+    [scrollY],
+  );
+  const glowTranslateY = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, 1000],
+        outputRange: [0, -1000],
+        extrapolateLeft: 'clamp',
+      }),
+    [scrollY],
+  );
   const headerSlideAnim = useRef(new Animated.Value(-20)).current;
   const batchActiveRef = useRef(false);
   const lastPastedUrlRef = useRef<string>('');
@@ -1909,7 +1934,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       >
         <AmbientGlow color={platformColor} />
       </Animated.View>
-      <OfflineBanner onActionPress={onNavigateToLibrary} />
+      <OfflineBanner />
       <StatusBar
         barStyle="light-content"
         translucent
@@ -2018,31 +2043,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           disabled={state.isLoading || state.isDownloading}
         />
 
-        {/* Offline Mode Indicator */}
+        {/* Offline state */}
         {isOffline && (
-          <View style={styles.offlineContainer}>
-            <View style={styles.offlineHero}>
-              <View style={styles.offlineGlow} />
-              <Text style={styles.offlineIcon}>🌩️</Text>
-              <Text style={styles.offlineTitle}>Network Interrupted</Text>
-              <Text style={styles.offlineSubtitle}>
-                You are currently offline. Premium downloads are paused, but
-                your Library remains fully accessible.
-              </Text>
-              {onNavigateToLibrary && (
-                <TouchableOpacity
-                  style={[
-                    styles.offlineBtn,
-                    { backgroundColor: Colors.primary },
-                  ]}
-                  onPress={onNavigateToLibrary}
-                >
-                  <LibraryIcon size={18} color={Colors.onPrimary} />
-                  <Text style={styles.offlineBtnText}>OPEN LIBRARY</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
+          <OfflineState
+            onOpenLibrary={onNavigateToLibrary}
+            onRetry={handleRetryConnection}
+          />
         )}
 
         {/* URL Input */}
@@ -2390,8 +2396,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </>
         )}
 
-        {/* Animated Empty State */}
-        {!state.videoInfo && !state.isLoading && !state.fetchError && !url && (
+        {/* Animated Empty State (hidden offline: the offline card replaces it) */}
+        {!isOffline && !state.videoInfo && !state.isLoading && !state.fetchError && !url && (
           <EmptyState
             platform={detectedPlatform}
             isOffline={isOffline}
@@ -2797,73 +2803,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.5,
   },
-  // ── Offline ──
-  offlineContainer: {
-    marginHorizontal: Spacing.md,
-    marginTop: Spacing.xl,
-    backgroundColor: `${Colors.surfaceElevated}`,
-    borderRadius: BorderRadius.xl,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.xl,
-    alignItems: 'center',
-    ...Shadows.lg,
-  },
-  offlineHero: {
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
-  offlineIcon: {
-    fontSize: 48,
-    marginBottom: Spacing.sm,
-  },
-  offlineTitle: {
-    color: Colors.textPrimary,
-    fontSize: 22,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  offlineSubtitle: {
-    color: Colors.textMuted,
-    fontSize: 14,
-    textAlign: 'center',
-    lineHeight: 22,
-    maxWidth: 280,
-  },
-  offlineWarning: {
-    color: Colors.error,
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 2,
-    marginTop: 20,
-  },
-  offlineActionRow: {
-    marginTop: 24,
-  },
-  offlineGlow: {
-    position: 'absolute',
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: Colors.error,
-    opacity: 0.05,
-  },
-  offlineBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 12,
-    marginTop: 12,
-    gap: 8,
-    ...Shadows.md,
-  },
-  offlineBtnText: {
-    color: Colors.onPrimary,
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
+  // ── Queue ──
   queueBadge: {
     position: 'absolute',
     top: -6,

@@ -141,9 +141,11 @@ export default function LyricsPanel({
     const [collapsed, setCollapsed] = useState(defaultCollapsed);
     const saveResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // Continuous spinner rotation for the save-in-progress state
+    // Continuous spinner rotation, only while a save is actually in progress.
     const spinAnim = useRef(new Animated.Value(0)).current;
     useEffect(() => {
+        if (saveState !== 'saving') return undefined;
+        spinAnim.setValue(0);
         const loop = Animated.loop(
             Animated.timing(spinAnim, {
                 toValue: 1,
@@ -154,12 +156,15 @@ export default function LyricsPanel({
         );
         loop.start();
         return () => loop.stop();
-    }, [spinAnim]);
-    const spinStyle = {
-        transform: [{
-            rotate: spinAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] })
-        }]
-    };
+    }, [spinAnim, saveState]);
+    const spinStyle = useMemo(
+        () => ({
+            transform: [{
+                rotate: spinAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] })
+            }]
+        }),
+        [spinAnim],
+    );
 
     /** Only the tabs the provider actually returned data for. */
     const available = useMemo<Mode[]>(() => {

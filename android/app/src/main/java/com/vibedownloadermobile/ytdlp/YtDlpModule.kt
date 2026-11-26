@@ -459,7 +459,7 @@ private fun isExecutable(file: File): Boolean = try {
                 request.addOption("--extractor-args", "youtube:player_client=web_embedded")
                 request.addOption("--no-playlist")
                 request.addOption("--dump-single-json")
-                val out = YoutubeDL.getInstance().execute(request, processId = null, callback = null).out
+                val out = BoundedYtDlp.execute(request, processId = null, callback = null).out
                 val raw = JsonParser.parseString(out).asJsonObject
                 if (raw.bool("is_live") != true && raw.get("formats") != null) {
                     saveInfoCache(url, out)
@@ -1194,9 +1194,14 @@ private fun isExecutable(file: File): Boolean = try {
                     probe.addOption("--socket-timeout", "30")
                     probe.addOption("--user-agent", DESKTOP_USER_AGENT)
                     probe.addOption("--list-formats")
+                    // A playlist/channel URL would otherwise list the formats of every
+                    // entry; one is enough for a diagnostic (and keeps output bounded).
+                    probe.addOption("--playlist-items", "1")
                     probe.addOption("--extractor-args", "youtube:player_client=$client")
                     applyJsRuntime(probe)
-                    val out = YoutubeDL.getInstance().execute(probe, null, true, null).out.orEmpty()
+                    val out = BoundedYtDlp.execute(
+                        probe, null, true, BoundedYtDlp.Capture.TAIL, null,
+                    ).out.orEmpty()
                     val rows = out.lineSequence().filter { it.contains('|') }.toList()
                     val usable = rows.count { !it.contains("storyboard") && !it.contains("images") }
                     report.appendLine("  $client -> $usable playable / ${rows.size} listed")
@@ -1262,11 +1267,14 @@ private suspend fun probeVerbose(url: String, playerClients: String?) {
         probe.addOption("--user-agent", DESKTOP_USER_AGENT)
         probe.addOption("--list-formats")
         probe.addOption("--verbose")
+        // Diagnostic only: never enumerate a whole playlist/channel (this probe
+        // used to buffer hundreds of MB and OOM the 256 MB Java heap).
+        probe.addOption("--playlist-items", "1")
         if (!playerClients.isNullOrEmpty()) {
             probe.addOption("--extractor-args", "youtube:player_client=$playerClients")
         }
         applyJsRuntime(probe)
-        val response = YoutubeDL.getInstance().execute(probe, null, true, null)
+        val response = BoundedYtDlp.execute(probe, null, true, BoundedYtDlp.Capture.TAIL, null)
         out = response.out.orEmpty()
         err = response.err.orEmpty()
         exitCode = response.exitCode
@@ -2066,7 +2074,7 @@ if (options?.hasKey("cookies") == true) {
 
                 for (clients in clientSets) {
                     try {
-                        responseJson = YoutubeDL.getInstance()
+                        responseJson = BoundedYtDlp
                             .execute(buildRequest(clients), processId = null, callback = null)
                             .out
                         usedPlayerClient = clients
@@ -2486,8 +2494,14 @@ withContext(Dispatchers.Main) {
                 var downloaded: File? = null
                 for (attempt in 1..SUBTITLE_ATTEMPTS) {
                     try {
-                        YoutubeDL.getInstance()
-                            .execute(request, processId = null, callback = null)
+                        // Output is not needed (subtitles are written to disk), so keep
+                        // only a bounded tail.
+                        BoundedYtDlp.execute(
+                            request,
+                            processId = null,
+                            capture = BoundedYtDlp.Capture.TAIL,
+                            callback = null,
+                        )
                         lastError = ""
                     } catch (e: Exception) {
                         lastError = e.message ?: ""
@@ -2877,7 +2891,7 @@ private fun publishSidecarFile(
                     }
                 }
 
-                val response = YoutubeDL.getInstance().execute(request)
+                val response = BoundedYtDlp.execute(request)
                 promise.resolve(response.out)
             } catch (e: Exception) {
                  promise.reject("PLAYLIST_ERROR", e.message)
@@ -3280,7 +3294,7 @@ platform.equals("Spotify", ignoreCase = true) ||
                 request.addOption("--no-check-certificate")
                 request.addOption("--socket-timeout", "30")
                 
-                val response = YoutubeDL.getInstance().execute(request, processId) { progress, eta, line ->
+                val response = BoundedYtDlp.execute(request, processId, capture = BoundedYtDlp.Capture.TAIL) { progress, eta, line ->
                     if (isCancelled.get()) return@execute
                     
                     val displayLine = when {
@@ -3649,7 +3663,7 @@ platform.equals("Spotify", ignoreCase = true) ||
                 request.addOption("--no-check-certificate")
                 request.addOption("--socket-timeout", "30")
                 
-                val response = YoutubeDL.getInstance().execute(request, processId) { progress, eta, line ->
+                val response = BoundedYtDlp.execute(request, processId, capture = BoundedYtDlp.Capture.TAIL) { progress, eta, line ->
                     if (isCancelled.get()) return@execute
                     
                     val displayLine = when {

@@ -3,7 +3,7 @@
  *  - PressScale: spring press feedback + haptic tick (replaces TouchableOpacity)
  *  - Reveal:     staggered fade + rise entrance
  */
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import {
   Animated,
   Easing,
@@ -95,20 +95,18 @@ export const Reveal: React.FC<RevealProps> = ({
     }).start();
   }, [t, index]);
 
+  const translateY = useMemo(
+    () => t.interpolate({ inputRange: [0, 1], outputRange: [distance, 0] }),
+    [t, distance],
+  );
+
   return (
     <Animated.View
       style={[
         style,
         {
           opacity: t,
-          transform: [
-            {
-              translateY: t.interpolate({
-                inputRange: [0, 1],
-                outputRange: [distance, 0],
-              }),
-            },
-          ],
+          transform: [{ translateY }],
         },
       ]}
     >

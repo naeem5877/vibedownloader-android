@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   TextInput,
@@ -58,18 +58,26 @@ export const URLInput: React.FC<URLInputProps> = ({
     }).start();
   }, [fill, hasValue]);
 
-  const borderColor = focus.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['rgba(255,255,255,0.08)', `${platformColor}80`],
-  });
-  const glowOpacity = focus.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 0.35],
-  });
-  const buttonBg = fill.interpolate({
-    inputRange: [0, 1],
-    outputRange: [Colors.glassFillStrong, platformColor],
-  });
+  const borderColor = useMemo(
+    () =>
+      focus.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['rgba(255,255,255,0.08)', `${platformColor}80`],
+      }),
+    [focus, platformColor],
+  );
+  const glowOpacity = useMemo(
+    () => focus.interpolate({ inputRange: [0, 1], outputRange: [0, 0.35] }),
+    [focus],
+  );
+  const buttonBg = useMemo(
+    () =>
+      fill.interpolate({
+        inputRange: [0, 1],
+        outputRange: [Colors.glassFillStrong, platformColor],
+      }),
+    [fill, platformColor],
+  );
   const onFill = hasValue ? getOnPlatformColor(platformColor) : '#FFFFFF';
 
   return (

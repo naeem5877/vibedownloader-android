@@ -5,6 +5,7 @@ import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.vibedownloadermobile.cookie.CookieModule
 import com.vibedownloadermobile.storage.MediaStorePublisher
+import com.vibedownloadermobile.ytdlp.BoundedYtDlp
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.*
@@ -252,7 +253,7 @@ class StoryModule(
             request.addOption("--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
             request.addOption("--add-header", "Accept-Language:en-US,en;q=0.9")
 
-            val response = YoutubeDL.getInstance().execute(request)
+            val response = BoundedYtDlp.execute(request)
             val json = JSONObject(response.out)
             
             val entries = json.optJSONArray("entries")
@@ -284,7 +285,7 @@ class StoryModule(
             request.addOption("--no-check-certificate")
             request.addOption("--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
 
-            val response = YoutubeDL.getInstance().execute(request)
+            val response = BoundedYtDlp.execute(request)
             val json = JSONObject(response.out)
             
             // Check if this is a playlist or single
@@ -451,7 +452,7 @@ class StoryModule(
                 request.addOption("--no-check-certificate")
                 request.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
-                val response = YoutubeDL.getInstance().execute(request)
+                val response = BoundedYtDlp.execute(request)
                 val json = JSONObject(response.out)
                 val entries = json.optJSONArray("entries")
 
@@ -643,7 +644,7 @@ class StoryModule(
         }
         request.addOption("--user-agent", MOBILE_UA)
 
-        YoutubeDL.getInstance().execute(request, processId) { progress, _, line ->
+        BoundedYtDlp.execute(request, processId, capture = BoundedYtDlp.Capture.TAIL) { progress, _, line ->
             sendProgress(processId, progress.toDouble(), line ?: "Downloading...")
         }
 

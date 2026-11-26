@@ -76,19 +76,16 @@ export const ShinyText: React.FC<ShinyTextProps> = ({
         return () => loop.stop();
     }, [disabled, speed, yoyo]);
 
-    // Animate the stops for a shimmer sweep across the text
-    const offset1 = animatedValue.interpolate({
-        inputRange: [0, 1],
-        outputRange: [-1, 1],
-    });
-    const offset2 = animatedValue.interpolate({
-        inputRange: [0, 1],
-        outputRange: [-0.5, 1.5],
-    });
-    const offset3 = animatedValue.interpolate({
-        inputRange: [0, 1],
-        outputRange: [0, 2],
-    });
+    // Animate the stops for a shimmer sweep across the text (memoised: a new
+    // native node per render otherwise).
+    const [offset1, offset2, offset3] = useMemo(
+        () => [
+            animatedValue.interpolate({ inputRange: [0, 1], outputRange: [-1, 1] }),
+            animatedValue.interpolate({ inputRange: [0, 1], outputRange: [-0.5, 1.5] }),
+            animatedValue.interpolate({ inputRange: [0, 1], outputRange: [0, 2] }),
+        ],
+        [animatedValue],
+    );
 
     return (
         <View style={[{ height: fontSize * 1.5, width: '100%' }, style]}>

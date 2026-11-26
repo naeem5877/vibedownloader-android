@@ -224,10 +224,10 @@ export const CutDownloadSheet: React.FC<CutDownloadSheetProps> = ({
     }).start();
   }, [mode, tabAnim]);
   const tabWidth = tabsWidth > 0 ? (tabsWidth - 8 - 4) / 2 : 0;
-  const indicatorX = tabAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, tabWidth + 4],
-  });
+  const indicatorX = useMemo(
+    () => tabAnim.interpolate({ inputRange: [0, 1], outputRange: [0, tabWidth + 4] }),
+    [tabAnim, tabWidth],
+  );
 
   // Re-seed the selection each time the sheet opens, matching the desktop
   // modal which resets to the full length on open. Keyed on the formats array

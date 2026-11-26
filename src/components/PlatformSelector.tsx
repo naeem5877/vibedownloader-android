@@ -2,7 +2,7 @@
  * PlatformSelector — the active platform expands into an icon + label pill,
  * the rest stay as quiet icon chips. Auto-scrolls to the active one.
  */
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useMemo, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -88,29 +88,29 @@ const Item: React.FC<{
   const fill = platform.id === 'tiktok' ? '#000000' : c;
   const iconOnActive =
     platform.id === 'tiktok' ? c : getOnPlatformColor(fill);
-  const bg = sel.interpolate({
-    inputRange: [0, 1],
-    outputRange: [Colors.glassFillStrong, fill],
-  });
-  const border = sel.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['rgba(255,255,255,0)', c],
-  });
-  const scale = sel.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] });
+  const bg = useMemo(
+    () => sel.interpolate({ inputRange: [0, 1], outputRange: [Colors.glassFillStrong, fill] }),
+    [sel, fill],
+  );
+  const border = useMemo(
+    () => sel.interpolate({ inputRange: [0, 1], outputRange: ['rgba(255,255,255,0)', c] }),
+    [sel, c],
+  );
+  const scale = useMemo(
+    () => sel.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }),
+    [sel],
+  );
+  const enterY = useMemo(
+    () => enter.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }),
+    [enter],
+  );
 
   return (
     <Animated.View
       onLayout={e => onLayoutX(e.nativeEvent.layout.x)}
       style={{
         opacity: enter,
-        transform: [
-          {
-            translateY: enter.interpolate({
-              inputRange: [0, 1],
-              outputRange: [10, 0],
-            }),
-          },
-        ],
+        transform: [{ translateY: enterY }],
       }}
     >
       <PressScale onPress={onPress} disabled={disabled} scaleTo={0.92} haptic>

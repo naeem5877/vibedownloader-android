@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { Colors, Spacing, Typography, BorderRadius } from '../theme';
 import { VideoIcon, MusicIcon } from './Icons';
@@ -10,7 +10,8 @@ interface FormatToggleProps {
 }
 
 export const FormatToggle: React.FC<FormatToggleProps> = ({ mode, onModeChange, platformColor = Colors.primary }) => {
-    const [anim] = useState(new Animated.Value(mode === 'video' ? 0 : 1));
+    // Lazy initialiser: `useState(new Animated.Value())` allocates a throwaway value every render.
+    const [anim] = useState(() => new Animated.Value(mode === 'video' ? 0 : 1));
 
     useEffect(() => {
         Animated.timing(anim, {
@@ -18,12 +19,12 @@ export const FormatToggle: React.FC<FormatToggleProps> = ({ mode, onModeChange, 
             duration: 250,
             useNativeDriver: false,
         }).start();
-    }, [mode]);
+    }, [mode, anim]);
 
-    const left = anim.interpolate({
-        inputRange: [0, 1],
-        outputRange: [2, 50], // Adjust based on width
-    });
+    const left = useMemo(
+        () => anim.interpolate({ inputRange: [0, 1], outputRange: [2, 50] }), // Adjust based on width
+        [anim],
+    );
 
     return (
         <View style={styles.container}>

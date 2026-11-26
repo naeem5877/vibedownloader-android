@@ -399,10 +399,14 @@ export const LibraryEditor: React.FC<LibraryEditorProps> = ({
     }).start();
   }, [tab, tabAnim]);
   const tabWidth = tabsWidth > 0 ? (tabsWidth - 8 - 8) / 3 : 0;
-  const indicatorX = tabAnim.interpolate({
-    inputRange: [0, 1, 2],
-    outputRange: [0, tabWidth + 4, (tabWidth + 4) * 2],
-  });
+  const indicatorX = useMemo(
+    () =>
+      tabAnim.interpolate({
+        inputRange: [0, 1, 2],
+        outputRange: [0, tabWidth + 4, (tabWidth + 4) * 2],
+      }),
+    [tabAnim, tabWidth],
+  );
 
   const running = phase === 'running';
   const blockedReason =

@@ -69,18 +69,10 @@ jobs:
             ## 📥 VibeDownloader Android ${{ github.ref_name }}
 
             ### ✨ New
-            - 🎬 **In-app media editor**: Edit videos and audio from your Library without leaving the app, with a redesigned GIF range picker for making GIFs from any clip
-            - 🖤 **Monochrome theme**: A clean white-on-black look across the whole app
-            - 🎨 **Redesigned Home & downloads**: New platform selector, link box, video card, format list, download progress, loading skeletons and empty state
-            - 🌀 **Platform glow**: A soft ambient glow tinted to the platform you pick, with smoother animations everywhere
-            - 📜 **Better playlists**: Redesigned playlist selection and a dedicated YouTube playlist loader
-            - 🎵 **Improved Spotify links**: Reworked Spotify handling for more reliable results
-            - 📱 **Edge-to-edge screen**: The app now draws behind the status and navigation bars for a more immersive look
-            - ⚡ **Faster start**: The splash screen now gets out of the way sooner
+            - 📡 **Redesigned offline screen**: Clearer "no internet" card with a one-tap "Try again" to re-check your connection, and a cleaner offline pill at the top of Home
 
             ### 🐛 Fixed
-            - 📶 **Status bar overlap**: Platform buttons no longer run into the clock, signal and battery icons when you scroll
-            - 🧹 **Smoother status bar fade**: Content now fades out gently under the status bar
+            - 💥 **Crash fixes for several out-of-memory crashes**: downloading or probing a large playlist/channel no longer buffers unbounded output in memory, and scrolling Home no longer creates a new animated node on every frame
 
             ### 📦 Download Guide
             Choose the correct APK for your device:
@@ -91,4 +83,4 @@ jobs:
 
             ---
             Requires Android 7.0 (API 24) or newer.
-            **Full Changelog**: https://github.com/naeem5877/vibedownloader-android/compare/v2.1.0...${{ github.ref_name }}
+            **Full Changelog**: https://github.com/naeem5877/vibedownloader-android/compare/v2.2.0...${{ github.ref_name }}

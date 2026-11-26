@@ -200,18 +200,18 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
     };
   }, [pulse, spin]);
 
-  const rotate = spin.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  });
-  const rotateBack = spin.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '-360deg'],
-  });
-  const lightOpacity = pulse.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.05, 0.13],
-  });
+  const rotate = useMemo(
+    () => spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }),
+    [spin],
+  );
+  const rotateBack = useMemo(
+    () => spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '-360deg'] }),
+    [spin],
+  );
+  const lightOpacity = useMemo(
+    () => pulse.interpolate({ inputRange: [0, 1], outputRange: [0.05, 0.13] }),
+    [pulse],
+  );
 
   const steps: [string, string][] = [
     ['Copy the link', `Copy the media URL from ${meta.name}`],

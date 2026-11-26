@@ -1,7 +1,8 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, TouchableOpacity, Easing } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Typography, Shadows, BorderRadius } from '../theme';
-import { LibraryIcon } from './Icons';
+import { LibraryIcon, WifiOffIcon } from './Icons';
 
 // Safe Import for NetInfo to prevent crashes if package is missing
 let NetInfo: any;
@@ -21,9 +22,13 @@ interface OfflineBannerProps {
     onActionPress?: () => void;
 }
 
+/** Far enough off-screen to hide the pill even under a tall camera cutout. */
+const HIDDEN_Y = -200;
+
 export const OfflineBanner: React.FC<OfflineBannerProps> = ({ onActionPress }) => {
+    const insets = useSafeAreaInsets();
     const [isConnected, setIsConnected] = useState<boolean | null>(true);
-    const slideAnim = useRef(new Animated.Value(-120)).current;
+    const slideAnim = useRef(new Animated.Value(HIDDEN_Y)).current;
     const pulseAnim = useRef(new Animated.Value(1)).current;
 
     useEffect(() => {
@@ -35,7 +40,7 @@ export const OfflineBanner: React.FC<OfflineBannerProps> = ({ onActionPress }) =
             setIsConnected(online);
 
             Animated.spring(slideAnim, {
-                toValue: online === false ? 0 : -120,
+                toValue: online === false ? 0 : HIDDEN_Y,
                 friction: 8,
                 tension: 40,
                 useNativeDriver: true,
@@ -77,31 +82,39 @@ export const OfflineBanner: React.FC<OfflineBannerProps> = ({ onActionPress }) =
         };
     }, [isConnected, pulseAnim]);
 
+    const pulseOpacity = useMemo(
+        () => pulseAnim.interpolate({ inputRange: [1, 1.5], outputRange: [0.6, 0] }),
+        [pulseAnim],
+    );
+
     // Hidden while online and while the state is still unknown (null).
     if (isConnected !== false) return null;
 
     return (
-        <Animated.View style={[styles.container, { transform: [{ translateY: slideAnim }] }]}>
+        <Animated.View
+            pointerEvents="box-none"
+            style={[
+                styles.container,
+                { paddingTop: insets.top + 8, transform: [{ translateY: slideAnim }] },
+            ]}
+        >
             <View style={styles.content}>
                 <View style={styles.indicatorContainer}>
-                    <Text style={styles.icon}>📡</Text>
                     <Animated.View
                         style={[
                             styles.pulse,
                             {
                                 transform: [{ scale: pulseAnim }],
-                                opacity: pulseAnim.interpolate({
-                                    inputRange: [1, 1.5],
-                                    outputRange: [0.6, 0]
-                                })
+                                opacity: pulseOpacity
                             }
                         ]}
                     />
+                    <WifiOffIcon size={17} color={Colors.textPrimary} />
                 </View>
 
                 <View style={styles.textContainer}>
-                    <Text style={styles.title}>You are offline</Text>
-                    <Text style={styles.message}>Connect to download, or view library</Text>
+                    <Text style={styles.title}>You’re offline</Text>
+                    <Text style={styles.message}>Downloads are paused</Text>
                 </View>
 
                 {onActionPress && (
@@ -127,35 +140,37 @@ const styles = StyleSheet.create({
         right: 0,
         zIndex: 9999,
         paddingHorizontal: 12,
-        paddingTop: 12,
+        // paddingTop is set at render time from the safe-area inset.
     },
     content: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#1A1A1A',
-        borderRadius: 16,
-        padding: 12,
+        backgroundColor: 'rgba(19, 19, 22, 0.96)',
+        borderRadius: 18,
+        paddingVertical: 8,
+        paddingLeft: 8,
+        paddingRight: 12,
         borderWidth: 1,
-        borderColor: 'rgba(255, 69, 58, 0.3)',
+        borderColor: 'rgba(239, 68, 68, 0.28)',
         ...Shadows.lg,
         elevation: 10,
     },
     indicatorContainer: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        backgroundColor: 'rgba(255, 69, 58, 0.1)',
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        backgroundColor: 'rgba(239, 68, 68, 0.12)',
         justifyContent: 'center',
         alignItems: 'center',
         marginRight: 10,
     },
     pulse: {
         position: 'absolute',
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        width: 34,
+        height: 34,
+        borderRadius: 17,
         borderWidth: 1,
-        borderColor: 'rgba(255, 69, 58, 0.4)',
+        borderColor: 'rgba(239, 68, 68, 0.5)',
     },
 
     icon: {
